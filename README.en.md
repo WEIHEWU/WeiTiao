@@ -1,6 +1,6 @@
 # WeiTiao
 
-[中文说明](README.md) · **[📥 Download Latest APK (WeiTiao-v1.3.9.apk · 1.6 MB)](https://github.com/WEIHEWU/WeiTiao/releases/latest)**
+[中文说明](README.md) · **[📥 Direct Download APK (WeiTiao-v1.3.9.apk · 1.6 MB)](https://github.com/WEIHEWU/WeiTiao/raw/main/releases/WeiTiao-v1.3.9.apk)** · [Releases](https://github.com/WEIHEWU/WeiTiao/releases)
 
 An LSPosed (`libxposed API 102`) & Root enhancement module for Samsung One UI, combining **App Store Region Unlock (CSC/SIM spoofing)**, **Hardware Model Spoofing**, **WeChat Steps & Anti-Recall**, **Screen-On Fast Charging**, and **USB PD Bypass Power**.
 
