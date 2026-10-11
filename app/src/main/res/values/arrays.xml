@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- LSPosed 模块推荐作用域：仅应用商店、三星账号判区服务与微信，绝不注入系统框架或物理 SIM 服务 -->
+    <string-array name="xposed_scope">
+        <item>com.sec.android.app.samsungapps</item>
+        <item>com.samsung.android.themestore</item>
+        <item>com.samsung.android.themecenter</item>
+        <item>com.android.vending</item>
+        <item>com.osp.app.signin</item>
+        <item>com.samsung.android.samsungaccount</item>
+        <item>com.samsung.android.authfw</item>
+        <item>com.tencent.mm</item>
+    </string-array>
+</resources>
+

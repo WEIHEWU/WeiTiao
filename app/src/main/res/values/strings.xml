@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">微调</string>
+    <string name="xposed_description">集成 CSC/SIM/机型伪装、微信运动、防撤回、亮屏快充和 USB PD 旁路供电</string>
+    <string name="module_disabled_toast">模块未启用，请在 LSPosed 中启用并勾选商店与微信作用域</string>
+
+    <!-- 顶栏 / 导航 -->
+    <string name="topbar_title">微调</string>
+    <string name="nav_settings">CSC 高级设置</string>
+    <string name="nav_language">语言</string>
+    <string name="switch_language">切换语言</string>
+    <string name="back">返回</string>
+
+    <!-- 主控台 Dashboard -->
+    <string name="dashboard_subtitle">Samsung Galaxy 系统与区域智能中枢</string>
+    <string name="lsposed_ready">LSPosed 已激活</string>
+    <string name="lsposed_not_ready">LSPosed 未连接</string>
+    <string name="lsposed_ready_desc">已在 %1$d 个目标应用进程中加载本模块</string>
+    <string name="lsposed_not_ready_desc">LSPosed 服务未连接（仅影响区域/微信 Hook，快充与旁路供电仍可正常使用）</string>
+    <string name="lsposed_scope_missing">LSPosed 待生效</string>
+    <string name="lsposed_scope_missing_desc">框架已连接，打开微信或应用商店后即自动加载</string>
+    <string name="badge_active">已激活</string>
+    <string name="badge_no_scope">待生效</string>
+    <string name="badge_not_connected">未连接</string>
+    <string name="status_csc_label">生效 CSC 区域</string>
+    <string name="status_model_label">生效机型</string>
+    <string name="status_tuning_label">活跃微调</string>
+    <string name="items_active">%1$d 项开启</string>
+    <string name="native_device">原生设备</string>
+    <string name="disabled">已关闭</string>
+    <string name="section_features">功能与配置</string>
+    <string name="section_maintenance">快捷维护</string>
+    <string name="clear_store_quick">一键清理应用商店缓存</string>
+    <string name="clear_store_quick_desc">切换 CSC 区域后重置 Galaxy Store 与主题商店</string>
+    <string name="clear_store_success">已重置应用商店缓存并应用新区域</string>
+    <string name="clear_store_fail">清理失败：请确认已授予 Root 权限</string>
+    <string name="region_changed_banner">区域配置已变更，建议立即清理应用商店以加载新区域</string>
+    <string name="action_clear_now">立即清理</string>
+
+    <!-- 预设项目 -->
+    <string name="preset_hk_name">中国香港</string>
+    <string name="preset_hk_tag">Good Lock 全量 · 港版商店</string>
+    <string name="preset_us_name">美国公开版</string>
+    <string name="preset_us_tag">美区商店 · Google 生态</string>
+    <string name="preset_eu_name">欧洲通用版</string>
+    <string name="preset_eu_tag">全欧通用 · 纯净无捆绑</string>
+    <string name="preset_tw_name">中国台湾</string>
+    <string name="preset_tw_tag">台版商店 · 繁体生态</string>
+    <string name="preset_kr_name">韩国官方版</string>
+    <string name="preset_kr_tag">韩国本土商店 · 首发组件</string>
+    <string name="preset_cn_name">中国大陆</string>
+    <string name="preset_cn_tag">国行默认 · 本地化服务</string>
+    <string name="factory_baseline_format">出厂基准: %1$s · MCC %2$s</string>
+    <string name="search_all_csc_desc">按国家、运营商或 MCC 检索全部 80 个地区预设</string>
+
+    <!-- 伪装主页 SpoofScreen -->
+    <string name="dashboard_spoof_title">地区、SIM 与机型伪装</string>
+    <string name="dashboard_spoof_enabled">伪装已启用</string>
+    <string name="dashboard_spoof_disabled">伪装已停用</string>
+    <string name="spoof_subtitle">应用商店跨区解锁與应用级硬件机型标识</string>
+    <string name="native_baseline_format">📱 当前设备出厂原生基准：CSC %1$s · MCC %2$s (%3$s)</string>
+    <string name="action_restore_factory">恢复出厂原生</string>
+    <string name="restore_factory_success">已关闭区域伪装并恢复出厂原生配置（%1$s）</string>
+    <string name="presets_title">应用商店区域切换</string>
+    <string name="presets_subtitle">选择预设或搜索全球代码，仅对应用商店生效，不影响物理 SIM 卡与信号</string>
+    <string name="search_all_csc_btn">搜索全部 80 个国家/地区预设</string>
+    <string name="preset_confirm_title">切换至【%1$s】？</string>
+    <string name="preset_confirm_auto">自动参数：CSC=%1$s · SIM MCC=%2$s · 国家代码=%3$s</string>
+    <string name="action_apply_and_clear">应用并重置商店</string>
+    <string name="preset_applied_toast">已切换至：%1$s</string>
+    <string name="module_switch">地区与机型伪装总开关</string>
+    <string name="module_enabled">已启用</string>
+    <string name="module_disabled">已暂停所有地区与机型伪装</string>
+    <string name="target_region">当前生效区域</string>
+    <string name="current_active_format">当前生效: %1$s · 真实出厂: %2$s</string>
+    <string name="sales_code_label">销售代码 (CSC)</string>
+    <string name="country_code_label">国家代码</string>
+    <string name="sim_spoof_title">SIM 卡运营商信息伪装</string>
+    <string name="sim_spoof_desc">仅对应用商店判区生效</string>
+    <string name="sim_spoof_switch">启用 SIM 欺骗</string>
+    <string name="sim_spoof_switch_desc">向应用商店返回目标地区的 MCC 与运营商信息</string>
+    <string name="sim_mcc_input_label">SIM 运营商 MCC (留空自动推导: %1$s)</string>
+    <string name="device_spoof">硬件机型伪装</string>
+    <string name="device_spoof_desc">修改 Build.MODEL / PRODUCT 等应用可见的机型标识</string>
+    <string name="device_spoof_switch">启用机型伪装</string>
+    <string name="device_spoof_configured">正在模拟目标机型</string>
+    <string name="device_spoof_keep_native">保持原生硬件标识</string>
+    <string name="target_model_label">伪装目标型号</string>
+    <string name="click_to_choose_model">点击选择目标机型</string>
+    <string name="filter_apps_label">仅对指定应用生效</string>
+    <string name="all_scopes_applied">对已勾选作用域的应用生效</string>
+    <string name="apps_count_applied">已指定 %1$d 个目标应用（需在 LSPosed 作用域中勾选）</string>
+    <string name="select_target_apps_btn">选择目标应用 (%1$d)</string>
+
+    <!-- 微调页 TuningScreen -->
+    <string name="dashboard_tuning_title">微信与充电增强</string>
+    <string name="dashboard_tuning_none">微信增强与快充功能均未启用</string>
+    <string name="dashboard_tuning_count">已启用 %1$d 项功能</string>
+    <string name="tuning_subtitle">微信步数/防撤回 Hook 与 Root 硬件级充电温控管理</string>
+    <string name="wechat_section_title">微信增强</string>
+    <string name="wechat_steps">微信运动步数修改</string>
+    <string name="wechat_steps_desc">计步传感器倍率注入与消息防撤回（需在 LSPosed 勾选微信）</string>
+    <string name="wechat_steps_off_hint">已关闭步数修改：今日步数将保持当前数值，后续仅按 1:1 累加真实步行，次日 0 点恢复正常计步。</string>
+    <string name="step_auto_mode">自动递增模式</string>
+    <string name="step_auto_mode_desc">每次传感器唤醒自动累加步数；关闭则仅在实际走动时按倍率放大</string>
+    <string name="step_multiplier">单次增量 / 倍率</string>
+    <string name="step_maximum">每日步数封顶上限</string>
+    <string name="step_end_hour">每日停止增长时间（0–24 点）</string>
+    <string name="step_cap_desc">今日注入增量严格封顶于上限值（若开启前微信已有初始底数，最终显示会略低于上限以防负跳变异常）</string>
+    <string name="battery_optimization_warning">当前受系统电池优化限制，三星「深度休眠」会拦截插电广播导致快充无法自动触发，建议设为「不受限制」。</string>
+    <string name="battery_optimization_action">去设置</string>
+    <string name="step_simulator_title">微信运动「实时步数预览」</string>
+    <string name="step_simulator_calc">固定倍率模式：实际步行 1,000 步 ≈ 微信增加 %1$d 步</string>
+    <string name="step_simulator_auto_calc">自动递增模式：每次计步事件自动 + %1$d 步（上限 %2$d 步）</string>
+    <string name="restart_wechat_btn">一键重启微信</string>
+    <string name="restart_wechat_done">已强制停止并重新拉起微信</string>
+    <string name="restart_wechat_failed">重启微信失败，请检查 Root 权限</string>
+    <string name="wechat_anti_recall">微信消息防撤回</string>
+    <string name="wechat_anti_recall_desc">拦截对方撤回指令，保留文字、图片、语音及视频</string>
+    <string name="fast_charge_section">亮屏快充</string>
+    <string name="fast_charge_desc">解除三星亮屏充电温控限流，维持高功率快充（纯 Root 直控，无需 LSPosed）</string>
+    <string name="fast_charge_enable">插电自动激活</string>
+    <string name="fast_charge_switch_desc">连接充电器自动解除限流，拔线、关闭或温度达 44°C 时自动恢复原厂温控</string>
+    <string name="fast_charge_warning">此功能通过 Root 临时屏蔽温控限流节点，拔线或达 44°C 安全线立即恢复 0755。</string>
+    <string name="pass_through_section">应用旁路供电</string>
+    <string name="pass_through_desc">运行指定游戏/应用时绕过电池直接给主板供电，大幅降低边充边玩发热（纯 Root 直控）</string>
+    <string name="pass_through_enable">启用旁路供电</string>
+    <string name="pass_through_switch_desc">前台运行目标应用且电量达标时自动开启旁路供电，退出应用立即恢复普通充电</string>
+    <string name="pass_through_threshold">触发电量阈值</string>
+    <string name="pass_through_threshold_desc">电量达到 %1$d%% 及以上时允许启用旁路供电</string>
+    <string name="choose_apps_none">尚未选择目标应用</string>
+    <string name="choose_apps_count">已选择 %1$d 个目标应用</string>
+    <string name="saved_toast">配置已保存</string>
+
+    <!-- 设置页 SettingsScreen -->
+    <string name="settings_title">CSC 高级设置</string>
+    <string name="settings_subtitle">细分系统属性注入与自定义 CscFeature 覆盖</string>
+    <string name="settings_inject_title">属性注入细分控制</string>
+    <string name="settings_inject_desc">精准控制向应用商店返回的各项系统属性与 RIL 参数</string>
+    <string name="spoof_sales_code_setting">欺骗 ro.csc.sales_code</string>
+    <string name="spoof_sales_code_setting_desc">主销售代码（Galaxy Store 识别区域的主要依据）</string>
+    <string name="spoof_country_code_setting">欺骗 ro.csc.country_code</string>
+    <string name="spoof_country_code_setting_desc">国家/地区代码（如 CN / HK / TW / US）</string>
+    <string name="spoof_ril_code_setting">欺骗 ril.sales_code</string>
+    <string name="spoof_ril_code_setting_desc">SIM / 运营商销售代码</string>
+    <string name="spoof_omc_setting">欺骗 OMC 相关属性</string>
+    <string name="hook_csc_feature_setting">拦截 SemCscFeature</string>
+    <string name="hook_csc_feature_setting_desc">拦截 CscFeature_* 读取（配合下方自定义覆盖表使用）</string>
+    <string name="custom_props">自定义属性覆盖</string>
+    <string name="custom_props_desc">JSON 格式：{"属性名":"值"}，优先级最高</string>
+    <string name="custom_features">自定义 CscFeature 覆盖</string>
+    <string name="custom_features_desc">JSON 格式：{"CscFeature_xxx":"值"}</string>
+    <string name="format_json_btn">格式化 JSON</string>
+    <string name="clear_btn">清空</string>
+    <string name="save_and_apply_btn">保存并应用自定义配置</string>
+    <string name="settings_saved">设置已保存</string>
+    <string name="settings_auto_saved">设置已自动保存</string>
+    <string name="scope_note">LSPosed 推荐作用域说明：\n· 仅需勾选「三星应用商店 / 主题商店 / 三星账号 / Play 商店」与「微信」\n· 严禁勾选系统框架 (android) 或电话服务，确保物理 SIM 卡与系统基带 100% 原生稳定\n· 亮屏快充与旁路供电由 Root 直接驱动，无需配置 LSPosed。</string>
+
+    <!-- 搜索页 SearchScreen -->
+    <string name="select_csc_title">全球区域检索</string>
+    <string name="search_screen_subtitle">选择目标国家/地区与运营商以解锁对应应用商店</string>
+    <string name="search_hint">搜索国家、运营商、CSC 或 MCC 数字代码...</string>
+    <string name="search_app_hint">搜索应用名称或包名</string>
+    <string name="clear">清除</string>
+    <string name="search_result_count">共 %1$d 个地区预设</string>
+    <string name="current_market_region">当前生效区域：%1$s</string>
+    <string name="market_unlock_success">已切换至 [%1$s] 并重置应用商店</string>
+    <string name="restore_market_default">恢复出厂原生</string>
+    <string name="restore_market_success">已关闭区域伪装并恢复物理 SIM 原生状态</string>
+
+    <!-- 弹窗通用 -->
+    <string name="choose_device_model">选择模拟机型（共 %1$d 款）</string>
+    <string name="search_device_model">搜索机型名称、型号代码或品牌</string>
+    <string name="device_model_result_count">找到 %1$d 款</string>
+    <string name="all">全部</string>
+    <string name="close">关闭</string>
+    <string name="cancel">取消</string>
+    <string name="confirm">确认</string>
+    <string name="choose_device_target_apps">选择机型伪装目标应用</string>
+    <string name="confirm_and_request_scope">保存目标应用 (%1$d)</string>
+    <string name="save_app_selection">保存应用列表 (%1$d)</string>
+    <string name="choose_pass_through_apps">选择旁路供电触发应用</string>
+    <string name="use_custom_model_format">使用自定义型号: \"%1$s\"</string>
+    <string name="custom_model_desc">直接应用此自定义型号并自动适配属性</string>
+</resources>
+

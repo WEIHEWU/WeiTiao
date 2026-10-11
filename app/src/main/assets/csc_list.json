@@ -1,0 +1,722 @@
+[
+  {
+    "country": "美国",
+    "operator": "T-Mobile",
+    "numeric": "310260",
+    "code": "XAA",
+    "countryCode": "US",
+    "mcc": "310",
+    "region": "美国 (T-Mobile 310260)"
+  },
+  {
+    "country": "美国",
+    "operator": "Verizon",
+    "numeric": "310004",
+    "code": "XAA",
+    "countryCode": "US",
+    "mcc": "310",
+    "region": "美国 (Verizon 310004)"
+  },
+  {
+    "country": "美国",
+    "operator": "AT&T",
+    "numeric": "310090",
+    "code": "XAA",
+    "countryCode": "US",
+    "mcc": "310",
+    "region": "美国 (AT&T 310090)"
+  },
+  {
+    "country": "美国",
+    "operator": "Sprint",
+    "numeric": "310120",
+    "code": "XAA",
+    "countryCode": "US",
+    "mcc": "310",
+    "region": "美国 (Sprint 310120)"
+  },
+  {
+    "country": "美国",
+    "operator": "Alltel",
+    "numeric": "310590",
+    "code": "XAA",
+    "countryCode": "US",
+    "mcc": "310",
+    "region": "美国 (Alltel 310590)"
+  },
+  {
+    "country": "加拿大",
+    "operator": "Rogers",
+    "numeric": "302720",
+    "code": "XAC",
+    "countryCode": "CA",
+    "mcc": "302",
+    "region": "加拿大 (Rogers 302720)"
+  },
+  {
+    "country": "加拿大",
+    "operator": "Telus",
+    "numeric": "302220",
+    "code": "XAC",
+    "countryCode": "CA",
+    "mcc": "302",
+    "region": "加拿大 (Telus 302220)"
+  },
+  {
+    "country": "加拿大",
+    "operator": "Bell",
+    "numeric": "302610",
+    "code": "XAC",
+    "countryCode": "CA",
+    "mcc": "302",
+    "region": "加拿大 (Bell 302610)"
+  },
+  {
+    "country": "瑞士",
+    "operator": "sunrise",
+    "numeric": "22802",
+    "code": "AUT",
+    "countryCode": "CH",
+    "mcc": "228",
+    "region": "瑞士 (sunrise 22802)"
+  },
+  {
+    "country": "瑞士",
+    "operator": "swisscom",
+    "numeric": "22801",
+    "code": "AUT",
+    "countryCode": "CH",
+    "mcc": "228",
+    "region": "瑞士 (swisscom 22801)"
+  },
+  {
+    "country": "瑞士",
+    "operator": "orange",
+    "numeric": "22803",
+    "code": "AUT",
+    "countryCode": "CH",
+    "mcc": "228",
+    "region": "瑞士 (orange 22803)"
+  },
+  {
+    "country": "德国",
+    "operator": "o2 - de",
+    "numeric": "26207",
+    "code": "EUX",
+    "countryCode": "DE",
+    "mcc": "262",
+    "region": "德国 (o2 - de 26207)"
+  },
+  {
+    "country": "德国",
+    "operator": "E-Plus",
+    "numeric": "26203",
+    "code": "EUX",
+    "countryCode": "DE",
+    "mcc": "262",
+    "region": "德国 (E-Plus 26203)"
+  },
+  {
+    "country": "德国",
+    "operator": "T-Mobile",
+    "numeric": "26201",
+    "code": "EUX",
+    "countryCode": "DE",
+    "mcc": "262",
+    "region": "德国 (T-Mobile 26201)"
+  },
+  {
+    "country": "德国",
+    "operator": "Vodafone",
+    "numeric": "26202",
+    "code": "EUX",
+    "countryCode": "DE",
+    "mcc": "262",
+    "region": "德国 (Vodafone 26202)"
+  },
+  {
+    "country": "德国",
+    "operator": "Arcor",
+    "numeric": "26210",
+    "code": "EUX",
+    "countryCode": "DE",
+    "mcc": "262",
+    "region": "德国 (Arcor 26210)"
+  },
+  {
+    "country": "巴西",
+    "operator": "TIM",
+    "numeric": "72402",
+    "code": "ZTO",
+    "countryCode": "BR",
+    "mcc": "724",
+    "region": "巴西 (TIM 72402)"
+  },
+  {
+    "country": "巴西",
+    "operator": "Claro",
+    "numeric": "72405",
+    "code": "ZTO",
+    "countryCode": "BR",
+    "mcc": "724",
+    "region": "巴西 (Claro 72405)"
+  },
+  {
+    "country": "巴西",
+    "operator": "Sercomtel",
+    "numeric": "72407",
+    "code": "ZTO",
+    "countryCode": "BR",
+    "mcc": "724",
+    "region": "巴西 (Sercomtel 72407)"
+  },
+  {
+    "country": "巴西",
+    "operator": "Vivo",
+    "numeric": "72410",
+    "code": "ZTO",
+    "countryCode": "BR",
+    "mcc": "724",
+    "region": "巴西 (Vivo 72410)"
+  },
+  {
+    "country": "巴西",
+    "operator": "Brasil Telecom",
+    "numeric": "72416",
+    "code": "ZTO",
+    "countryCode": "BR",
+    "mcc": "724",
+    "region": "巴西 (Brasil Telecom 72416)"
+  },
+  {
+    "country": "巴西",
+    "operator": "CTBC",
+    "numeric": "72415",
+    "code": "ZTO",
+    "countryCode": "BR",
+    "mcc": "724",
+    "region": "巴西 (CTBC 72415)"
+  },
+  {
+    "country": "意大利",
+    "operator": "TIM",
+    "numeric": "22201",
+    "code": "EUX",
+    "countryCode": "IT",
+    "mcc": "222",
+    "region": "意大利 (TIM 22201)"
+  },
+  {
+    "country": "意大利",
+    "operator": "Noverca",
+    "numeric": "22207",
+    "code": "EUX",
+    "countryCode": "IT",
+    "mcc": "222",
+    "region": "意大利 (Noverca 22207)"
+  },
+  {
+    "country": "意大利",
+    "operator": "Vodafone",
+    "numeric": "22210",
+    "code": "EUX",
+    "countryCode": "IT",
+    "mcc": "222",
+    "region": "意大利 (Vodafone 22210)"
+  },
+  {
+    "country": "意大利",
+    "operator": "RFI",
+    "numeric": "22230",
+    "code": "EUX",
+    "countryCode": "IT",
+    "mcc": "222",
+    "region": "意大利 (RFI 22230)"
+  },
+  {
+    "country": "意大利",
+    "operator": "3 Italia",
+    "numeric": "22299",
+    "code": "EUX",
+    "countryCode": "IT",
+    "mcc": "222",
+    "region": "意大利 (3 Italia 22299)"
+  },
+  {
+    "country": "澳大利亚",
+    "operator": "Telstra",
+    "numeric": "50501",
+    "code": "XSA",
+    "countryCode": "AU",
+    "mcc": "505",
+    "region": "澳大利亚 (Telstra 50501)"
+  },
+  {
+    "country": "奥地利",
+    "operator": "T-Mobile",
+    "numeric": "23203",
+    "code": "EUX",
+    "countryCode": "AT",
+    "mcc": "232",
+    "region": "奥地利 (T-Mobile 23203)"
+  },
+  {
+    "country": "荷兰",
+    "operator": "T-Mobile",
+    "numeric": "20416",
+    "code": "EUX",
+    "countryCode": "NL",
+    "mcc": "204",
+    "region": "荷兰 (T-Mobile 20416)"
+  },
+  {
+    "country": "爱尔兰",
+    "operator": "Meteorie",
+    "numeric": "27203",
+    "code": "EUX",
+    "countryCode": "IE",
+    "mcc": "272",
+    "region": "爱尔兰 (Meteorie 27203)"
+  },
+  {
+    "country": "日本",
+    "operator": "NTT docomo",
+    "numeric": "44003",
+    "code": "DCM",
+    "countryCode": "JP",
+    "mcc": "440",
+    "region": "日本 (NTT docomo 44003)"
+  },
+  {
+    "country": "日本",
+    "operator": "SoftBank",
+    "numeric": "44004",
+    "code": "DCM",
+    "countryCode": "JP",
+    "mcc": "440",
+    "region": "日本 (SoftBank 44004)"
+  },
+  {
+    "country": "韩国",
+    "operator": "KT",
+    "numeric": "45002",
+    "code": "KOO",
+    "countryCode": "KR",
+    "mcc": "450",
+    "region": "韩国 (KT 45002)"
+  },
+  {
+    "country": "韩国",
+    "operator": "SKT",
+    "numeric": "45005",
+    "code": "KOO",
+    "countryCode": "KR",
+    "mcc": "450",
+    "region": "韩国 (SKT 45005)"
+  },
+  {
+    "country": "韩国",
+    "operator": "LGU+",
+    "numeric": "45006",
+    "code": "KOO",
+    "countryCode": "KR",
+    "mcc": "450",
+    "region": "韩国 (LGU+ 45006)"
+  },
+  {
+    "country": "韩国",
+    "operator": "olleh",
+    "numeric": "45008",
+    "code": "KOO",
+    "countryCode": "KR",
+    "mcc": "450",
+    "region": "韩国 (olleh 45008)"
+  },
+  {
+    "country": "中国",
+    "operator": "CHINA MOBILE",
+    "numeric": "46000",
+    "code": "CHC",
+    "countryCode": "CN",
+    "mcc": "460",
+    "region": "中国 (CHINA MOBILE 46000)"
+  },
+  {
+    "country": "中国",
+    "operator": "CHN-UNICOM",
+    "numeric": "46001",
+    "code": "CHC",
+    "countryCode": "CN",
+    "mcc": "460",
+    "region": "中国 (CHN-UNICOM 46001)"
+  },
+  {
+    "country": "中国",
+    "operator": "CHINA MOBILE",
+    "numeric": "46002",
+    "code": "CHC",
+    "countryCode": "CN",
+    "mcc": "460",
+    "region": "中国 (CHINA MOBILE 46002)"
+  },
+  {
+    "country": "中国",
+    "operator": "China Telecom",
+    "numeric": "46003",
+    "code": "CHC",
+    "countryCode": "CN",
+    "mcc": "460",
+    "region": "中国 (China Telecom 46003)"
+  },
+  {
+    "country": "中国",
+    "operator": "China Telecom",
+    "numeric": "46005",
+    "code": "CHC",
+    "countryCode": "CN",
+    "mcc": "460",
+    "region": "中国 (China Telecom 46005)"
+  },
+  {
+    "country": "香港",
+    "operator": "SmarTone",
+    "numeric": "45406",
+    "code": "TGY",
+    "countryCode": "HK",
+    "mcc": "454",
+    "region": "香港 (SmarTone 45406)"
+  },
+  {
+    "country": "澳门",
+    "operator": "SmarTone",
+    "numeric": "45500",
+    "code": "TGY",
+    "countryCode": "MO",
+    "mcc": "455",
+    "region": "澳门 (SmarTone 45500)"
+  },
+  {
+    "country": "台湾",
+    "operator": "Telecom",
+    "numeric": "46688",
+    "code": "BRI",
+    "countryCode": "TW",
+    "mcc": "466",
+    "region": "台湾 (Telecom 46688)"
+  },
+  {
+    "country": "南非",
+    "operator": "Vodacom",
+    "numeric": "65501",
+    "code": "XFE",
+    "countryCode": "ZA",
+    "mcc": "655",
+    "region": "南非 (Vodacom 65501)"
+  },
+  {
+    "country": "俄罗斯",
+    "operator": "MTS",
+    "numeric": "25001",
+    "code": "SER",
+    "countryCode": "RU",
+    "mcc": "250",
+    "region": "俄罗斯 (MTS 25001)"
+  },
+  {
+    "country": "英国",
+    "operator": "BT",
+    "numeric": "23400",
+    "code": "EUX",
+    "countryCode": "GB",
+    "mcc": "234",
+    "region": "英国 (BT 23400)"
+  },
+  {
+    "country": "英国",
+    "operator": "Vectone Mobile",
+    "numeric": "23401",
+    "code": "EUX",
+    "countryCode": "GB",
+    "mcc": "234",
+    "region": "英国 (Vectone Mobile 23401)"
+  },
+  {
+    "country": "英国",
+    "operator": "O2",
+    "numeric": "23402",
+    "code": "EUX",
+    "countryCode": "GB",
+    "mcc": "234",
+    "region": "英国 (O2 23402)"
+  },
+  {
+    "country": "英国",
+    "operator": "Airtel-Vodafone",
+    "numeric": "23403",
+    "code": "EUX",
+    "countryCode": "GB",
+    "mcc": "234",
+    "region": "英国 (Airtel-Vodafone 23403)"
+  },
+  {
+    "country": "英国",
+    "operator": "Virgin",
+    "numeric": "23431",
+    "code": "EUX",
+    "countryCode": "GB",
+    "mcc": "234",
+    "region": "英国 (Virgin 23431)"
+  },
+  {
+    "country": "法国",
+    "operator": "Orange",
+    "numeric": "20800",
+    "code": "EUX",
+    "countryCode": "FR",
+    "mcc": "208",
+    "region": "法国 (Orange 20800)"
+  },
+  {
+    "country": "法国",
+    "operator": "SFR",
+    "numeric": "20810",
+    "code": "EUX",
+    "countryCode": "FR",
+    "mcc": "208",
+    "region": "法国 (SFR 20810)"
+  },
+  {
+    "country": "印度",
+    "operator": "AirTel",
+    "numeric": "40445",
+    "code": "INS",
+    "countryCode": "IN",
+    "mcc": "404",
+    "region": "印度 (AirTel 40445)"
+  },
+  {
+    "country": "阿尔巴尼亚",
+    "operator": "AMC",
+    "numeric": "27601",
+    "code": "EUX",
+    "countryCode": "AL",
+    "mcc": "276",
+    "region": "阿尔巴尼亚 (AMC 27601)"
+  },
+  {
+    "country": "比利时",
+    "operator": "Telenet",
+    "numeric": "20605",
+    "code": "EUX",
+    "countryCode": "BE",
+    "mcc": "206",
+    "region": "比利时 (Telenet 20605)"
+  },
+  {
+    "country": "捷克",
+    "operator": "O2",
+    "numeric": "23002",
+    "code": "EUX",
+    "countryCode": "CZ",
+    "mcc": "230",
+    "region": "捷克 (O2 23002)"
+  },
+  {
+    "country": "丹麦",
+    "operator": "Telenor",
+    "numeric": "23802",
+    "code": "EUX",
+    "countryCode": "DK",
+    "mcc": "238",
+    "region": "丹麦 (Telenor 23802)"
+  },
+  {
+    "country": "克罗地亚",
+    "operator": "T-Mobile",
+    "numeric": "21901",
+    "code": "EUX",
+    "countryCode": "HR",
+    "mcc": "219",
+    "region": "克罗地亚 (T-Mobile 21901)"
+  },
+  {
+    "country": "芬兰",
+    "operator": "DNA",
+    "numeric": "24403",
+    "code": "EUX",
+    "countryCode": "FI",
+    "mcc": "244",
+    "region": "芬兰 (DNA 24403)"
+  },
+  {
+    "country": "荷兰",
+    "operator": "VastMobiel",
+    "numeric": "20401",
+    "code": "EUX",
+    "countryCode": "NL",
+    "mcc": "204",
+    "region": "荷兰 (VastMobiel 20401)"
+  },
+  {
+    "country": "荷兰",
+    "operator": "Tele2",
+    "numeric": "20402",
+    "code": "EUX",
+    "countryCode": "NL",
+    "mcc": "204",
+    "region": "荷兰 (Tele2 20402)"
+  },
+  {
+    "country": "瑞典",
+    "operator": "Spring",
+    "numeric": "24010",
+    "code": "EUX",
+    "countryCode": "SE",
+    "mcc": "240",
+    "region": "瑞典 (Spring 24010)"
+  },
+  {
+    "country": "土耳其",
+    "operator": "Turkcell",
+    "numeric": "28601",
+    "code": "TUR",
+    "countryCode": "TR",
+    "mcc": "286",
+    "region": "土耳其 (Turkcell 28601)"
+  },
+  {
+    "country": "匈牙利",
+    "operator": "Telenor",
+    "numeric": "21601",
+    "code": "EUX",
+    "countryCode": "HU",
+    "mcc": "216",
+    "region": "匈牙利 (Telenor 21601)"
+  },
+  {
+    "country": "希腊",
+    "operator": "Cosmote",
+    "numeric": "20201",
+    "code": "EUX",
+    "countryCode": "GR",
+    "mcc": "202",
+    "region": "希腊 (Cosmote 20201)"
+  },
+  {
+    "country": "葡萄牙",
+    "operator": "Optimus",
+    "numeric": "26803",
+    "code": "EUX",
+    "countryCode": "PT",
+    "mcc": "268",
+    "region": "葡萄牙 (Optimus 26803)"
+  },
+  {
+    "country": "罗马尼亚",
+    "operator": "Romtelecom",
+    "numeric": "22602",
+    "code": "EUX",
+    "countryCode": "RO",
+    "mcc": "226",
+    "region": "罗马尼亚 (Romtelecom 22602)"
+  },
+  {
+    "country": "斯诺文尼亚",
+    "operator": "Si.mobil",
+    "numeric": "29340",
+    "code": "EUX",
+    "countryCode": "SI",
+    "mcc": "293",
+    "region": "斯诺文尼亚 (Si.mobil 29340)"
+  },
+  {
+    "country": "斯诺文尼亚",
+    "operator": "Mobitel",
+    "numeric": "29341",
+    "code": "EUX",
+    "countryCode": "SI",
+    "mcc": "293",
+    "region": "斯诺文尼亚 (Mobitel 29341)"
+  },
+  {
+    "country": "斯洛伐克",
+    "operator": "Orange",
+    "numeric": "23101",
+    "code": "EUX",
+    "countryCode": "SK",
+    "mcc": "231",
+    "region": "斯洛伐克 (Orange 23101)"
+  },
+  {
+    "country": "挪威",
+    "operator": "NetCom",
+    "numeric": "24202",
+    "code": "EUX",
+    "countryCode": "NO",
+    "mcc": "242",
+    "region": "挪威 (NetCom 24202)"
+  },
+  {
+    "country": "波兰",
+    "operator": "Plus",
+    "numeric": "26001",
+    "code": "EUX",
+    "countryCode": "PL",
+    "mcc": "260",
+    "region": "波兰 (Plus 26001)"
+  },
+  {
+    "country": "马来西亚",
+    "operator": "ATUR 450",
+    "numeric": "50201",
+    "code": "XME",
+    "countryCode": "MY",
+    "mcc": "502",
+    "region": "马来西亚 (ATUR 450 50201)"
+  },
+  {
+    "country": "印度尼西亚",
+    "operator": "PSN",
+    "numeric": "51000",
+    "code": "XID",
+    "countryCode": "ID",
+    "mcc": "510",
+    "region": "印度尼西亚 (PSN 51000)"
+  },
+  {
+    "country": "印度尼西亚",
+    "operator": "INDOSAT",
+    "numeric": "51001",
+    "code": "XID",
+    "countryCode": "ID",
+    "mcc": "510",
+    "region": "印度尼西亚 (INDOSAT 51001)"
+  },
+  {
+    "country": "印度尼西亚",
+    "operator": "StarOne",
+    "numeric": "51003",
+    "code": "XID",
+    "countryCode": "ID",
+    "mcc": "510",
+    "region": "印度尼西亚 (StarOne 51003)"
+  },
+  {
+    "country": "越南",
+    "operator": "Vinaphone",
+    "numeric": "45201",
+    "code": "XXV",
+    "countryCode": "VN",
+    "mcc": "452",
+    "region": "越南 (Vinaphone 45201)"
+  },
+  {
+    "country": "台湾",
+    "operator": "FarEasTone",
+    "numeric": "46601",
+    "code": "BRI",
+    "countryCode": "TW",
+    "mcc": "466",
+    "region": "台湾 (FarEasTone 46601)"
+  }
+]

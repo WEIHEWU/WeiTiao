@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">WeiTiao</string>
+    <string name="xposed_description">CSC, SIM and device spoofing with WeChat and Root charging tweaks</string>
+    <string name="module_disabled_toast">Module not enabled. Enable it in LSPosed and select store &amp; WeChat scopes</string>
+
+    <!-- Header / Navigation -->
+    <string name="topbar_title">WeiTiao</string>
+    <string name="nav_settings">Advanced CSC Settings</string>
+    <string name="nav_language">Language</string>
+    <string name="switch_language">Switch language</string>
+    <string name="back">Back</string>
+
+    <!-- Dashboard -->
+    <string name="dashboard_subtitle">Samsung Galaxy System &amp; Region Hub</string>
+    <string name="lsposed_ready">LSPosed Active</string>
+    <string name="lsposed_not_ready">LSPosed Not Connected</string>
+    <string name="lsposed_ready_desc">Loaded in %1$d target app processes</string>
+    <string name="lsposed_not_ready_desc">LSPosed service not connected (Root fast charge &amp; bypass still work)</string>
+    <string name="lsposed_scope_missing">LSPosed Standby</string>
+    <string name="lsposed_scope_missing_desc">Framework connected — open WeChat or Galaxy Store to trigger loading</string>
+    <string name="badge_active">Active</string>
+    <string name="badge_no_scope">Standby</string>
+    <string name="badge_not_connected">Offline</string>
+    <string name="status_csc_label">Active CSC</string>
+    <string name="status_model_label">Active Model</string>
+    <string name="status_tuning_label">Active Tweaks</string>
+    <string name="items_active">%1$d active</string>
+    <string name="native_device">Native Device</string>
+    <string name="disabled">Disabled</string>
+    <string name="section_features">Features &amp; Config</string>
+    <string name="section_maintenance">Maintenance</string>
+    <string name="clear_store_quick">Clear Store Cache</string>
+    <string name="clear_store_quick_desc">Reset Galaxy Store &amp; Theme Store after switching region</string>
+    <string name="clear_store_success">Store cache reset and new region applied</string>
+    <string name="clear_store_fail">Reset failed: Root permission required</string>
+    <string name="region_changed_banner">Region config changed. Reset store cache now to load the new region.</string>
+    <string name="action_clear_now">Reset Now</string>
+
+    <!-- Presets -->
+    <string name="preset_hk_name">Hong Kong</string>
+    <string name="preset_hk_tag">Full Good Lock · HK Store</string>
+    <string name="preset_us_name">US Unlocked</string>
+    <string name="preset_us_tag">US Store · Google Ecosystem</string>
+    <string name="preset_eu_name">Europe Open</string>
+    <string name="preset_eu_tag">EU Unified · Unbundled</string>
+    <string name="preset_tw_name">Taiwan</string>
+    <string name="preset_tw_tag">TW Store · Traditional Chinese</string>
+    <string name="preset_kr_name">South Korea</string>
+    <string name="preset_kr_tag">KR Store · First-wave Modules</string>
+    <string name="preset_cn_name">Mainland China</string>
+    <string name="preset_cn_tag">CN Default · Local Services</string>
+    <string name="factory_baseline_format">Factory: %1$s · MCC %2$s</string>
+    <string name="search_all_csc_desc">Search all 80 curated regional &amp; carrier presets by country or MCC</string>
+
+    <!-- SpoofScreen -->
+    <string name="dashboard_spoof_title">Region, SIM &amp; Device Spoofing</string>
+    <string name="dashboard_spoof_enabled">Spoofing enabled</string>
+    <string name="dashboard_spoof_disabled">Spoofing disabled</string>
+    <string name="spoof_subtitle">App Store region unlock &amp; per-app hardware model identity</string>
+    <string name="native_baseline_format">📱 Native Device Baseline: CSC %1$s · MCC %2$s (%3$s)</string>
+    <string name="action_restore_factory">Restore Native</string>
+    <string name="restore_factory_success">Spoofing disabled and restored to native default (%1$s)</string>
+    <string name="presets_title">Store Region Switcher</string>
+    <string name="presets_subtitle">Applies only to store apps without affecting physical SIM or baseband</string>
+    <string name="search_all_csc_btn">Search all 80 Country &amp; Carrier Presets</string>
+    <string name="preset_confirm_title">Switch to [%1$s]?</string>
+    <string name="preset_confirm_auto">Auto settings: CSC=%1$s · SIM MCC=%2$s · Country=%3$s</string>
+    <string name="action_apply_and_clear">Apply &amp; Reset Store</string>
+    <string name="preset_applied_toast">Switched to: %1$s</string>
+    <string name="module_switch">Spoofing Master Switch</string>
+    <string name="module_enabled">Enabled</string>
+    <string name="module_disabled">All region and device spoofing paused</string>
+    <string name="target_region">Active Region</string>
+    <string name="current_active_format">Active: %1$s · Factory: %2$s</string>
+    <string name="sales_code_label">Sales Code (CSC)</string>
+    <string name="country_code_label">Country Code</string>
+    <string name="sim_spoof_title">SIM Carrier Spoofing</string>
+    <string name="sim_spoof_desc">Applies only to store region checks</string>
+    <string name="sim_spoof_switch">Enable SIM Spoofing</string>
+    <string name="sim_spoof_switch_desc">Return target MCC &amp; carrier info to store apps</string>
+    <string name="sim_mcc_input_label">SIM Carrier MCC (Auto: %1$s)</string>
+    <string name="device_spoof">Hardware Model Spoofing</string>
+    <string name="device_spoof_desc">Modify Build.MODEL / PRODUCT visible to target apps</string>
+    <string name="device_spoof_switch">Enable Device Spoofing</string>
+    <string name="device_spoof_configured">Simulating target model</string>
+    <string name="device_spoof_keep_native">Keep native hardware identity</string>
+    <string name="target_model_label">Target Device Model</string>
+    <string name="click_to_choose_model">Tap to choose target model</string>
+    <string name="filter_apps_label">Target Specific Apps Only</string>
+    <string name="all_scopes_applied">Applied to all scoped apps</string>
+    <string name="apps_count_applied">%1$d target apps selected (must also be checked in LSPosed scope)</string>
+    <string name="select_target_apps_btn">Select Target Apps (%1$d)</string>
+
+    <!-- TuningScreen -->
+    <string name="dashboard_tuning_title">WeChat &amp; Charging Tweaks</string>
+    <string name="dashboard_tuning_none">No WeChat or charging tweaks active</string>
+    <string name="dashboard_tuning_count">%1$d tweaks active</string>
+    <string name="tuning_subtitle">WeChat step/anti-recall hooks &amp; Root hardware charging control</string>
+    <string name="wechat_section_title">WeChat Enhancements</string>
+    <string name="wechat_steps">WeChat Step Modifier</string>
+    <string name="wechat_steps_desc">Step sensor multiplier &amp; message anti-recall (requires WeChat in LSPosed scope)</string>
+    <string name="wechat_steps_off_hint">Step modifier is off: today\'s count stays at its current value and adds only real steps 1:1. Resets at midnight.</string>
+    <string name="step_auto_mode">Auto-Increment Mode</string>
+    <string name="step_auto_mode_desc">Automatically adds steps on sensor events; turn off to multiply only real walking</string>
+    <string name="step_multiplier">Increment / Multiplier</string>
+    <string name="step_maximum">Daily Step Cap</string>
+    <string name="step_end_hour">Daily Cutoff Hour (0–24)</string>
+    <string name="step_cap_desc">Today\'s injected steps are strictly capped (if WeChat had a morning baseline before enabling, final display may be slightly below cap to prevent negative jumps)</string>
+    <string name="battery_optimization_warning">Battery optimization is active. Samsung deep-sleep blocks plug-in triggers for fast charging. Tap to set to \"Unrestricted\".</string>
+    <string name="battery_optimization_action">Settings</string>
+    <string name="step_simulator_title">Step Realtime Preview</string>
+    <string name="step_simulator_calc">Multiplier mode: 1,000 real steps ≈ +%1$d steps in WeChat</string>
+    <string name="step_simulator_auto_calc">Auto mode: +%1$d steps per sensor event (capped at %2$d)</string>
+    <string name="restart_wechat_btn">Restart WeChat</string>
+    <string name="restart_wechat_done">WeChat force-stopped and relaunched</string>
+    <string name="restart_wechat_failed">Restart failed. Please check Root access</string>
+    <string name="wechat_anti_recall">WeChat Anti-Recall</string>
+    <string name="wechat_anti_recall_desc">Block message recall and preserve text, photos, voice &amp; videos</string>
+    <string name="fast_charge_section">Screen-On Fast Charging</string>
+    <string name="fast_charge_desc">Bypass Samsung screen-on thermal throttling for full-speed charging (Root only, no LSPosed needed)</string>
+    <string name="fast_charge_enable">Auto-Activate on Plug-In</string>
+    <string name="fast_charge_switch_desc">Unlocks fast charge when plugged in; restores stock thermal control on unplug, disable, or ≥44°C</string>
+    <string name="fast_charge_warning">Uses Root to mask thermal nodes while charging and restores 0755 on unplug or ≥44°C.</string>
+    <string name="pass_through_section">USB PD Bypass Power</string>
+    <string name="pass_through_desc">Power the motherboard directly while gaming to reduce heat and battery wear (Root only)</string>
+    <string name="pass_through_enable">Enable Bypass Power</string>
+    <string name="pass_through_switch_desc">Activates when a target app is in the foreground and battery exceeds threshold</string>
+    <string name="pass_through_threshold">Battery Threshold</string>
+    <string name="pass_through_threshold_desc">Enable bypass power when battery is at or above %1$d%%</string>
+    <string name="choose_apps_none">No target apps selected</string>
+    <string name="choose_apps_count">%1$d target apps selected</string>
+    <string name="saved_toast">Configuration saved</string>
+
+    <!-- SettingsScreen -->
+    <string name="settings_title">Advanced CSC Settings</string>
+    <string name="settings_subtitle">Fine-grained property injection &amp; custom CscFeature override</string>
+    <string name="settings_inject_title">Property Injection Control</string>
+    <string name="settings_inject_desc">Fine-tune system properties and RIL parameters returned to store apps</string>
+    <string name="spoof_sales_code_setting">Spoof ro.csc.sales_code</string>
+    <string name="spoof_sales_code_setting_desc">Primary sales code for Galaxy Store region detection</string>
+    <string name="spoof_country_code_setting">Spoof ro.csc.country_code</string>
+    <string name="spoof_country_code_setting_desc">Country code like CN, HK, TW, US</string>
+    <string name="spoof_ril_code_setting">Spoof ril.sales_code</string>
+    <string name="spoof_ril_code_setting_desc">SIM &amp; carrier sales code</string>
+    <string name="spoof_omc_setting">Spoof OMC Properties</string>
+    <string name="hook_csc_feature_setting">Intercept SemCscFeature</string>
+    <string name="hook_csc_feature_setting_desc">Intercept CscFeature_* queries with custom overrides below</string>
+    <string name="custom_props">Custom Property Overrides</string>
+    <string name="custom_props_desc">JSON: {"property":"value"}, highest priority</string>
+    <string name="custom_features">Custom CscFeature Overrides</string>
+    <string name="custom_features_desc">JSON: {"CscFeature_xxx":"value"}</string>
+    <string name="format_json_btn">Format JSON</string>
+    <string name="clear_btn">Clear</string>
+    <string name="save_and_apply_btn">Save &amp; Apply Custom Config</string>
+    <string name="settings_saved">Settings saved</string>
+    <string name="settings_auto_saved">Settings saved automatically</string>
+    <string name="scope_note">LSPosed Recommended Scopes:\n· Only check Galaxy Store, Theme Store, Samsung Account, Play Store, and WeChat\n· Never check System Framework (android) or Phone services — keeps physical SIM &amp; baseband 100% native\n· Screen-On Fast Charge and Bypass Power use Root directly and require no LSPosed scopes.</string>
+
+    <!-- SearchScreen -->
+    <string name="select_csc_title">Global Region Search</string>
+    <string name="search_screen_subtitle">Select a country/carrier preset to unlock the corresponding store region</string>
+    <string name="search_hint">Search country, carrier, CSC or MCC code...</string>
+    <string name="search_app_hint">Search app name or package</string>
+    <string name="clear">Clear</string>
+    <string name="search_result_count">%1$d regional presets</string>
+    <string name="current_market_region">Active Region: %1$s</string>
+    <string name="market_unlock_success">Switched to [%1$s] and reset store</string>
+    <string name="restore_market_default">Restore Native</string>
+    <string name="restore_market_success">Spoofing disabled and native SIM state restored</string>
+
+    <!-- Dialogs -->
+    <string name="choose_device_model">Choose Device Model (%1$d)</string>
+    <string name="search_device_model">Search model name, code, or brand</string>
+    <string name="device_model_result_count">%1$d models found</string>
+    <string name="all">All</string>
+    <string name="close">Close</string>
+    <string name="cancel">Cancel</string>
+    <string name="confirm">Confirm</string>
+    <string name="choose_device_target_apps">Select Device Spoofing Apps</string>
+    <string name="confirm_and_request_scope">Save Target Apps (%1$d)</string>
+    <string name="save_app_selection">Save App List (%1$d)</string>
+    <string name="choose_pass_through_apps">Select Bypass Power Apps</string>
+    <string name="use_custom_model_format">Use custom model: \"%1$s\"</string>
+    <string name="custom_model_desc">Apply this custom model directly with auto-adapted properties</string>
+</resources>
+
