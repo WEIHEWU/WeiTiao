@@ -1,78 +1,68 @@
 package com.weitiao.tuning.ui.theme
 
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.darkColorScheme as m3DarkColorScheme
+import androidx.compose.material3.lightColorScheme as m3LightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.theme.darkColorScheme
+import top.yukonga.miuix.kmp.theme.lightColorScheme
 
-private val OneUiLightColors = lightColorScheme(
-    primary = OneUiTokens.SamsungBlue,
+private val M3LightColors = m3LightColorScheme(
+    primary = Color(0xFF3482FF),
     onPrimary = Color.White,
-    primaryContainer = OneUiTokens.SamsungBlueContainerLight,
-    onPrimaryContainer = OneUiTokens.SamsungBlue,
+    primaryContainer = Color(0xFFEAF2FF),
+    onPrimaryContainer = Color(0xFF3482FF),
     secondary = Color(0xFF4B5563),
     onSecondary = Color.White,
-    background = OneUiTokens.BackgroundLight,
-    onBackground = OneUiTokens.TextPrimaryLight,
-    surface = OneUiTokens.SurfaceCardLight,
-    onSurface = OneUiTokens.TextPrimaryLight,
-    surfaceVariant = OneUiTokens.SurfaceCardSubtleLight,
-    onSurfaceVariant = OneUiTokens.TextSecondaryLight,
-    outline = OneUiTokens.DividerLight,
-    error = OneUiTokens.DangerRed,
-    errorContainer = OneUiTokens.DangerRedContainerLight,
-    onErrorContainer = OneUiTokens.DangerRed,
+    background = Color(0xFFF7F7F7),
+    onBackground = Color.Black,
+    surface = Color.White,
+    onSurface = Color.Black,
+    surfaceVariant = Color(0xFFF0F0F0),
+    onSurfaceVariant = Color(0xFF666666),
+    outline = Color(0xFFE0E0E0),
+    error = Color(0xFFE94634),
+    errorContainer = Color(0xFFFDF6F4),
+    onErrorContainer = Color(0xFFE94634),
 )
 
-private val OneUiDarkColors = darkColorScheme(
-    primary = OneUiTokens.SamsungBlueDark,
-    onPrimary = Color(0xFF002F65),
-    primaryContainer = OneUiTokens.SamsungBlueContainerDark,
-    onPrimaryContainer = OneUiTokens.SamsungBlueDark,
+private val M3DarkColors = m3DarkColorScheme(
+    primary = Color(0xFF277AF7),
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFF2B3B54),
+    onPrimaryContainer = Color(0xFF4788FF),
     secondary = Color(0xFF9CA3AF),
     onSecondary = Color(0xFF1F2937),
-    background = OneUiTokens.BackgroundDark,
-    onBackground = OneUiTokens.TextPrimaryDark,
-    surface = OneUiTokens.SurfaceCardDark,
-    onSurface = OneUiTokens.TextPrimaryDark,
-    surfaceVariant = OneUiTokens.SurfaceCardSubtleDark,
-    onSurfaceVariant = OneUiTokens.TextSecondaryDark,
-    outline = OneUiTokens.DividerDark,
-    error = OneUiTokens.DangerRedDark,
-    errorContainer = OneUiTokens.DangerRedContainerDark,
-    onErrorContainer = OneUiTokens.DangerRedDark,
+    background = Color.Black,
+    onBackground = Color(0xFFF2F2F2),
+    surface = Color(0xFF242424),
+    onSurface = Color(0xFFF2F2F2),
+    surfaceVariant = Color(0xFF2D2D2D),
+    onSurfaceVariant = Color(0xFF959595),
+    outline = Color(0xFF393939),
+    error = Color(0xFFF12522),
+    errorContainer = Color(0xFF2E0603),
+    onErrorContainer = Color(0xFFFFDAD6),
 )
 
 @Composable
 fun CscChangerTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = false, // 默认使用 Samsung One UI 官方精调色彩，确保最纯正的 Galaxy 质感
     content: @Composable () -> Unit,
 ) {
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            val dynamic = if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-            if (darkTheme) {
-                // 确保在深色模式下即使使用动态取色，也保持 AMOLED 纯黑底色
-                dynamic.copy(
-                    background = OneUiTokens.BackgroundDark,
-                    surface = OneUiTokens.SurfaceCardDark,
-                )
-            } else dynamic
-        }
-        darkTheme -> OneUiDarkColors
-        else -> OneUiLightColors
-    }
+    val miuixColors = if (darkTheme) darkColorScheme() else lightColorScheme()
+    val m3Colors = if (darkTheme) M3DarkColors else M3LightColors
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        content = content,
-    )
+    MiuixTheme(
+        colors = miuixColors,
+        smoothRounding = true,
+    ) {
+        MaterialTheme(
+            colorScheme = m3Colors,
+            content = content,
+        )
+    }
 }

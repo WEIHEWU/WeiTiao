@@ -1,15 +1,17 @@
 # WeiTiao
 
-[中文说明](README.md) · **[📥 Direct Download APK (WeiTiao-v1.3.9.apk · 1.6 MB)](https://github.com/WEIHEWU/WeiTiao/raw/main/releases/WeiTiao-v1.3.9.apk)** · [Releases](https://github.com/WEIHEWU/WeiTiao/releases)
+[中文说明](README.md) · **[📥 Direct Download APK (WeiTiao-v1.4.0.apk · 1.6 MB)](https://github.com/WEIHEWU/WeiTiao/raw/main/releases/WeiTiao-v1.4.0.apk)** · [Releases](https://github.com/WEIHEWU/WeiTiao/releases)
 
-An LSPosed (`libxposed API 102`) & Root enhancement module for Samsung One UI, combining **App Store Region Unlock (CSC/SIM spoofing)**, **Hardware Model Spoofing**, **WeChat Steps & Anti-Recall**, **Screen-On Fast Charging**, and **USB PD Bypass Power**.
+An LSPosed (`libxposed API 102`) & Root enhancement module for Samsung One UI built with **`miuix` (`0.8.8`)**, combining **App Store Region Unlock (CSC/SIM spoofing)**, **Hardware Model Spoofing**, **WeChat Steps & Anti-Recall**, **Screen-On Fast Charging**, and **USB PD Bypass Power**.
 
-Current version: `1.3.9` (`versionCode 19`).
+Current version: `1.4.0` (`versionCode 20`).
 
 > Only tested on Samsung One UI 8.5. Other versions are not guaranteed to work.
 
 ## Key Features
 
+- **Native Miuix UI & Physics**:
+  - Built with `top.yukonga.miuix.kmp:miuix:0.8.8`, featuring collapsible large-title navigation bars, physical overscroll bounce (`overScrollVertical`), G2 continuous smooth corners (`smoothRounding`), and `folmeSpring` physics animations.
 - **Store Region Unlock (CSC + SIM Spoofing)**:
   - 6 curated presets (Hong Kong, US Unlocked, Europe Open, Taiwan, South Korea, Mainland China) plus a searchable database of 80 global country/carrier presets;
   - Spoofs CSC and SIM operator info **only for store apps** (Galaxy Store, Theme Store, Play Store, Samsung Account region services) — **never hooks `android` system framework or `com.android.phone`, keeping physical SIM and baseband 100% native and stable**;

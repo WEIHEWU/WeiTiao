@@ -1,60 +1,156 @@
 package com.weitiao.tuning.ui.components
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.weitiao.tuning.R
 import com.weitiao.tuning.ui.theme.OneUiTokens
+import top.yukonga.miuix.kmp.basic.BasicComponent
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
+import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.SmallTitle
+import top.yukonga.miuix.kmp.basic.SnackbarHost
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TopAppBar
+import top.yukonga.miuix.kmp.basic.rememberTopAppBarState
+import top.yukonga.miuix.kmp.extra.SuperArrow
+import top.yukonga.miuix.kmp.extra.SuperSwitch
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.utils.overScrollVertical
 
 /**
- * One UI 8.5 可折叠大标题视区 (Viewing Area Header)
+ * Miuix 丝滑阻尼折叠大标题页面脚手架 (Scaffold + Collapsible TopAppBar + overScrollVertical)
+ */
+@Composable
+fun MiuixPageScaffold(
+    title: String,
+    modifier: Modifier = Modifier,
+    subtitle: String? = null,
+    onBack: (() -> Unit)? = null,
+    actions: @Composable (RowScope.() -> Unit)? = null,
+    snackbarHostState: SnackbarHostState? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val scrollBehavior = MiuixScrollBehavior(rememberTopAppBarState())
+    val haptics = rememberOneUiHaptics()
+
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        containerColor = MiuixTheme.colorScheme.surface,
+        topBar = {
+            TopAppBar(
+                title = title,
+                largeTitle = title,
+                color = MiuixTheme.colorScheme.surface,
+                scrollBehavior = scrollBehavior,
+                navigationIcon = {
+                    if (onBack != null) {
+                        val backLabel = stringResource(R.string.back)
+                        IconButton(
+                            onClick = {
+                                haptics.tap()
+                                onBack()
+                            },
+                            modifier = Modifier.padding(start = 16.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = backLabel,
+                                tint = MiuixTheme.colorScheme.onSurface,
+                            )
+                        }
+                    }
+                },
+                actions = {
+                    if (actions != null) {
+                        Row(
+                            modifier = Modifier.padding(end = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            actions()
+                        }
+                    }
+                },
+            )
+        },
+        snackbarHost = {
+            if (snackbarHostState != null) {
+                SnackbarHost(state = snackbarHostState)
+            }
+        },
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .nestedScroll(scrollBehavior.nestedScrollConnection)
+                .overScrollVertical()
+                .verticalScroll(rememberScrollState())
+                .padding(
+                    top = padding.calculateTopPadding(),
+                    bottom = padding.calculateBottomPadding(),
+                ),
+        ) {
+            if (!subtitle.isNullOrBlank()) {
+                Text(
+                    text = subtitle,
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(start = 26.dp, end = 26.dp, bottom = 10.dp),
+                )
+            } else {
+                Spacer(modifier = Modifier.height(6.dp))
+            }
+
+            content()
+        }
+    }
+}
+
+/**
+ * 兼容固定头部页面（如包含独立 LazyColumn 的 SearchScreen）的 Miuix 顶部标题栏
  */
 @Composable
 fun OneUiLargeHeader(
@@ -64,10 +160,11 @@ fun OneUiLargeHeader(
     onBack: (() -> Unit)? = null,
     actions: @Composable (RowScope.() -> Unit)? = null,
 ) {
+    val haptics = rememberOneUiHaptics()
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 12.dp),
+            .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 10.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -75,32 +172,21 @@ fun OneUiLargeHeader(
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             if (onBack != null) {
-                val backLabel = androidx.compose.ui.res.stringResource(com.weitiao.tuning.R.string.back)
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .clickable(onClick = onBack)
-                        .padding(horizontal = 4.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                val backLabel = stringResource(R.string.back)
+                IconButton(
+                    onClick = {
+                        haptics.tap()
+                        onBack()
+                    },
                 ) {
                     Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = backLabel,
-                        tint = IosGlassTokens.IosBlue,
-                        modifier = Modifier.size(20.dp),
-                    )
-                    Text(
-                        text = backLabel,
-                        style = MaterialTheme.typography.bodyLarge.copy(
-                            fontWeight = FontWeight.Normal,
-                            fontSize = 17.sp,
-                        ),
-                        color = IosGlassTokens.IosBlue,
+                        tint = MiuixTheme.colorScheme.onSurface,
                     )
                 }
             } else {
-                Spacer(modifier = Modifier.size(36.dp))
+                Spacer(modifier = Modifier.size(40.dp))
             }
 
             if (actions != null) {
@@ -111,42 +197,36 @@ fun OneUiLargeHeader(
                     actions()
                 }
             } else {
-                Spacer(modifier = Modifier.size(36.dp))
+                Spacer(modifier = Modifier.size(40.dp))
             }
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
-        // iOS 标志性左对齐大标题 (Large Title: 34sp Bold)
         Text(
             text = title,
-            style = MaterialTheme.typography.headlineLarge.copy(
-                fontSize = 34.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = (-0.8).sp,
-            ),
-            color = MaterialTheme.colorScheme.onBackground,
+            fontSize = MiuixTheme.textStyles.title1.fontSize,
+            fontWeight = FontWeight.Normal,
+            color = MiuixTheme.colorScheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 6.dp),
         )
 
         if (!subtitle.isNullOrBlank()) {
-            Spacer(modifier = Modifier.height(3.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = subtitle,
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = 14.sp,
-                    letterSpacing = (-0.2).sp,
-                ),
-                color = IosGlassTokens.IosGray,
+                fontSize = MiuixTheme.textStyles.body2.fontSize,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.padding(horizontal = 6.dp),
             )
         }
     }
 }
 
 /**
- * One UI 8.5 岛屿式卡片容器 (Squircle Island Card)
- * 当处于 Liquid Glass 渲染树下时，自动升级为带 AGSL 透镜折射与高光的液态玻璃卡片
+ * Miuix 卡片分组容器 (SmallTitle + Miuix Card)
  */
 @Composable
 fun OneUiIslandCard(
@@ -154,75 +234,31 @@ fun OneUiIslandCard(
     title: String? = null,
     subtitle: String? = null,
     icon: ImageVector? = null,
-    iconTint: Color = MaterialTheme.colorScheme.primary,
-    containerColor: Color = MaterialTheme.colorScheme.surface,
-    shape: RoundedCornerShape = OneUiTokens.IslandCardShape,
-    contentPadding: Dp = 16.dp,
+    iconTint: Color = MiuixTheme.colorScheme.primary,
+    containerColor: Color = MiuixTheme.colorScheme.surfaceContainer,
+    shape: RoundedCornerShape = OneUiTokens.ControlShape,
+    contentPadding: Dp = 14.dp,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    if (LocalLiquidBackdrop.current != null) {
-        OneUiLiquidCard(
-            modifier = modifier,
-            title = title,
-            subtitle = subtitle,
-            icon = icon,
-            iconTint = iconTint,
-            shape = shape,
-            contentPadding = contentPadding,
-            content = content,
-        )
-        return
-    }
-
     Column(modifier = modifier.fillMaxWidth()) {
         if (title != null) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (icon != null) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = iconTint,
-                        modifier = Modifier
-                            .size(20.dp)
-                            .padding(end = 6.dp),
-                    )
-                }
-                Column {
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.labelLarge.copy(
-                            fontWeight = FontWeight.SemiBold,
-                            letterSpacing = 0.2.sp,
-                        ),
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    if (!subtitle.isNullOrBlank()) {
-                        Text(
-                            text = subtitle,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-            Spacer(modifier = Modifier.height(4.dp))
+            SmallTitle(
+                text = if (!subtitle.isNullOrBlank()) "$title · $subtitle" else title,
+                insideMargin = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+            )
         }
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = shape,
-            colors = CardDefaults.cardColors(containerColor = containerColor),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+            cornerRadius = 16.dp,
+            insideMargin = PaddingValues(contentPadding),
+            colors = CardDefaults.defaultColors(
+                color = containerColor,
+                contentColor = MiuixTheme.colorScheme.onSurfaceContainer,
+            ),
         ) {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(contentPadding),
+                modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 content()
@@ -232,7 +268,10 @@ fun OneUiIslandCard(
 }
 
 /**
- * One UI 8.5 标准交互行 (Item Row)
+ * Miuix 原生交互列表项：
+ * - 带开关时自动使用 Miuix [SuperSwitch]
+ * - 带箭头或点击跳转时自动使用 Miuix [SuperArrow]
+ * - 纯展示行使用 Miuix [BasicComponent]
  */
 @Composable
 fun OneUiItemRow(
@@ -241,9 +280,9 @@ fun OneUiItemRow(
     subtitle: String? = null,
     icon: ImageVector? = null,
     iconBackground: Color? = null,
-    iconTint: Color = IosGlassTokens.IosBlue,
+    iconTint: Color = MiuixTheme.colorScheme.primary,
     badgeText: String? = null,
-    badgeColor: Color = IosGlassTokens.IosBlue,
+    badgeColor: Color = MiuixTheme.colorScheme.primary,
     trailingValue: String? = null,
     showChevron: Boolean = false,
     checked: Boolean? = null,
@@ -252,47 +291,28 @@ fun OneUiItemRow(
     onCheckedChange: ((Boolean) -> Unit)? = null,
 ) {
     val haptics = rememberOneUiHaptics()
-    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
+    val itemMargin = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
+    val itemModifier = modifier.clip(RoundedCornerShape(12.dp))
 
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .scale(if (isPressed && onClick != null && enabled) 0.982f else 1f)
-            .clip(RoundedCornerShape(12.dp))
-            .then(
-                if (onClick != null && enabled) {
-                    Modifier.clickable(
-                        interactionSource = interactionSource,
-                        indication = androidx.compose.material3.ripple(),
-                    ) {
-                        haptics.tap()
-                        onClick()
-                    }
-                } else Modifier
-            )
-            .padding(vertical = 8.dp, horizontal = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        if (icon != null) {
+    val startIconSlot: (@Composable () -> Unit)? = if (icon != null) {
+        {
             val iconBgModifier = if (iconBackground != null) {
                 Modifier.background(iconBackground)
             } else {
                 Modifier.background(
                     Brush.linearGradient(
                         listOf(
-                            iconTint.copy(alpha = 0.90f),
-                            iconTint.copy(alpha = 0.70f),
+                            iconTint.copy(alpha = 0.92f),
+                            iconTint.copy(alpha = 0.72f),
                         )
                     )
                 )
             }
             Box(
                 modifier = Modifier
-                    .size(32.dp)
-                    .clip(RoundedCornerShape(8.dp))
+                    .padding(end = 6.dp)
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(10.dp))
                     .then(iconBgModifier),
                 contentAlignment = Alignment.Center,
             ) {
@@ -304,115 +324,103 @@ fun OneUiItemRow(
                 )
             }
         }
+    } else null
 
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+    val endBadgesSlot: @Composable RowScope.() -> Unit = {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
+            if (!badgeText.isNullOrBlank()) {
+                OneUiBadge(text = badgeText, color = badgeColor)
+            }
+            if (!trailingValue.isNullOrBlank()) {
                 Text(
-                    text = title,
-                    style = MaterialTheme.typography.bodyLarge.copy(
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 16.sp,
-                        letterSpacing = (-0.2).sp,
-                    ),
-                    color = if (enabled) MaterialTheme.colorScheme.onSurface
-                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                    text = trailingValue,
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantActions,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-
-                if (!badgeText.isNullOrBlank()) {
-                    OneUiBadge(text = badgeText, color = badgeColor)
-                }
-            }
-
-            if (!subtitle.isNullOrBlank()) {
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        fontSize = 13.sp,
-                        letterSpacing = (-0.1).sp,
-                    ),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
                 )
             }
         }
+    }
 
-        if (!trailingValue.isNullOrBlank()) {
-            Text(
-                text = trailingValue,
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontWeight = FontWeight.Normal,
-                    fontSize = 15.sp,
-                    letterSpacing = (-0.2).sp,
-                ),
-                color = IosGlassTokens.IosBlue,
-            )
-        }
-
-        if (checked != null && onCheckedChange != null) {
-            // 纯正 iOS 风格开关：iOS Green (#34C759) + 白球
-            Switch(
+    when {
+        checked != null && onCheckedChange != null -> {
+            SuperSwitch(
                 checked = checked,
                 onCheckedChange = {
                     haptics.toggle()
                     onCheckedChange(it)
                 },
+                title = title,
+                summary = subtitle,
+                modifier = itemModifier,
+                insideMargin = itemMargin,
                 enabled = enabled,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color.White,
-                    checkedTrackColor = IosGlassTokens.IosGreen,
-                    uncheckedThumbColor = Color.White,
-                    uncheckedTrackColor = if (isDark) Color(0xFF39393D) else Color(0xFFE9E9EA),
-                    uncheckedBorderColor = Color.Transparent,
-                ),
+                startAction = startIconSlot,
+                endActions = endBadgesSlot,
             )
-        } else if (showChevron) {
-            // iOS 风格灰色细角标
-            Icon(
-                Icons.Default.ChevronRight,
-                contentDescription = null,
-                tint = Color(0xFF8E8E93),
-                modifier = Modifier.size(20.dp),
+        }
+
+        showChevron || onClick != null -> {
+            SuperArrow(
+                title = title,
+                summary = subtitle,
+                modifier = itemModifier,
+                insideMargin = itemMargin,
+                enabled = enabled,
+                startAction = startIconSlot,
+                endActions = endBadgesSlot,
+                onClick = if (onClick != null) {
+                    {
+                        haptics.tap()
+                        onClick()
+                    }
+                } else null,
+            )
+        }
+
+        else -> {
+            BasicComponent(
+                title = title,
+                summary = subtitle,
+                modifier = itemModifier,
+                insideMargin = itemMargin,
+                enabled = enabled,
+                startAction = startIconSlot,
+                endActions = endBadgesSlot,
             )
         }
     }
 }
 
 /**
- * One UI 8.5 状态胶囊徽章 (Badge Pill)
+ * Miuix 状态胶囊徽章 (Badge Pill)
  */
 @Composable
 fun OneUiBadge(
     text: String,
     modifier: Modifier = Modifier,
-    color: Color = MaterialTheme.colorScheme.primary,
-    backgroundColor: Color = color.copy(alpha = 0.12f),
+    color: Color = MiuixTheme.colorScheme.primary,
+    backgroundColor: Color = color.copy(alpha = if (isSystemInDarkTheme()) 0.18f else 0.12f),
 ) {
-    if (LocalLiquidBackdrop.current != null) {
-        OneUiLiquidBadge(text = text, modifier = modifier, color = color)
-        return
-    }
-
     Box(
         modifier = modifier
-            .clip(OneUiTokens.BadgeShape)
+            .clip(RoundedCornerShape(50))
             .background(backgroundColor)
-            .padding(horizontal = 8.dp, vertical = 3.dp),
+            .border(
+                width = 0.6.dp,
+                color = color.copy(alpha = 0.30f),
+                shape = RoundedCornerShape(50),
+            )
+            .padding(horizontal = 9.dp, vertical = 3.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = text,
-            style = MaterialTheme.typography.labelSmall.copy(
-                fontWeight = FontWeight.Bold,
-                fontSize = 11.sp,
-            ),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
             color = color,
             maxLines = 1,
             softWrap = false,
@@ -421,7 +429,7 @@ fun OneUiBadge(
 }
 
 /**
- * One UI 8.5 分段选择器 (Segmented Control Pill Tabs)
+ * Miuix 分段选择器
  */
 @Composable
 fun <T> OneUiSegmentedControl(
@@ -431,57 +439,57 @@ fun <T> OneUiSegmentedControl(
     modifier: Modifier = Modifier,
     label: (T) -> String = { it.toString() },
 ) {
-    if (LocalLiquidBackdrop.current != null) {
-        OneUiLiquidSegmentedControl(
-            items = items,
-            selectedItem = selectedItem,
-            onSelect = onSelect,
-            modifier = modifier,
-            label = label,
-        )
-        return
-    }
-
     val haptics = rememberOneUiHaptics()
+    val isDark = isSystemInDarkTheme()
 
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clip(OneUiTokens.PillShape)
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+            .height(38.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MiuixTheme.colorScheme.secondaryContainer)
+            .padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         items.forEach { item ->
             val isSelected = item == selectedItem
-            val bgColor by animateColorAsState(
-                if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                label = "segBg",
+            val interactionSource = remember { MutableInteractionSource() }
+
+            val thumbBgColor by animateColorAsState(
+                if (isSelected) {
+                    if (isDark) MiuixTheme.colorScheme.surfaceContainerHighest else Color.White
+                } else Color.Transparent,
+                label = "miuixSegBg",
             )
+
             val textColor by animateColorAsState(
-                if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                label = "segText",
+                if (isSelected) MiuixTheme.colorScheme.onSurface
+                else MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                label = "miuixSegText",
             )
 
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .clip(OneUiTokens.PillShape)
-                    .background(bgColor)
-                    .clickable {
+                    .height(32.dp)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(thumbBgColor)
+                    .clickable(
+                        interactionSource = interactionSource,
+                        indication = null,
+                    ) {
                         if (!isSelected) {
                             haptics.tap()
                             onSelect(item)
                         }
-                    }
-                    .padding(vertical = 8.dp),
+                    },
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     text = label(item),
-                    style = MaterialTheme.typography.labelMedium.copy(
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                    ),
+                    fontSize = 13.sp,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                     color = textColor,
                     maxLines = 1,
                     softWrap = false,
@@ -493,32 +501,31 @@ fun <T> OneUiSegmentedControl(
 }
 
 /**
- * One UI 8.5 警示与状态横条 (Notice Banner)
+ * Miuix 警示与状态横条 (Notice Banner)
  */
 @Composable
 fun OneUiNoticeBanner(
     text: String,
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
-    containerColor: Color = OneUiTokens.SamsungBlueContainerLight,
-    contentColor: Color = OneUiTokens.SamsungBlue,
+    containerColor: Color = MiuixTheme.colorScheme.tertiaryContainer,
+    contentColor: Color = MiuixTheme.colorScheme.primary,
     actionText: String? = null,
     onActionClick: (() -> Unit)? = null,
 ) {
-    val isLiquid = LocalLiquidBackdrop.current != null
     val bannerShape = RoundedCornerShape(14.dp)
 
     Row(
         modifier = modifier
             .fillMaxWidth()
             .clip(bannerShape)
-            .background(containerColor.copy(alpha = 0.20f))
+            .background(contentColor.copy(alpha = if (isSystemInDarkTheme()) 0.16f else 0.10f))
             .border(
-                width = 0.8.dp,
-                color = contentColor.copy(alpha = 0.40f),
+                width = 0.7.dp,
+                color = contentColor.copy(alpha = 0.30f),
                 shape = bannerShape,
             )
-            .padding(14.dp),
+            .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -533,11 +540,8 @@ fun OneUiNoticeBanner(
 
         Text(
             text = text,
-            style = MaterialTheme.typography.bodySmall.copy(
-                fontWeight = FontWeight.Medium,
-                fontSize = 13.sp,
-                letterSpacing = (-0.1).sp,
-            ),
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
             color = contentColor,
             modifier = Modifier.weight(1f),
         )
@@ -545,18 +549,17 @@ fun OneUiNoticeBanner(
         if (!actionText.isNullOrBlank() && onActionClick != null) {
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(10.dp))
                     .background(contentColor)
                     .clickable(onClick = onActionClick)
-                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     text = actionText,
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                    ),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
                     maxLines = 1,
                     softWrap = false,
                 )

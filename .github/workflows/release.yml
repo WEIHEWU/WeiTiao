@@ -21,14 +21,18 @@ jobs:
       - name: Create GitHub Release and Upload APK
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.3.9
-          name: "微调 WeiTiao v1.3.9"
+          tag_name: v1.4.0
+          name: "微调 WeiTiao v1.4.0 (Miuix UI)"
           body: |
-            ### 微调 (WeiTiao) v1.3.9
+            ### 微调 (WeiTiao) v1.4.0
 
-            - **极致轻量化**：正式版安装包仅 **1.6 MB**，O(1) 哈希属性查表，零冗余后台唤醒。
+            - **全面重构为 Miuix (`top.yukonga.miuix.kmp:miuix:0.8.8`) 原生视觉与物理交互**：
+              - 全屏引入 HyperOS 原生级可折叠大标题导航栏 (`TopAppBar` + `MiuixScrollBehavior`) 与物理弹性阻尼越界回弹 (`overScrollVertical`)；
+              - 全部卡片、列表项、开关、滑块、搜索栏与底部弹窗均切换为 `miuix` 原生组件 (`Card`、`SuperSwitch`、`SuperArrow`、`Slider`、`SearchBar`、`WindowDialog`)，启用 G2 连续曲率圆角 (`smoothRounding = true`) 与 `folmeSpring` 弹簧动画；
+              - 移除高负载 Canvas 流体背景，改为纯净零 GPU 占用的 `MiuixTheme` 表面色。
+            - **极致轻量化**：R8 深度裁剪后正式版安装包依然仅 **1.6 MB**，O(1) 哈希属性查表，零冗余后台唤醒。
             - **LSPosed 作用域纯净锁死**：仅需勾选三星应用商店、主题商店、Play 商店、三星账号判区服务与微信，严禁勾选 `android` 系统框架，确保物理 SIM 卡与基带 100% 原生稳定。
             - **微信运动与防撤回**：单调递增计步引擎（支持自动递增与固定倍率）、消息与媒体防撤回、一键重启并自动拉起微信。
             - **亮屏快充 & 应用旁路供电**：纯 Root 硬件温控/供电节点直控，44.0°C 安全熔断保护，无需配置 LSPosed 作用域。
           files: |
-            releases/WeiTiao-v1.3.9.apk
+            releases/WeiTiao-v1.4.0.apk

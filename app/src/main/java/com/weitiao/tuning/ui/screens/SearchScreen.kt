@@ -2,13 +2,12 @@ package com.weitiao.tuning.ui.screens
 
 import android.widget.Toast
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -20,22 +19,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -49,6 +38,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.weitiao.tuning.R
@@ -60,10 +50,21 @@ import com.weitiao.tuning.data.CscCatalog
 import com.weitiao.tuning.data.CscEntry
 import com.weitiao.tuning.ui.components.IosGlassTokens
 import com.weitiao.tuning.ui.components.OneUiBadge
-import com.weitiao.tuning.ui.components.OneUiLargeHeader
 import com.weitiao.tuning.ui.components.OneUiNoticeBanner
 import com.weitiao.tuning.ui.components.rememberOneUiHaptics
-import com.weitiao.tuning.ui.theme.OneUiTokens
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.SmallTopAppBar
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.basic.TextField
+import top.yukonga.miuix.kmp.extra.WindowDialog
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.utils.overScrollVertical
 
 private val QUICK_COUNTRIES = listOf("中国", "香港", "台湾", "韩国", "日本", "美国", "英国", "德国")
 
@@ -79,6 +80,8 @@ fun SearchScreen(
     val nativeInfo = remember { NativeDevice.detect(context) }
     var currentCsc by remember { mutableStateOf(CscPrefs.load(context)) }
     var pendingConfirmEntry by remember { mutableStateOf<CscEntry?>(null) }
+    var lastConfirmEntry by remember { mutableStateOf(catalog.firstOrNull()) }
+    pendingConfirmEntry?.let { lastConfirmEntry = it }
 
     val currentRegionText = remember(currentCsc, catalog, nativeInfo) {
         if (!currentCsc.enabled) {
@@ -104,37 +107,62 @@ fun SearchScreen(
     val results = remember(query, catalog) { CscCatalog.search(catalog, query) }
 
     Scaffold(
-        containerColor = Color.Transparent,
+        modifier = Modifier.fillMaxSize(),
+        containerColor = MiuixTheme.colorScheme.surface,
+        topBar = {
+            SmallTopAppBar(
+                title = stringResource(R.string.select_csc_title),
+                color = MiuixTheme.colorScheme.surface,
+                navigationIcon = {
+                    IconButton(
+                        onClick = {
+                            haptics.tap()
+                            onBack()
+                        },
+                        modifier = Modifier.padding(start = 16.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.back),
+                            tint = MiuixTheme.colorScheme.onSurface,
+                        )
+                    }
+                },
+            )
+        },
     ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding),
+                .padding(
+                    top = padding.calculateTopPadding(),
+                    bottom = padding.calculateBottomPadding(),
+                ),
         ) {
-            OneUiLargeHeader(
-                title = stringResource(R.string.select_csc_title),
-                subtitle = stringResource(R.string.search_screen_subtitle),
-                onBack = onBack,
-            )
-
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                Text(
+                    text = stringResource(R.string.search_screen_subtitle),
+                    fontSize = 13.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
+
                 // 当前生效地区提示卡片
                 Card(
-                    shape = OneUiTokens.ControlShape,
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                    cornerRadius = 14.dp,
+                    insideMargin = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                    colors = CardDefaults.defaultColors(
+                        color = MiuixTheme.colorScheme.tertiaryContainer,
                     ),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
@@ -147,26 +175,31 @@ fun SearchScreen(
                                 modifier = Modifier
                                     .size(28.dp)
                                     .clip(CircleShape)
-                                    .background(IosGlassTokens.IosBlue.copy(alpha = 0.12f)),
+                                    .background(MiuixTheme.colorScheme.primary.copy(alpha = 0.14f)),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Icon(
-                                    Icons.Default.Public,
+                                    imageVector = Icons.Default.Public,
                                     contentDescription = null,
-                                    tint = IosGlassTokens.IosBlue,
+                                    tint = MiuixTheme.colorScheme.primary,
                                     modifier = Modifier.size(16.dp),
                                 )
                             }
                             Text(
                                 text = stringResource(R.string.current_market_region, currentRegionText),
-                                style = MaterialTheme.typography.titleSmall.copy(
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.primary,
-                                ),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MiuixTheme.colorScheme.primary,
                             )
                         }
                         if (currentCsc.enabled || currentCsc.spoofSimInfo || currentCsc.marketUnlockRaw.isNotBlank()) {
                             TextButton(
+                                text = stringResource(R.string.restore_market_default),
+                                insideMargin = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                colors = ButtonDefaults.textButtonColors(
+                                    color = Color.Transparent,
+                                    textColor = IosGlassTokens.IosRed,
+                                ),
                                 onClick = {
                                     haptics.confirm()
                                     StoreCleaner.restoreNativeTelephonyProps()
@@ -192,41 +225,46 @@ fun SearchScreen(
                                         Toast.LENGTH_SHORT,
                                     ).show()
                                 },
-                            ) {
-                                Text(
-                                    text = stringResource(R.string.restore_market_default),
-                                    style = MaterialTheme.typography.labelMedium.copy(
-                                        color = MaterialTheme.colorScheme.error,
-                                        fontWeight = FontWeight.Medium,
-                                    ),
-                                )
-                            }
+                            )
                         }
                     }
                 }
 
-                // 搜索输入框
-                OutlinedTextField(
+                // 搜索输入框（Miuix TextField）
+                TextField(
                     value = searchInput,
                     onValueChange = {
                         searchInput = it
                         query = it
                     },
-                    placeholder = { Text(stringResource(R.string.search_hint)) },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    label = stringResource(R.string.search_hint),
+                    useLabelAsPlaceholder = true,
+                    singleLine = true,
+                    insideMargin = DpSize(14.dp, 12.dp),
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = null,
+                            tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
+                            modifier = Modifier.padding(start = 12.dp).size(18.dp),
+                        )
+                    },
                     trailingIcon = {
                         if (searchInput.isNotEmpty()) {
-                            IconButton(onClick = { searchInput = ""; query = "" }) {
-                                Icon(Icons.Default.Close, contentDescription = stringResource(R.string.clear))
+                            IconButton(
+                                onClick = { searchInput = ""; query = "" },
+                                modifier = Modifier.padding(end = 6.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = stringResource(R.string.clear),
+                                    tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
+                                    modifier = Modifier.size(18.dp),
+                                )
                             }
                         }
                     },
-                    singleLine = true,
-                    shape = OneUiTokens.ControlShape,
                     modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                    ),
                 )
 
                 // 中文快捷地区分类胶囊列表
@@ -241,10 +279,10 @@ fun SearchScreen(
                         val isSelected = query == country
                         Box(
                             modifier = Modifier
-                                .clip(OneUiTokens.PillShape)
+                                .clip(RoundedCornerShape(50))
                                 .background(
-                                    if (isSelected) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.surfaceVariant
+                                    if (isSelected) MiuixTheme.colorScheme.primary
+                                    else MiuixTheme.colorScheme.secondaryContainer
                                 )
                                 .clickable {
                                     haptics.confirm()
@@ -261,28 +299,30 @@ fun SearchScreen(
                         ) {
                             Text(
                                 text = country,
-                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                color = if (isSelected) Color.White else MaterialTheme.colorScheme.primary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isSelected) Color.White else MiuixTheme.colorScheme.primary,
                             )
                         }
                     }
                 }
 
                 Text(
-                    stringResource(R.string.search_result_count, results.size),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    text = stringResource(R.string.search_result_count, results.size),
+                    fontSize = 12.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     modifier = Modifier.padding(start = 4.dp, top = 2.dp),
                 )
             }
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // 80 项地区与运营商列表 (120Hz 极速满帧)
+            // 80 项地区与运营商列表 (Miuix overScrollVertical 弹性阻尼)
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 16.dp),
+                    .padding(horizontal = 16.dp)
+                    .overScrollVertical(),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 items(
@@ -302,49 +342,46 @@ fun SearchScreen(
         }
     }
 
-    pendingConfirmEntry?.let { entry ->
-        val regionDisplayName = "${entry.country.ifBlank { entry.region }} (${entry.code})"
-        AlertDialog(
+    val confirmEntry = pendingConfirmEntry ?: lastConfirmEntry
+    if (confirmEntry != null) {
+        val regionDisplayName = "${confirmEntry.country.ifBlank { confirmEntry.region }} (${confirmEntry.code})"
+        WindowDialog(
+            show = pendingConfirmEntry != null,
+            title = stringResource(R.string.preset_confirm_title, regionDisplayName),
             onDismissRequest = { pendingConfirmEntry = null },
-            shape = OneUiTokens.IslandCardShape,
-            title = {
-                Text(
-                    text = stringResource(R.string.preset_confirm_title, regionDisplayName),
-                    fontWeight = FontWeight.Bold,
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                OneUiNoticeBanner(
+                    text = stringResource(
+                        R.string.preset_confirm_auto,
+                        confirmEntry.code,
+                        confirmEntry.mcc,
+                        confirmEntry.countryCode,
+                    ),
                 )
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OneUiNoticeBanner(
-                        text = stringResource(
-                            R.string.preset_confirm_auto,
-                            entry.code,
-                            entry.mcc,
-                            entry.countryCode,
-                        ),
-                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    TextButton(
+                        text = stringResource(R.string.cancel),
+                        onClick = { pendingConfirmEntry = null },
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(
+                        text = stringResource(R.string.action_apply_and_clear),
+                        colors = ButtonDefaults.textButtonColorsPrimary(),
+                        onClick = {
+                            haptics.confirm()
+                            pendingConfirmEntry = null
+                            onSelect(confirmEntry)
+                        },
+                        modifier = Modifier.weight(1f),
                     )
                 }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        haptics.confirm()
-                        pendingConfirmEntry = null
-                        onSelect(entry)
-                    },
-                    shape = OneUiTokens.PillShape,
-                ) {
-                    Text(stringResource(R.string.action_apply_and_clear))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingConfirmEntry = null }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            },
-        )
+            }
+        }
     }
 }
 
@@ -354,50 +391,45 @@ private fun CscMarketRow(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val isDark = isSystemInDarkTheme()
-    val surfaceColor = if (isDark) Color(0xFF161A24) else Color(0xFFFFFFFF)
-    val borderColor = if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f)
-
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(OneUiTokens.ControlShape)
-            .background(surfaceColor)
-            .border(0.6.dp, borderColor, OneUiTokens.ControlShape)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        cornerRadius = 14.dp,
+        insideMargin = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        onClick = onClick,
     ) {
-        Column(Modifier.weight(1f)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    text = entry.country.ifBlank { entry.region },
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Bold,
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = entry.country.ifBlank { entry.region },
                         fontSize = 16.sp,
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                OneUiBadge(
-                    text = entry.code,
-                    color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold,
+                        color = MiuixTheme.colorScheme.onSurface,
+                    )
+                    OneUiBadge(
+                        text = entry.code,
+                        color = MiuixTheme.colorScheme.primary,
+                    )
+                }
+                Text(
+                    text = if (entry.operator.isNotBlank()) "${entry.operator} ${entry.numeric}" else entry.region,
+                    fontSize = 13.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    maxLines = 1,
                 )
             }
-            Text(
-                text = if (entry.operator.isNotBlank()) "${entry.operator} ${entry.numeric}" else entry.region,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
+
+            OneUiBadge(
+                text = entry.countryCode,
+                color = IosGlassTokens.IosGray,
             )
         }
-
-        OneUiBadge(
-            text = entry.countryCode,
-            color = MaterialTheme.colorScheme.secondary,
-        )
     }
 }

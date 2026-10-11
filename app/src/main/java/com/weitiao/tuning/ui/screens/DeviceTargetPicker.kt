@@ -9,23 +9,17 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -37,11 +31,22 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
 import com.weitiao.tuning.R
-import com.weitiao.tuning.ui.theme.OneUiTokens
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
+import top.yukonga.miuix.kmp.basic.Checkbox
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.basic.TextField
+import top.yukonga.miuix.kmp.extra.WindowDialog
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.utils.overScrollVertical
 
 private data class TargetAppItem(
     val packageName: String,
@@ -51,6 +56,7 @@ private data class TargetAppItem(
 
 @Composable
 fun DeviceTargetPicker(
+    show: Boolean = true,
     initialSelection: Set<String>,
     onDismiss: () -> Unit,
     onSave: (Set<String>) -> Unit,
@@ -83,34 +89,38 @@ fun DeviceTargetPicker(
 
     var selected by remember { mutableStateOf(initialSelection.toSet()) }
 
-    AlertDialog(
+    WindowDialog(
+        show = show,
+        title = stringResource(R.string.choose_device_target_apps),
         onDismissRequest = onDismiss,
-        shape = OneUiTokens.IslandCardShape,
-        title = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    stringResource(R.string.choose_device_target_apps),
-                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                )
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    placeholder = { Text(stringResource(R.string.search_app_hint)) },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                    singleLine = true,
-                    shape = OneUiTokens.ControlShape,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                    ),
-                )
-            }
-        },
-        text = {
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            TextField(
+                value = query,
+                onValueChange = { query = it },
+                label = stringResource(R.string.search_app_hint),
+                useLabelAsPlaceholder = true,
+                singleLine = true,
+                insideMargin = DpSize(14.dp, 12.dp),
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = null,
+                        tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
+                        modifier = Modifier.padding(start = 12.dp).size(18.dp),
+                    )
+                },
+                modifier = Modifier.fillMaxWidth(),
+            )
+
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 400.dp),
+                    .heightIn(max = 360.dp)
+                    .overScrollVertical(),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 items(filteredApps, key = { it.packageName }) { app ->
@@ -118,13 +128,13 @@ fun DeviceTargetPicker(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(OneUiTokens.ControlShape)
+                            .clip(RoundedCornerShape(12.dp))
                             .clickable {
                                 selected = selected.toMutableSet().apply {
                                     if (!add(app.packageName)) remove(app.packageName)
                                 }.toSet()
                             }
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                            .padding(horizontal = 8.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
@@ -138,36 +148,55 @@ fun DeviceTargetPicker(
                             Box(
                                 modifier = Modifier
                                     .size(36.dp)
-                                    .clip(OneUiTokens.ControlShape)
-                                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(MiuixTheme.colorScheme.secondaryContainer),
                             )
                         }
 
                         Column(Modifier.weight(1f)) {
-                            Text(app.label, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
-                            Text(app.packageName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                text = app.label,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MiuixTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                text = app.packageName,
+                                fontSize = 11.sp,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            )
                         }
 
                         Checkbox(
-                            checked = isChecked,
-                            onCheckedChange = null,
+                            state = ToggleableState(isChecked),
+                            onClick = {
+                                selected = selected.toMutableSet().apply {
+                                    if (!add(app.packageName)) remove(app.packageName)
+                                }.toSet()
+                            },
                         )
                     }
                 }
             }
-        },
-        confirmButton = {
-            Button(
-                onClick = { onSave(selected) },
-                shape = OneUiTokens.PillShape,
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Text(stringResource(R.string.confirm_and_request_scope, selected.size))
+                TextButton(
+                    text = stringResource(R.string.cancel),
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    text = stringResource(R.string.confirm_and_request_scope, selected.size),
+                    onClick = { onSave(selected) },
+                    colors = ButtonDefaults.textButtonColorsPrimary(),
+                    modifier = Modifier.weight(1f),
+                )
             }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.cancel))
-            }
-        },
-    )
+        }
+    }
 }

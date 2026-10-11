@@ -1,15 +1,17 @@
 # 微调 (WeiTiao)
 
-[English](README.en.md) · **[📥 点击直接下载安装包 (WeiTiao-v1.3.9.apk · 1.6 MB)](https://github.com/WEIHEWU/WeiTiao/raw/main/releases/WeiTiao-v1.3.9.apk)** · [Releases 页面](https://github.com/WEIHEWU/WeiTiao/releases)
+[English](README.en.md) · **[📥 点击直接下载安装包 (WeiTiao-v1.4.0.apk · 1.6 MB)](https://github.com/WEIHEWU/WeiTiao/raw/main/releases/WeiTiao-v1.4.0.apk)** · [Releases 页面](https://github.com/WEIHEWU/WeiTiao/releases)
 
-一个基于 `libxposed API 102` 与 `Root` 的三星 One UI 增强模块，集成 **应用商店跨区解锁（CSC/SIM 伪装）**、**硬件机型伪装**、**微信运动步数与消息防撤回**、**亮屏快充** 以及 **USB PD 应用旁路供电**。
+一个基于 `libxposed API 102`、`Root` 与 **`miuix` (`0.8.8`)** 界面的三星 One UI 增强模块，集成 **应用商店跨区解锁（CSC/SIM 伪装）**、**硬件机型伪装**、**微信运动步数与消息防撤回**、**亮屏快充** 以及 **USB PD 应用旁路供电**。
 
-当前版本：`1.3.9`（`versionCode 19`）。
+当前版本：`1.4.0`（`versionCode 20`）。
 
 > 仅在三星 One UI 8.5 上测试通过，其他版本不保证能够使用。
 
 ## 核心特性
 
+- **Miuix 原生质感与物理交互**：
+  - 基于 `top.yukonga.miuix.kmp:miuix:0.8.8` 全面构建，支持可折叠大标题导航栏、物理弹性越界回弹 (`overScrollVertical`)、G2 连续曲率圆角 (`smoothRounding`) 与 `folmeSpring` 物理弹簧弹窗动画。
 - **应用商店跨区解锁（CSC + SIM 联合伪装）**：
   - 内置 6 大精选预设（中国香港、美国公开版、欧洲通用版、中国台湾、韩国官方版、中国大陆）及全球 80 个国家/运营商预设检索库；
   - 仅对应用商店（Galaxy Store / 主题商店 / Play 商店 / 三星账号判区组件）返回目标 CSC 与 SIM 运营商信息，**绝不注入系统框架 (`android`) 或电话服务 (`com.android.phone`)，确保物理 SIM 卡与系统基带 100% 原生稳定**；
@@ -25,7 +27,7 @@
 - **USB PD 应用旁路供电（纯 Root 直控，无需 LSPosed）**：
   - 前台运行指定游戏/应用且电量达到设定阈值时，自动开启旁路供电直接给主板供电，大幅降低边充边玩发热。
 - **极致轻量化**：
-  - 零第三方冗余依赖，Release APK 仅 **1.6 MB**，O(1) 哈希属性查表，零轮询唤醒。
+  - Release APK 仅 **1.6 MB**，O(1) 哈希属性查表，零轮询唤醒。
 
 ## 推荐 LSPosed 作用域
 

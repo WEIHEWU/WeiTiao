@@ -16,8 +16,8 @@ android {
         applicationId = "com.weitiao.tuning"
         minSdk = 26
         targetSdk = 36
-        versionCode = 19
-        versionName = "1.3.9"
+        versionCode = 20
+        versionName = "1.4.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -92,6 +92,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.extended)
+    implementation(libs.miuix)
 
     // libxposed 现代 API（102）：仅编译期依赖。
     // targetApiVersion=102 的模块禁止调用 legacy de.robv.android.xposed API，
