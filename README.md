@@ -1,6 +1,6 @@
 # 微调 (WeiTiao)
 
-[English](README.en.md)
+[English](README.en.md) · **[📥 直接下载最新版 APK (WeiTiao-v1.3.9.apk · 1.6 MB)](https://github.com/WEIHEWU/WeiTiao/releases/latest)**
 
 一个基于 `libxposed API 102` 与 `Root` 的三星 One UI 增强模块，集成 **应用商店跨区解锁（CSC/SIM 伪装）**、**硬件机型伪装**、**微信运动步数与消息防撤回**、**亮屏快充** 以及 **USB PD 应用旁路供电**。
 

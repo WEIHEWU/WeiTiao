@@ -1,0 +1,32 @@
+name: Publish Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create GitHub Release and Upload APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.3.9
+          name: "微调 WeiTiao v1.3.9"
+          body: |
+            ### 微调 (WeiTiao) v1.3.9
+
+            - **极致轻量化**：正式版安装包仅 **1.6 MB**，O(1) 哈希属性查表，零冗余后台唤醒。
+            - **LSPosed 作用域纯净锁死**：仅需勾选三星应用商店、主题商店、Play 商店、三星账号判区服务与微信，严禁勾选 `android` 系统框架，确保物理 SIM 卡与基带 100% 原生稳定。
+            - **微信运动与防撤回**：单调递增计步引擎（支持自动递增与固定倍率）、消息与媒体防撤回、一键重启并自动拉起微信。
+            - **亮屏快充 & 应用旁路供电**：纯 Root 硬件温控/供电节点直控，44.0°C 安全熔断保护，无需配置 LSPosed 作用域。
+          files: |
+            releases/WeiTiao-v1.3.9.apk
