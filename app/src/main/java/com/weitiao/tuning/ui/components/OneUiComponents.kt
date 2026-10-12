@@ -50,27 +50,24 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.weitiao.tuning.R
 import com.weitiao.tuning.ui.theme.OneUiTokens
-import top.yukonga.miuix.kmp.basic.BasicComponent
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
-import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SnackbarHost
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
+import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TopAppBar
-import top.yukonga.miuix.kmp.basic.rememberTopAppBarState
-import top.yukonga.miuix.kmp.extra.SuperArrow
-import top.yukonga.miuix.kmp.extra.SuperSwitch
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.miuixShape
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 
 /**
- * Miuix 丝滑阻尼折叠大标题页面脚手架
+ * Miuix 精致紧凑顶栏页面脚手架（去除夸张大字号标题与底部悬浮栏留白）
  */
 @Composable
 fun MiuixPageScaffold(
@@ -80,22 +77,30 @@ fun MiuixPageScaffold(
     onBack: (() -> Unit)? = null,
     actions: @Composable (RowScope.() -> Unit)? = null,
     snackbarHostState: SnackbarHostState? = null,
-    bottomNavigationPadding: Dp = 96.dp,
+    bottomNavigationPadding: Dp = 20.dp,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val scrollBehavior = MiuixScrollBehavior(rememberTopAppBarState())
     val haptics = rememberOneUiHaptics()
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MiuixTheme.colorScheme.surface,
         topBar = {
-            TopAppBar(
-                title = title,
-                largeTitle = title,
-                color = MiuixTheme.colorScheme.surface,
-                scrollBehavior = scrollBehavior,
-                navigationIcon = {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MiuixTheme.colorScheme.surface)
+                    .statusBarsPadding()
+                    .height(48.dp)
+                    .padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.weight(1f),
+                ) {
                     if (onBack != null) {
                         val backLabel = stringResource(R.string.back)
                         IconButton(
@@ -103,28 +108,37 @@ fun MiuixPageScaffold(
                                 haptics.tap()
                                 onBack()
                             },
-                            modifier = Modifier.padding(start = 16.dp),
+                            modifier = Modifier.size(34.dp),
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = backLabel,
                                 tint = MiuixTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(19.dp),
                             )
                         }
                     }
-                },
-                actions = {
-                    if (actions != null) {
-                        Row(
-                            modifier = Modifier.padding(end = 16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            actions()
-                        }
+
+                    Text(
+                        text = title,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MiuixTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = if (onBack == null) 4.dp else 0.dp),
+                    )
+                }
+
+                if (actions != null) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        actions()
                     }
-                },
-            )
+                }
+            }
         },
         snackbarHost = {
             if (snackbarHostState != null) {
@@ -135,24 +149,21 @@ fun MiuixPageScaffold(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .nestedScroll(scrollBehavior.nestedScrollConnection)
                 .scrollEndHaptic()
                 .overScrollVertical()
                 .verticalScroll(rememberScrollState())
                 .padding(
-                    top = padding.calculateTopPadding(),
+                    top = padding.calculateTopPadding() + 4.dp,
                     bottom = padding.calculateBottomPadding() + bottomNavigationPadding,
                 ),
         ) {
             if (!subtitle.isNullOrBlank()) {
                 Text(
                     text = subtitle,
-                    fontSize = 13.sp,
+                    fontSize = 11.5.sp,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 10.dp),
+                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 8.dp),
                 )
-            } else {
-                Spacer(modifier = Modifier.height(6.dp))
             }
 
             content()
@@ -161,7 +172,7 @@ fun MiuixPageScaffold(
 }
 
 /**
- * 顶部主状态横幅大卡（左上粗体大字 + 浅蓝圆点胶囊 + 双行完整摘要 + 右下角超大半裁切圆环对勾水印）
+ * 顶部主状态横幅大卡（精致紧凑字号 + 浅蓝圆点胶囊 + 右下角半裁切圆环对勾水印）
  */
 @Composable
 fun MiuixHeroStatusCard(
@@ -175,7 +186,7 @@ fun MiuixHeroStatusCard(
     onClick: (() -> Unit)? = null,
 ) {
     val isDark = isSystemInDarkTheme()
-    val cardShape = miuixShape(22.dp)
+    val cardShape = miuixShape(20.dp)
     val pillBg = if (isWarning) {
         IosGlassTokens.pastelBg(IosGlassTokens.IosAmber)
     } else {
@@ -183,9 +194,9 @@ fun MiuixHeroStatusCard(
     }
     val pillFg = if (isWarning) IosGlassTokens.IosAmber else IosGlassTokens.activeTileFg()
     val watermarkColor = if (isWarning) {
-        IosGlassTokens.IosAmber.copy(alpha = if (isDark) 0.70f else 0.85f)
+        IosGlassTokens.IosAmber.copy(alpha = if (isDark) 0.68f else 0.82f)
     } else {
-        accentColor.copy(alpha = if (isDark) 0.72f else 0.88f)
+        accentColor.copy(alpha = if (isDark) 0.70f else 0.85f)
     }
 
     Box(
@@ -202,14 +213,14 @@ fun MiuixHeroStatusCard(
                 }
             ),
     ) {
-        // 右下角超大半裁切圆环对勾水印
+        // 右下角半裁切圆环对勾水印
         Canvas(
             modifier = Modifier
-                .size(110.dp)
+                .size(92.dp)
                 .align(Alignment.BottomEnd)
-                .offset(x = 28.dp, y = 28.dp),
+                .offset(x = 22.dp, y = 22.dp),
         ) {
-            val strokeWidth = 9.5.dp.toPx()
+            val strokeWidth = 8.dp.toPx()
             val radius = (size.minDimension - strokeWidth) / 2f
             drawCircle(
                 color = watermarkColor,
@@ -253,16 +264,16 @@ fun MiuixHeroStatusCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 20.dp, top = 20.dp, end = 64.dp, bottom = 22.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+                .padding(start = 18.dp, top = 16.dp, end = 58.dp, bottom = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
                     text = statusTitle,
-                    fontSize = 24.sp,
+                    fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     color = MiuixTheme.colorScheme.onSurface,
                     maxLines = 1,
@@ -273,19 +284,19 @@ fun MiuixHeroStatusCard(
                     modifier = Modifier
                         .clip(RoundedCornerShape(50))
                         .background(pillBg)
-                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                        .padding(horizontal = 8.dp, vertical = 3.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(6.dp)
+                            .size(5.dp)
                             .clip(CircleShape)
                             .background(pillFg),
                     )
                     Text(
                         text = pillText,
-                        fontSize = 11.sp,
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = pillFg,
                         maxLines = 1,
@@ -293,16 +304,16 @@ fun MiuixHeroStatusCard(
                 }
             }
 
-            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                     text = line1Text,
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     maxLines = 2,
                 )
                 Text(
                     text = line2Text,
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.82f),
                     maxLines = 2,
                 )
@@ -312,7 +323,7 @@ fun MiuixHeroStatusCard(
 }
 
 /**
- * 3×2 快捷点亮式状态磁贴（启用时变为柔和浅天蓝底 #E7F0FD + 小米蓝字 #267AF6；未启用时纯白底）
+ * 3×2 快捷点亮式状态磁贴（精致小字号，启用时柔和浅天蓝底 #E7F0FD + 小米蓝字 #267AF6）
  */
 @Composable
 fun MiuixQuickTile(
@@ -324,7 +335,7 @@ fun MiuixQuickTile(
     onClick: () -> Unit,
 ) {
     val haptics = rememberOneUiHaptics()
-    val tileShape = miuixShape(18.dp)
+    val tileShape = miuixShape(16.dp)
     val bgColor by animateColorAsState(
         targetValue = if (active) IosGlassTokens.activeTileBg() else MiuixTheme.colorScheme.surfaceContainer,
         label = "quickTileBg",
@@ -350,7 +361,7 @@ fun MiuixQuickTile(
                 haptics.tap()
                 onClick()
             }
-            .padding(horizontal = 10.dp, vertical = 12.dp),
+            .padding(horizontal = 10.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -358,7 +369,7 @@ fun MiuixQuickTile(
             imageVector = icon,
             contentDescription = label,
             tint = iconColor,
-            modifier = Modifier.size(18.dp),
+            modifier = Modifier.size(16.dp),
         )
 
         Column(
@@ -367,7 +378,7 @@ fun MiuixQuickTile(
         ) {
             Text(
                 text = label,
-                fontSize = 11.sp,
+                fontSize = 10.5.sp,
                 fontWeight = FontWeight.Normal,
                 color = labelColor,
                 maxLines = 1,
@@ -375,8 +386,8 @@ fun MiuixQuickTile(
             )
             Text(
                 text = statusText,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
+                fontSize = 11.5.sp,
+                fontWeight = FontWeight.SemiBold,
                 color = statusColor,
                 maxLines = 1,
                 softWrap = false,
@@ -386,7 +397,7 @@ fun MiuixQuickTile(
 }
 
 /**
- * 2×2 马卡龙柔和超椭圆图标 + 大数字/大核心值指标卡
+ * 2×1 马卡龙柔和超椭圆图标 + 紧凑卡片
  */
 @Composable
 fun MiuixMetricCard(
@@ -398,8 +409,8 @@ fun MiuixMetricCard(
     onClick: (() -> Unit)? = null,
 ) {
     val haptics = rememberOneUiHaptics()
-    val cardShape = miuixShape(18.dp)
-    val iconBoxShape = miuixShape(12.dp)
+    val cardShape = miuixShape(16.dp)
+    val iconBoxShape = miuixShape(10.dp)
     val iconBg = IosGlassTokens.pastelBg(accentColor)
 
     Row(
@@ -416,13 +427,13 @@ fun MiuixMetricCard(
                     Modifier
                 }
             )
-            .padding(horizontal = 12.dp, vertical = 14.dp),
+            .padding(horizontal = 12.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Box(
             modifier = Modifier
-                .size(36.dp)
+                .size(32.dp)
                 .clip(iconBoxShape)
                 .background(iconBg),
             contentAlignment = Alignment.Center,
@@ -431,27 +442,27 @@ fun MiuixMetricCard(
                 imageVector = icon,
                 contentDescription = labelText,
                 tint = accentColor,
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(16.dp),
             )
         }
 
         Column(
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+            verticalArrangement = Arrangement.spacedBy(1.dp),
         ) {
             Text(
                 text = valueText,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Bold,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
                 color = MiuixTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = labelText,
-                fontSize = 11.sp,
+                fontSize = 10.5.sp,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                maxLines = 2,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         }
@@ -459,7 +470,7 @@ fun MiuixMetricCard(
 }
 
 /**
- * 干净利落的左对齐粗体分组标题（支持下方完整副标题描述或右侧简短状态摘要）
+ * 干净利落的左对齐分组小标题
  */
 @Composable
 fun MiuixSectionTitle(
@@ -471,8 +482,8 @@ fun MiuixSectionTitle(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 4.dp, vertical = 2.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+            .padding(horizontal = 4.dp, vertical = 1.dp),
+        verticalArrangement = Arrangement.spacedBy(1.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -481,14 +492,14 @@ fun MiuixSectionTitle(
         ) {
             Text(
                 text = title,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Bold,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
                 color = MiuixTheme.colorScheme.onSurface,
             )
             if (!trailingText.isNullOrBlank()) {
                 Text(
                     text = trailingText,
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
             }
@@ -496,7 +507,7 @@ fun MiuixSectionTitle(
         if (!subtitle.isNullOrBlank()) {
             Text(
                 text = subtitle,
-                fontSize = 12.sp,
+                fontSize = 11.sp,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
         }
@@ -504,7 +515,7 @@ fun MiuixSectionTitle(
 }
 
 /**
- * 兼容固定头部页面（如包含独立 LazyColumn 的 SearchScreen）的 Miuix 顶部标题栏
+ * 兼容固定头部页面（如包含独立 LazyColumn 的 SearchScreen）的紧凑顶部标题栏
  */
 @Composable
 fun OneUiLargeHeader(
@@ -518,69 +529,70 @@ fun OneUiLargeHeader(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 10.dp),
+            .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 6.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            if (onBack != null) {
-                val backLabel = stringResource(R.string.back)
-                IconButton(
-                    onClick = {
-                        haptics.tap()
-                        onBack()
-                    },
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = backLabel,
-                        tint = MiuixTheme.colorScheme.onSurface,
-                    )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.weight(1f),
+            ) {
+                if (onBack != null) {
+                    val backLabel = stringResource(R.string.back)
+                    IconButton(
+                        onClick = {
+                            haptics.tap()
+                            onBack()
+                        },
+                        modifier = Modifier.size(34.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = backLabel,
+                            tint = MiuixTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(19.dp),
+                        )
+                    }
                 }
-            } else {
-                Spacer(modifier = Modifier.size(40.dp))
+
+                Text(
+                    text = title,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MiuixTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
 
             if (actions != null) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     actions()
                 }
-            } else {
-                Spacer(modifier = Modifier.size(40.dp))
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Text(
-            text = title,
-            fontSize = MiuixTheme.textStyles.title1.fontSize,
-            fontWeight = FontWeight.Normal,
-            color = MiuixTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(horizontal = 6.dp),
-        )
-
         if (!subtitle.isNullOrBlank()) {
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = subtitle,
-                fontSize = MiuixTheme.textStyles.body2.fontSize,
+                fontSize = 11.sp,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                modifier = Modifier.padding(horizontal = 6.dp),
+                modifier = Modifier.padding(horizontal = 4.dp),
             )
         }
     }
 }
 
 /**
- * Miuix 纯白无边框卡片分组容器 (MiuixSectionTitle + 20.dp Miuix Card)
+ * Miuix 纯白无边框卡片分组容器 (MiuixSectionTitle + 18.dp Miuix Card)
  */
 @Composable
 fun OneUiIslandCard(
@@ -591,12 +603,12 @@ fun OneUiIslandCard(
     iconTint: Color = MiuixTheme.colorScheme.primary,
     containerColor: Color = MiuixTheme.colorScheme.surfaceContainer,
     shape: RoundedCornerShape = OneUiTokens.ControlShape,
-    contentPadding: Dp = 14.dp,
+    contentPadding: Dp = 12.dp,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         if (title != null) {
             MiuixSectionTitle(
@@ -607,7 +619,7 @@ fun OneUiIslandCard(
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            cornerRadius = 20.dp,
+            cornerRadius = 18.dp,
             insideMargin = PaddingValues(contentPadding),
             colors = CardDefaults.defaultColors(
                 color = containerColor,
@@ -616,7 +628,7 @@ fun OneUiIslandCard(
         ) {
             Column(
                 modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 content()
             }
@@ -625,7 +637,7 @@ fun OneUiIslandCard(
 }
 
 /**
- * Miuix 原生交互列表项（统一使用柔和马卡龙圆角方块图标底座 + SuperSwitch / SuperArrow / BasicComponent）
+ * 精致紧凑型列表项（告别 SuperSwitch/SuperArrow 默认的硕大 17sp 标题，统一采用 13sp 标题 + 11sp 副标题）
  */
 @Composable
 fun OneUiItemRow(
@@ -645,18 +657,45 @@ fun OneUiItemRow(
     onCheckedChange: ((Boolean) -> Unit)? = null,
 ) {
     val haptics = rememberOneUiHaptics()
-    val itemMargin = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
-    val itemModifier = modifier.clip(miuixShape(14.dp))
+    val rowClick: (() -> Unit)? = when {
+        !enabled -> null
+        checked != null && onCheckedChange != null -> {
+            {
+                haptics.toggle()
+                onCheckedChange(!checked)
+            }
+        }
+        onClick != null -> {
+            {
+                haptics.tap()
+                onClick()
+            }
+        }
+        else -> null
+    }
 
-    val startIconSlot: (@Composable () -> Unit)? = if (icon != null) {
-        {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(miuixShape(12.dp))
+            .then(
+                if (rowClick != null) {
+                    Modifier.clickable(onClick = rowClick)
+                } else {
+                    Modifier
+                }
+            )
+            .padding(horizontal = 4.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        if (icon != null) {
             val resolvedBg = iconBackground ?: IosGlassTokens.pastelBg(iconTint)
             val resolvedIconTint = if (iconBackground != null) Color.White else iconTint
             Box(
                 modifier = Modifier
-                    .padding(end = 8.dp)
-                    .size(38.dp)
-                    .clip(miuixShape(11.dp))
+                    .size(32.dp)
+                    .clip(miuixShape(9.dp))
                     .background(resolvedBg),
                 contentAlignment = Alignment.Center,
             ) {
@@ -664,13 +703,30 @@ fun OneUiItemRow(
                     imageVector = icon,
                     contentDescription = null,
                     tint = resolvedIconTint,
-                    modifier = Modifier.size(19.dp),
+                    modifier = Modifier.size(16.dp),
                 )
             }
         }
-    } else null
 
-    val endBadgesSlot: @Composable RowScope.() -> Unit = {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(1.dp),
+        ) {
+            Text(
+                text = title,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color = if (enabled) MiuixTheme.colorScheme.onSurface else MiuixTheme.colorScheme.disabledOnSecondaryVariant,
+            )
+            if (!subtitle.isNullOrBlank()) {
+                Text(
+                    text = subtitle,
+                    fontSize = 11.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            }
+        }
+
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -681,60 +737,28 @@ fun OneUiItemRow(
             if (!trailingValue.isNullOrBlank()) {
                 Text(
                     text = trailingValue,
-                    fontSize = MiuixTheme.textStyles.body2.fontSize,
+                    fontSize = 11.5.sp,
                     color = MiuixTheme.colorScheme.onSurfaceVariantActions,
                     maxLines = 1,
                 )
             }
-        }
-    }
-
-    when {
-        checked != null && onCheckedChange != null -> {
-            SuperSwitch(
-                checked = checked,
-                onCheckedChange = {
-                    haptics.toggle()
-                    onCheckedChange(it)
-                },
-                title = title,
-                summary = subtitle,
-                modifier = itemModifier,
-                insideMargin = itemMargin,
-                enabled = enabled,
-                startAction = startIconSlot,
-                endActions = endBadgesSlot,
-            )
-        }
-
-        showChevron || onClick != null -> {
-            SuperArrow(
-                title = title,
-                summary = subtitle,
-                modifier = itemModifier,
-                insideMargin = itemMargin,
-                enabled = enabled,
-                startAction = startIconSlot,
-                endActions = endBadgesSlot,
-                onClick = if (onClick != null) {
-                    {
-                        haptics.tap()
-                        onClick()
-                    }
-                } else null,
-            )
-        }
-
-        else -> {
-            BasicComponent(
-                title = title,
-                summary = subtitle,
-                modifier = itemModifier,
-                insideMargin = itemMargin,
-                enabled = enabled,
-                startAction = startIconSlot,
-                endActions = endBadgesSlot,
-            )
+            if (checked != null && onCheckedChange != null) {
+                Switch(
+                    checked = checked,
+                    onCheckedChange = {
+                        haptics.toggle()
+                        onCheckedChange(it)
+                    },
+                    enabled = enabled,
+                )
+            } else if (showChevron || onClick != null) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
         }
     }
 }
@@ -753,12 +777,12 @@ fun OneUiBadge(
         modifier = modifier
             .clip(RoundedCornerShape(50))
             .background(backgroundColor)
-            .padding(horizontal = 9.dp, vertical = 3.dp),
+            .padding(horizontal = 8.dp, vertical = 2.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = text,
-            fontSize = 11.sp,
+            fontSize = 10.sp,
             fontWeight = FontWeight.SemiBold,
             color = color,
             maxLines = 1,
