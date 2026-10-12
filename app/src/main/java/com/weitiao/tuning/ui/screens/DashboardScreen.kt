@@ -51,6 +51,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -87,12 +88,13 @@ import com.weitiao.tuning.ui.components.MiuixHeroStatusCard
 import com.weitiao.tuning.ui.components.MiuixMetricCard
 import com.weitiao.tuning.ui.components.MiuixPageScaffold
 import com.weitiao.tuning.ui.components.MiuixQuickTile
-import com.weitiao.tuning.ui.components.MiuixSectionTitle
 import com.weitiao.tuning.ui.components.OneUiIslandCard
 import com.weitiao.tuning.ui.components.OneUiItemRow
 import com.weitiao.tuning.ui.components.OneUiNoticeBanner
+import com.weitiao.tuning.ui.components.OneUiSegmentedControl
 import com.weitiao.tuning.ui.components.rememberOneUiHaptics
 import com.weitiao.tuning.ui.theme.OneUiTokens
+import java.text.NumberFormat
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -113,6 +115,10 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 
 private enum class ModuleState { NOT_CONNECTED, NO_SCOPE, ACTIVE }
+
+private const val PANEL_SPOOF = 0
+private const val PANEL_STEPS = 1
+private const val PANEL_POWER = 2
 
 private data class CompactPreset(
     val flag: String,
@@ -136,6 +142,20 @@ private val QUICK_REGION_PRESETS = listOf(
     CompactPreset("🇨🇳", "大陆", "CN", R.string.preset_cn_name, "CHC", "460", "CN", "46000", "CHINA MOBILE", "00"),
 )
 
+private data class StepTierPreset(
+    val multiplier: Int,
+    val recommendedCap: Int,
+    val titleZh: String,
+    val titleEn: String,
+)
+
+private val STEP_TIER_PRESETS = listOf(
+    StepTierPreset(multiplier = 3, recommendedCap = 28000, titleZh = "3x 轻度", titleEn = "3x Light"),
+    StepTierPreset(multiplier = 10, recommendedCap = 50000, titleZh = "10x 日常", titleEn = "10x Daily"),
+    StepTierPreset(multiplier = 25, recommendedCap = 68000, titleZh = "25x 进阶", titleEn = "25x Boost"),
+    StepTierPreset(multiplier = 50, recommendedCap = 88888, titleZh = "50x 极速", titleEn = "50x Max"),
+)
+
 private data class LaunchableAppEntry(
     val packageName: String,
     val label: String,
@@ -156,10 +176,14 @@ fun DashboardScreen(
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val isZh = remember { Locale.getDefault().language.startsWith("zh") }
+    val numFmt = remember { NumberFormat.getIntegerInstance(Locale.US) }
 
     val nativeInfo = remember { NativeDevice.detect(context) }
     var csc by remember { mutableStateOf(CscPrefs.load(context)) }
     var tuning by remember { mutableStateOf(TuningPrefs.load(context)) }
+
+    // 下方参数面板分段切换（避免把所有卡片同时堆叠在一个长页面）
+    var activePanel by rememberSaveable { mutableIntStateOf(PANEL_SPOOF) }
 
     var multiplier by remember(tuning.stepMultiplier) { mutableStateOf(tuning.stepMultiplier.toString()) }
     var maximum by remember(tuning.stepMaximum) { mutableStateOf(tuning.stepMaximum.toString()) }
@@ -302,6 +326,7 @@ fun DashboardScreen(
     // 从全球 80 国检索库返回后自动应用并清理商店
     LaunchedEffect(pendingSelection) {
         pendingSelection?.let { entry ->
+            activePanel = PANEL_SPOOF
             updateCsc(context.getString(R.string.preset_applied_toast, "${entry.country} (${entry.code})")) {
                 it.copy(
                     enabled = true,
@@ -358,7 +383,7 @@ fun DashboardScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             if (regionCleanupPending) {
                 OneUiNoticeBanner(
@@ -397,7 +422,7 @@ fun DashboardScreen(
                 )
             }
 
-            // 第一层：顶部紧凑状态大卡（融合实时电池温度与电量，无需再单独堆叠重复看板卡）
+            // 第一层：顶部紧凑状态大卡（融合实时温度与电量）
             val modeLabel = if (moduleState == ModuleState.ACTIVE) {
                 if (isZh) "LSPosed 推荐模式" else "LSPosed Mode"
             } else {
@@ -425,7 +450,7 @@ fun DashboardScreen(
                 onClick = onOpenSettings,
             )
 
-            // 第二层：全应用唯一的 3×2 功能总开关磁贴（下方不再重复放置任何同功能开关）
+            // 第二层：全应用唯一的 3×2 功能总开关磁贴（点击切换开关，并自动联动下方配置面板）
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -445,6 +470,7 @@ fun DashboardScreen(
                         active = csc.enabled && csc.salesCode.isNotBlank(),
                         modifier = Modifier.weight(1f),
                         onClick = {
+                            activePanel = PANEL_SPOOF
                             if (csc.salesCode.isNotBlank()) {
                                 updateCsc { it.copy(enabled = !it.enabled) }
                             } else {
@@ -459,6 +485,7 @@ fun DashboardScreen(
                         active = csc.spoofDevice,
                         modifier = Modifier.weight(1f),
                         onClick = {
+                            activePanel = PANEL_SPOOF
                             if (csc.deviceName.isNotBlank()) {
                                 updateCsc { it.copy(spoofDevice = !it.spoofDevice) }
                             } else {
@@ -468,11 +495,16 @@ fun DashboardScreen(
                     )
                     MiuixQuickTile(
                         label = if (isZh) "微信计步" else "Steps",
-                        statusText = if (tuning.stepEnabled) enabledText else disabledText,
+                        statusText = if (tuning.stepEnabled) {
+                            "$enabledText · ${tuning.stepMultiplier}x"
+                        } else {
+                            disabledText
+                        },
                         icon = Icons.AutoMirrored.Filled.DirectionsRun,
                         active = tuning.stepEnabled,
                         modifier = Modifier.weight(1f),
                         onClick = {
+                            activePanel = PANEL_STEPS
                             updateTuning { it.copy(stepEnabled = !it.stepEnabled) }
                         },
                     )
@@ -499,6 +531,7 @@ fun DashboardScreen(
                         active = tuning.brightScreenFastCharge,
                         modifier = Modifier.weight(1f),
                         onClick = {
+                            activePanel = PANEL_POWER
                             val next = !tuning.brightScreenFastCharge
                             updateTuning { it.copy(brightScreenFastCharge = next) }
                             if (next) requestNotificationPermissionIfNeeded()
@@ -506,11 +539,16 @@ fun DashboardScreen(
                     )
                     MiuixQuickTile(
                         label = if (isZh) "旁路供电" else "Bypass",
-                        statusText = if (tuning.passThrough) enabledText else disabledText,
+                        statusText = if (tuning.passThrough) {
+                            "$enabledText · ${tuning.passThroughLimit}%"
+                        } else {
+                            disabledText
+                        },
                         icon = Icons.Default.Power,
                         active = tuning.passThrough,
                         modifier = Modifier.weight(1f),
                         onClick = {
+                            activePanel = PANEL_POWER
                             val next = !tuning.passThrough
                             updateTuning { it.copy(passThrough = next) }
                             if (next) requestNotificationPermissionIfNeeded()
@@ -519,35 +557,201 @@ fun DashboardScreen(
                 }
             }
 
-            // 第三层：区域与机型参数配置（无重复开关，直接选地区与机型）
-            OneUiIslandCard(
-                title = if (isZh) "区域与机型参数" else "Region & Model Parameters",
-                subtitle = if (csc.enabled && csc.salesCode.isNotBlank()) {
-                    if (isZh) "当前伪装: ${csc.salesCode} · ${csc.countryCode} (MCC ${csc.simMcc}) | 出厂: $rawSalesCode"
-                    else "Spoofed: ${csc.salesCode} · ${csc.countryCode} (MCC ${csc.simMcc}) | Factory: $rawSalesCode"
-                } else {
-                    if (isZh) "当前出厂原生区域: $rawSalesCode (MCC $rawSimOperator)"
-                    else "Native factory region: $rawSalesCode (MCC $rawSimOperator)"
+            // 第三层：轻量三段式面板切换器（每次仅展示 1 张参数卡片，彻底告别超长堆叠页面）
+            OneUiSegmentedControl(
+                items = listOf(PANEL_SPOOF, PANEL_STEPS, PANEL_POWER),
+                selectedItem = activePanel,
+                onSelect = { activePanel = it },
+                label = { panel ->
+                    when (panel) {
+                        PANEL_SPOOF -> if (isZh) "区域与机型" else "Region & Model"
+                        PANEL_STEPS -> if (isZh) "微信计步计算" else "Step Calculator"
+                        else -> if (isZh) "供电与维护" else "Power & Tools"
+                    }
                 },
-            ) {
-                // 6 大热门地区 3×2 紧凑一键预设
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    QUICK_REGION_PRESETS.chunked(3).forEach { rowPresets ->
+            )
+
+            // 根据当前选中的分段展示对应单张参数卡（一屏到底，清爽不堆叠）
+            when (activePanel) {
+                PANEL_SPOOF -> {
+                    OneUiIslandCard(
+                        title = if (isZh) "区域与机型参数" else "Region & Model Parameters",
+                        subtitle = if (csc.enabled && csc.salesCode.isNotBlank()) {
+                            if (isZh) "当前伪装: ${csc.salesCode} · ${csc.countryCode} (MCC ${csc.simMcc}) | 出厂: $rawSalesCode"
+                            else "Spoofed: ${csc.salesCode} · ${csc.countryCode} (MCC ${csc.simMcc}) | Factory: $rawSalesCode"
+                        } else {
+                            if (isZh) "当前出厂原生区域: $rawSalesCode (MCC $rawSimOperator)"
+                            else "Native factory region: $rawSalesCode (MCC $rawSimOperator)"
+                        },
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            QUICK_REGION_PRESETS.chunked(3).forEach { rowPresets ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    rowPresets.forEach { preset ->
+                                        val isCurrent = csc.enabled && csc.salesCode.equals(preset.salesCode, ignoreCase = true)
+                                        val bgColor = if (isCurrent) {
+                                            IosGlassTokens.activeTileBg()
+                                        } else {
+                                            MiuixTheme.colorScheme.secondaryContainer.copy(alpha = 0.65f)
+                                        }
+                                        val fgColor = if (isCurrent) {
+                                            IosGlassTokens.activeTileFg()
+                                        } else {
+                                            MiuixTheme.colorScheme.onSurface
+                                        }
+                                        Column(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .background(bgColor)
+                                                .clickable {
+                                                    haptics.tap()
+                                                    showPresetConfirmDialog = preset
+                                                }
+                                                .padding(horizontal = 8.dp, vertical = 7.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.spacedBy(1.dp),
+                                        ) {
+                                            Text(
+                                                text = "${preset.flag} ${if (isZh) preset.labelZh else preset.labelEn}",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = fgColor,
+                                                maxLines = 1,
+                                            )
+                                            Text(
+                                                text = "${preset.salesCode} · ${preset.simMcc}",
+                                                fontSize = 10.sp,
+                                                color = fgColor.copy(alpha = 0.78f),
+                                                maxLines = 1,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+
+                        OneUiItemRow(
+                            title = stringResource(R.string.search_all_csc_btn),
+                            subtitle = stringResource(R.string.search_all_csc_desc),
+                            icon = Icons.Default.Search,
+                            iconTint = IosGlassTokens.IosPurple,
+                            trailingValue = csc.salesCode.ifBlank { rawSalesCode },
+                            showChevron = true,
+                            onClick = onOpenSearch,
+                        )
+
+                        OneUiItemRow(
+                            title = stringResource(R.string.action_restore_factory),
+                            subtitle = stringResource(R.string.factory_baseline_format, rawSalesCode, rawSimOperator),
+                            icon = Icons.Default.Restore,
+                            iconTint = IosGlassTokens.IosAmber,
+                            showChevron = true,
+                            onClick = {
+                                haptics.confirm()
+                                StoreCleaner.restoreNativeTelephonyProps()
+                                updateCsc(context.getString(R.string.restore_factory_success, rawSalesCode)) {
+                                    it.copy(
+                                        enabled = false,
+                                        salesCode = nativeInfo.salesCode,
+                                        countryCode = nativeInfo.countryCode,
+                                        simMcc = nativeInfo.simMcc,
+                                        simMnc = "",
+                                        simNumeric = "",
+                                        simOperatorName = "",
+                                        simCountryIso = "",
+                                        marketUnlockRaw = "",
+                                        spoofSimInfo = false,
+                                        spoofDevice = false,
+                                    )
+                                }
+                            },
+                        )
+
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+
+                        OneUiItemRow(
+                            title = if (isZh) "选择伪装机型 (126款)" else "Target Device Model (126)",
+                            subtitle = if (isZh) "修改 Build.MODEL / DEVICE / PRODUCT" else "Spoof Build.MODEL / DEVICE / PRODUCT",
+                            icon = Icons.Default.Smartphone,
+                            iconTint = IosGlassTokens.IosBlue,
+                            trailingValue = csc.deviceName.ifBlank { Build.MODEL },
+                            showChevron = true,
+                            onClick = { showDeviceModelPicker = true },
+                        )
+
+                        OneUiItemRow(
+                            title = if (isZh) "机型伪装生效应用" else "Model Spoof Target Apps",
+                            subtitle = if (csc.deviceTargetFilterEnabled && csc.deviceTargetPackages.isNotEmpty()) {
+                                stringResource(R.string.apps_count_applied, csc.deviceTargetPackages.size)
+                            } else {
+                                stringResource(R.string.all_scopes_applied)
+                            },
+                            icon = Icons.Default.Apps,
+                            iconTint = IosGlassTokens.IosTeal,
+                            trailingValue = if (csc.deviceTargetFilterEnabled && csc.deviceTargetPackages.isNotEmpty()) {
+                                if (isZh) "${csc.deviceTargetPackages.size} 个应用" else "${csc.deviceTargetPackages.size} Apps"
+                            } else {
+                                if (isZh) "全部应用" else "All Apps"
+                            },
+                            showChevron = true,
+                            onClick = { showDeviceTargetPicker = true },
+                        )
+                    }
+                }
+
+                PANEL_STEPS -> {
+                    val currentMult = tuning.stepMultiplier.coerceIn(1, 1000)
+                    val currentCap = tuning.stepMaximum.coerceIn(1, 1_000_000)
+                    val calc1k = (1000 * currentMult).coerceAtMost(currentCap)
+                    val calc3k = (3000 * currentMult).coerceAtMost(currentCap)
+                    val calc5k = (5000 * currentMult).coerceAtMost(currentCap)
+
+                    OneUiIslandCard(
+                        title = stringResource(R.string.step_simulator_title),
+                        subtitle = if (tuning.stepEnabled) {
+                            stringResource(R.string.step_auto_mode_desc)
+                        } else {
+                            stringResource(R.string.wechat_steps_off_hint)
+                        },
+                    ) {
+                        // 模式切换：固定倍率 vs 自动递增
+                        OneUiSegmentedControl(
+                            items = listOf(false, true),
+                            selectedItem = tuning.stepAuto,
+                            onSelect = { auto ->
+                                updateTuning { it.copy(stepAuto = auto) }
+                            },
+                            label = { auto ->
+                                if (auto) {
+                                    if (isZh) "自动递增模式" else "Auto Increment"
+                                } else {
+                                    if (isZh) "固定倍率模式" else "Fixed Multiplier"
+                                }
+                            },
+                        )
+
+                        // 4 档常用倍率快捷选择（点击即切换倍率并实时刷新下方步数换算）
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
-                            rowPresets.forEach { preset ->
-                                val isCurrent = csc.enabled && csc.salesCode.equals(preset.salesCode, ignoreCase = true)
-                                val bgColor = if (isCurrent) {
+                            STEP_TIER_PRESETS.forEach { tier ->
+                                val isSelected = currentMult == tier.multiplier
+                                val bgColor = if (isSelected) {
                                     IosGlassTokens.activeTileBg()
                                 } else {
                                     MiuixTheme.colorScheme.secondaryContainer.copy(alpha = 0.65f)
                                 }
-                                val fgColor = if (isCurrent) {
+                                val fgColor = if (isSelected) {
                                     IosGlassTokens.activeTileFg()
                                 } else {
                                     MiuixTheme.colorScheme.onSurface
@@ -555,290 +759,248 @@ fun DashboardScreen(
                                 Column(
                                     modifier = Modifier
                                         .weight(1f)
-                                        .clip(RoundedCornerShape(12.dp))
+                                        .clip(RoundedCornerShape(10.dp))
                                         .background(bgColor)
                                         .clickable {
                                             haptics.tap()
-                                            showPresetConfirmDialog = preset
+                                            multiplier = tier.multiplier.toString()
+                                            maximum = tier.recommendedCap.toString()
+                                            updateTuning {
+                                                it.copy(
+                                                    stepEnabled = true,
+                                                    stepMultiplier = tier.multiplier,
+                                                    stepMaximum = tier.recommendedCap,
+                                                )
+                                            }
                                         }
-                                        .padding(horizontal = 8.dp, vertical = 7.dp),
+                                        .padding(vertical = 7.dp, horizontal = 4.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.spacedBy(1.dp),
                                 ) {
                                     Text(
-                                        text = "${preset.flag} ${if (isZh) preset.labelZh else preset.labelEn}",
+                                        text = if (isZh) tier.titleZh else tier.titleEn,
                                         fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium,
+                                        fontWeight = FontWeight.SemiBold,
                                         color = fgColor,
                                         maxLines = 1,
                                     )
                                     Text(
-                                        text = "${preset.salesCode} · ${preset.simMcc}",
-                                        fontSize = 10.sp,
-                                        color = fgColor.copy(alpha = 0.78f),
+                                        text = if (tuning.stepAuto) {
+                                            "+${tier.multiplier}/${if (isZh) "次" else "ev"}"
+                                        } else {
+                                            "1k→${(tier.multiplier).coerceAtMost(tier.recommendedCap / 1000)}k"
+                                        },
+                                        fontSize = 9.5.sp,
+                                        color = fgColor.copy(alpha = 0.80f),
                                         maxLines = 1,
                                     )
                                 }
                             }
                         }
+
+                        // 实时步数换算预览卡（展示不同档位/实际步数对应的微信步数结果）
+                        val primaryCalcText = if (tuning.stepAuto) {
+                            stringResource(R.string.step_simulator_auto_calc, currentMult, currentCap)
+                        } else {
+                            stringResource(R.string.step_simulator_calc, calc1k)
+                        }
+                        val multiTierCalcText = if (tuning.stepAuto) {
+                            val eventsFor10k = (10000 / currentMult).coerceAtLeast(1)
+                            val eventsForCap = (currentCap / currentMult).coerceAtLeast(1)
+                            if (isZh) {
+                                "$primaryCalcText\n· 累计触发 ${numFmt.format(eventsFor10k)} 次 ≈ 10,000 步 ｜ 触发 ${numFmt.format(eventsForCap)} 次达封顶 ${numFmt.format(currentCap)} 步"
+                            } else {
+                                "$primaryCalcText\n· ${numFmt.format(eventsFor10k)} events ≈ 10k steps | ${numFmt.format(eventsForCap)} events hits cap ${numFmt.format(currentCap)}"
+                            }
+                        } else {
+                            if (isZh) {
+                                "$primaryCalcText\n· 实走 3,000 步 ≈ ${numFmt.format(calc3k)} 步 ｜ 实走 5,000 步 ≈ ${numFmt.format(calc5k)} 步（上限 ${numFmt.format(currentCap)}）"
+                            } else {
+                                "$primaryCalcText\n· Walk 3k ≈ ${numFmt.format(calc3k)} | Walk 5k ≈ ${numFmt.format(calc5k)} (Cap ${numFmt.format(currentCap)})"
+                            }
+                        }
+                        OneUiNoticeBanner(
+                            text = multiTierCalcText,
+                            contentColor = IosGlassTokens.IosBlue,
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            TextField(
+                                value = multiplier,
+                                onValueChange = { raw ->
+                                    val digits = raw.filter(Char::isDigit).take(4)
+                                    multiplier = digits
+                                    digits.toIntOrNull()?.let { v ->
+                                        updateTuning { it.copy(stepMultiplier = v.coerceIn(1, 1000)) }
+                                    }
+                                },
+                                label = stringResource(R.string.step_multiplier),
+                                singleLine = true,
+                                insideMargin = DpSize(10.dp, 10.dp),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.weight(1f),
+                            )
+
+                            TextField(
+                                value = endHour,
+                                onValueChange = { raw ->
+                                    val digits = raw.filter(Char::isDigit).take(2)
+                                    endHour = digits
+                                    digits.toIntOrNull()?.let { v ->
+                                        updateTuning { it.copy(stepEndHour = v.coerceIn(0, 24)) }
+                                    }
+                                },
+                                label = if (isZh) "截止时间(0-24点)" else "Stop Hour(0-24)",
+                                singleLine = true,
+                                insideMargin = DpSize(10.dp, 10.dp),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+
+                        TextField(
+                            value = maximum,
+                            onValueChange = { raw ->
+                                val digits = raw.filter(Char::isDigit).take(7)
+                                maximum = digits
+                                digits.toIntOrNull()?.let { v ->
+                                    updateTuning { it.copy(stepMaximum = v.coerceIn(1, 1_000_000)) }
+                                }
+                            },
+                            label = stringResource(R.string.step_maximum),
+                            singleLine = true,
+                            insideMargin = DpSize(10.dp, 10.dp),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+
+                        OneUiNoticeBanner(
+                            text = stringResource(R.string.step_cap_desc),
+                            contentColor = IosGlassTokens.IosGreen,
+                        )
                     }
                 }
 
-                HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
-
-                OneUiItemRow(
-                    title = stringResource(R.string.search_all_csc_btn),
-                    subtitle = stringResource(R.string.search_all_csc_desc),
-                    icon = Icons.Default.Search,
-                    iconTint = IosGlassTokens.IosPurple,
-                    trailingValue = csc.salesCode.ifBlank { rawSalesCode },
-                    showChevron = true,
-                    onClick = onOpenSearch,
-                )
-
-                OneUiItemRow(
-                    title = stringResource(R.string.action_restore_factory),
-                    subtitle = stringResource(R.string.factory_baseline_format, rawSalesCode, rawSimOperator),
-                    icon = Icons.Default.Restore,
-                    iconTint = IosGlassTokens.IosAmber,
-                    showChevron = true,
-                    onClick = {
-                        haptics.confirm()
-                        StoreCleaner.restoreNativeTelephonyProps()
-                        updateCsc(context.getString(R.string.restore_factory_success, rawSalesCode)) {
-                            it.copy(
-                                enabled = false,
-                                salesCode = nativeInfo.salesCode,
-                                countryCode = nativeInfo.countryCode,
-                                simMcc = nativeInfo.simMcc,
-                                simMnc = "",
-                                simNumeric = "",
-                                simOperatorName = "",
-                                simCountryIso = "",
-                                marketUnlockRaw = "",
-                                spoofSimInfo = false,
-                                spoofDevice = false,
+                PANEL_POWER -> {
+                    OneUiIslandCard(
+                        title = if (isZh) "供电参数与快捷维护" else "Power & Quick Maintenance",
+                        subtitle = if (isZh) "亮屏快充超过 44.0°C 自动恢复原厂温控 · 旁路供电绕过电池直供主板"
+                        else "Fast charge 44.0°C safety cutoff · Bypass power feeds board directly",
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = stringResource(R.string.pass_through_threshold_desc, passThroughSlider.toInt()),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MiuixTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                text = "${passThroughSlider.toInt()}%",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = IosGlassTokens.IosBlue,
                             )
                         }
-                    },
-                )
 
-                HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+                        Slider(
+                            value = passThroughSlider,
+                            onValueChange = { passThroughSlider = it },
+                            onValueChangeFinished = {
+                                val limit = passThroughSlider.toInt().coerceIn(0, 100)
+                                updateTuning { it.copy(passThroughLimit = limit) }
+                            },
+                            valueRange = 0f..100f,
+                            steps = 19,
+                            showKeyPoints = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 4.dp),
+                        )
 
-                OneUiItemRow(
-                    title = if (isZh) "选择伪装机型 (126款)" else "Target Device Model (126)",
-                    subtitle = if (isZh) "修改 Build.MODEL / DEVICE / PRODUCT" else "Spoof Build.MODEL / DEVICE / PRODUCT",
-                    icon = Icons.Default.Smartphone,
-                    iconTint = IosGlassTokens.IosBlue,
-                    trailingValue = csc.deviceName.ifBlank { Build.MODEL },
-                    showChevron = true,
-                    onClick = { showDeviceModelPicker = true },
-                )
-
-                OneUiItemRow(
-                    title = if (isZh) "机型伪装生效应用" else "Model Spoof Target Apps",
-                    subtitle = if (csc.deviceTargetFilterEnabled && csc.deviceTargetPackages.isNotEmpty()) {
-                        stringResource(R.string.apps_count_applied, csc.deviceTargetPackages.size)
-                    } else {
-                        stringResource(R.string.all_scopes_applied)
-                    },
-                    icon = Icons.Default.Apps,
-                    iconTint = IosGlassTokens.IosTeal,
-                    trailingValue = if (csc.deviceTargetFilterEnabled && csc.deviceTargetPackages.isNotEmpty()) {
-                        if (isZh) "${csc.deviceTargetPackages.size} 个应用" else "${csc.deviceTargetPackages.size} Apps"
-                    } else {
-                        if (isZh) "全部应用" else "All Apps"
-                    },
-                    showChevron = true,
-                    onClick = { showDeviceTargetPicker = true },
-                )
-            }
-
-            // 第四层：计步与供电参数配置（无重复开关，直接调整参数与阈值）
-            OneUiIslandCard(
-                title = if (isZh) "计步与供电参数" else "Steps & Power Parameters",
-                subtitle = if (isZh) "亮屏快充超过 44.0°C 自动安全熔断恢复原厂温控" else "Auto 44.0°C thermal safety cutoff for fast charge",
-            ) {
-                OneUiItemRow(
-                    title = stringResource(R.string.step_auto_mode),
-                    subtitle = stringResource(R.string.step_auto_mode_desc),
-                    icon = Icons.AutoMirrored.Filled.DirectionsRun,
-                    iconTint = IosGlassTokens.IosBlue,
-                    trailingValue = if (tuning.stepAuto) {
-                        if (isZh) "自动递增" else "Auto"
-                    } else {
-                        if (isZh) "固定倍率" else "Fixed"
-                    },
-                    showChevron = true,
-                    onClick = {
-                        updateTuning { it.copy(stepAuto = !it.stepAuto) }
-                    },
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    TextField(
-                        value = multiplier,
-                        onValueChange = { raw ->
-                            val digits = raw.filter(Char::isDigit).take(4)
-                            multiplier = digits
-                            digits.toIntOrNull()?.let { v ->
-                                updateTuning { it.copy(stepMultiplier = v.coerceIn(1, 1000)) }
-                            }
-                        },
-                        label = if (isZh) "倍率" else "Rate",
-                        singleLine = true,
-                        insideMargin = DpSize(10.dp, 10.dp),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(0.9f),
-                    )
-
-                    TextField(
-                        value = maximum,
-                        onValueChange = { raw ->
-                            val digits = raw.filter(Char::isDigit).take(7)
-                            maximum = digits
-                            digits.toIntOrNull()?.let { v ->
-                                updateTuning { it.copy(stepMaximum = v.coerceIn(1, 1_000_000)) }
-                            }
-                        },
-                        label = if (isZh) "每日封顶步数" else "Daily Cap",
-                        singleLine = true,
-                        insideMargin = DpSize(10.dp, 10.dp),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1.3f),
-                    )
-
-                    TextField(
-                        value = endHour,
-                        onValueChange = { raw ->
-                            val digits = raw.filter(Char::isDigit).take(2)
-                            endHour = digits
-                            digits.toIntOrNull()?.let { v ->
-                                updateTuning { it.copy(stepEndHour = v.coerceIn(0, 24)) }
-                            }
-                        },
-                        label = if (isZh) "截止(h)" else "End(h)",
-                        singleLine = true,
-                        insideMargin = DpSize(10.dp, 10.dp),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(0.9f),
-                    )
-                }
-
-                HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = if (isZh) "旁路供电触发阈值" else "Bypass Power Threshold",
-                        fontSize = 12.5.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MiuixTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = "${passThroughSlider.toInt()}%",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = IosGlassTokens.IosBlue,
-                    )
-                }
-
-                Slider(
-                    value = passThroughSlider,
-                    onValueChange = { passThroughSlider = it },
-                    onValueChangeFinished = {
-                        val limit = passThroughSlider.toInt().coerceIn(0, 100)
-                        updateTuning { it.copy(passThroughLimit = limit) }
-                    },
-                    valueRange = 0f..100f,
-                    steps = 19,
-                    showKeyPoints = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 4.dp),
-                )
-
-                OneUiItemRow(
-                    title = stringResource(R.string.choose_pass_through_apps),
-                    subtitle = if (selectedPassApps.isEmpty()) stringResource(R.string.choose_apps_none)
-                    else stringResource(R.string.choose_apps_count, selectedPassApps.size),
-                    icon = Icons.Default.BatteryChargingFull,
-                    iconTint = IosGlassTokens.IosGreen,
-                    trailingValue = if (selectedPassApps.isEmpty()) {
-                        if (isZh) "未选择" else "None"
-                    } else {
-                        if (isZh) "${selectedPassApps.size} 个应用" else "${selectedPassApps.size} Apps"
-                    },
-                    showChevron = true,
-                    onClick = { showPassAppPicker = true },
-                )
-            }
-
-            // 第五层：快捷维护双列动作卡
-            MiuixSectionTitle(
-                title = if (isZh) "快捷维护" else "Quick Actions",
-                trailingText = if (isZh) "点击立即执行" else "Tap to run",
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                MiuixMetricCard(
-                    valueText = if (isZh) "重置商店" else "Reset Store",
-                    labelText = if (isZh) "清理缓存重判区" else "Clear store cache",
-                    icon = Icons.Default.CleaningServices,
-                    accentColor = IosGlassTokens.IosPurple,
-                    modifier = Modifier.weight(1f),
-                    onClick = {
-                        haptics.confirm()
-                        scope.launch {
-                            val ok = withContext(Dispatchers.IO) { StoreCleaner.clearStoreDataRoot() }
-                            if (ok) {
-                                RegionApplyState.markApplied(context)
-                                regionCleanupPending = false
-                                snackbar.showSnackbar(context.getString(R.string.clear_store_success))
+                        OneUiItemRow(
+                            title = stringResource(R.string.choose_pass_through_apps),
+                            subtitle = if (selectedPassApps.isEmpty()) stringResource(R.string.choose_apps_none)
+                            else stringResource(R.string.choose_apps_count, selectedPassApps.size),
+                            icon = Icons.Default.BatteryChargingFull,
+                            iconTint = IosGlassTokens.IosGreen,
+                            trailingValue = if (selectedPassApps.isEmpty()) {
+                                if (isZh) "未选择" else "None"
                             } else {
-                                snackbar.showSnackbar(context.getString(R.string.clear_store_fail))
-                            }
-                        }
-                    },
-                )
+                                if (isZh) "${selectedPassApps.size} 个应用" else "${selectedPassApps.size} Apps"
+                            },
+                            showChevron = true,
+                            onClick = { showPassAppPicker = true },
+                        )
 
-                MiuixMetricCard(
-                    valueText = if (isZh) "重启微信" else "Restart WeChat",
-                    labelText = if (isZh) "强停并重新拉起" else "Force stop & launch",
-                    icon = Icons.Default.Refresh,
-                    accentColor = IosGlassTokens.IosTeal,
-                    modifier = Modifier.weight(1f),
-                    onClick = {
-                        haptics.confirm()
-                        scope.launch {
-                            val code = withContext(Dispatchers.IO) {
-                                RootShell.exec(
-                                    "am force-stop com.tencent.mm && monkey -p com.tencent.mm -c android.intent.category.LAUNCHER 1"
-                                ).first
-                            }
-                            val msg = if (code == 0) {
-                                context.getString(R.string.restart_wechat_done)
-                            } else {
-                                context.getString(R.string.restart_wechat_failed)
-                            }
-                            snackbar.showSnackbar(msg)
+                        if (tuning.brightScreenFastCharge) {
+                            OneUiNoticeBanner(
+                                text = stringResource(R.string.fast_charge_warning),
+                                containerColor = OneUiTokens.WarningAmberContainerLight,
+                                contentColor = IosGlassTokens.IosAmber,
+                            )
                         }
-                    },
-                )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        MiuixMetricCard(
+                            valueText = if (isZh) "重置商店" else "Reset Store",
+                            labelText = if (isZh) "清理缓存重判区" else "Clear store cache",
+                            icon = Icons.Default.CleaningServices,
+                            accentColor = IosGlassTokens.IosPurple,
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                haptics.confirm()
+                                scope.launch {
+                                    val ok = withContext(Dispatchers.IO) { StoreCleaner.clearStoreDataRoot() }
+                                    if (ok) {
+                                        RegionApplyState.markApplied(context)
+                                        regionCleanupPending = false
+                                        snackbar.showSnackbar(context.getString(R.string.clear_store_success))
+                                    } else {
+                                        snackbar.showSnackbar(context.getString(R.string.clear_store_fail))
+                                    }
+                                }
+                            },
+                        )
+
+                        MiuixMetricCard(
+                            valueText = if (isZh) "重启微信" else "Restart WeChat",
+                            labelText = if (isZh) "强停并重新拉起" else "Force stop & launch",
+                            icon = Icons.Default.Refresh,
+                            accentColor = IosGlassTokens.IosTeal,
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                haptics.confirm()
+                                scope.launch {
+                                    val code = withContext(Dispatchers.IO) {
+                                        RootShell.exec(
+                                            "am force-stop com.tencent.mm && monkey -p com.tencent.mm -c android.intent.category.LAUNCHER 1"
+                                        ).first
+                                    }
+                                    val msg = if (code == 0) {
+                                        context.getString(R.string.restart_wechat_done)
+                                    } else {
+                                        context.getString(R.string.restart_wechat_failed)
+                                    }
+                                    snackbar.showSnackbar(msg)
+                                }
+                            },
+                        )
+                    }
+                }
             }
-
-            Spacer(modifier = Modifier.height(8.dp))
         }
     }
 
