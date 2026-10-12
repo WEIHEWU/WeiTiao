@@ -1,69 +1,67 @@
 package com.weitiao.tuning.ui.screens
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.BatteryManager
+import android.os.Build
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.DirectionsRun
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CleaningServices
-import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Power
 import androidx.compose.material.icons.filled.Public
-import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Smartphone
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.weitiao.tuning.App
+import com.weitiao.tuning.BuildConfig
 import com.weitiao.tuning.R
+import com.weitiao.tuning.core.CscConfig
 import com.weitiao.tuning.core.CscPrefs
 import com.weitiao.tuning.core.HookLiveness
-import com.weitiao.tuning.core.LanguageManager
 import com.weitiao.tuning.core.NativeDevice
 import com.weitiao.tuning.core.RegionApplyState
 import com.weitiao.tuning.core.RootShell
 import com.weitiao.tuning.core.StoreCleaner
+import com.weitiao.tuning.core.TuningConfig
 import com.weitiao.tuning.core.TuningPrefs
 import com.weitiao.tuning.ui.components.IosGlassTokens
+import com.weitiao.tuning.ui.components.MiuixHeroStatusCard
+import com.weitiao.tuning.ui.components.MiuixMetricCard
 import com.weitiao.tuning.ui.components.MiuixPageScaffold
-import com.weitiao.tuning.ui.components.OneUiBadge
-import com.weitiao.tuning.ui.components.OneUiIslandCard
-import com.weitiao.tuning.ui.components.OneUiItemRow
+import com.weitiao.tuning.ui.components.MiuixQuickTile
+import com.weitiao.tuning.ui.components.MiuixSectionTitle
 import com.weitiao.tuning.ui.components.OneUiNoticeBanner
 import com.weitiao.tuning.ui.components.rememberOneUiHaptics
 import com.weitiao.tuning.ui.theme.OneUiTokens
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import top.yukonga.miuix.kmp.basic.HorizontalDivider
-import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
-import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 private enum class ModuleState { NOT_CONNECTED, NO_SCOPE, ACTIVE }
 
@@ -72,11 +70,14 @@ fun DashboardScreen(
     refreshTrigger: Int = 0,
     onOpenSpoof: () -> Unit,
     onOpenTuning: () -> Unit,
+    onOpenSettings: () -> Unit = {},
+    onConfigChanged: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val haptics = rememberOneUiHaptics()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val isZh = remember { Locale.getDefault().language.startsWith("zh") }
 
     val nativeInfo = remember { NativeDevice.detect(context) }
     var csc by remember { mutableStateOf(CscPrefs.load(context)) }
@@ -93,6 +94,37 @@ fun DashboardScreen(
 
     var rawSalesCode by remember { mutableStateOf(nativeInfo.salesCode) }
     var rawSimOperator by remember { mutableStateOf(nativeInfo.simMcc) }
+
+    // 实时电池温度与充电状态监听
+    var batteryTemp by remember { mutableFloatStateOf(34.5f) }
+    var batteryLevel by remember { mutableIntStateOf(80) }
+    var isPlugged by remember { mutableStateOf(false) }
+
+    DisposableEffect(context) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context?, intent: Intent?) {
+                intent ?: return
+                val tempTenths = intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 345)
+                batteryTemp = tempTenths / 10f
+                val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, 80)
+                val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1)
+                batteryLevel = (level * 100) / scale
+                val plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0)
+                isPlugged = plugged != 0
+            }
+        }
+        val sticky = context.registerReceiver(receiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        if (sticky != null) {
+            batteryTemp = sticky.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 345) / 10f
+            val level = sticky.getIntExtra(BatteryManager.EXTRA_LEVEL, 80)
+            val scale = sticky.getIntExtra(BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1)
+            batteryLevel = (level * 100) / scale
+            isPlugged = sticky.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
+        }
+        onDispose {
+            runCatching { context.unregisterReceiver(receiver) }
+        }
+    }
 
     fun refreshModuleState() {
         if (App.getXposedService() == null && App.getRemotePrefs() == null) {
@@ -120,6 +152,20 @@ fun DashboardScreen(
         refreshModuleState()
     }
 
+    fun updateTuning(block: (TuningConfig) -> TuningConfig) {
+        val next = block(tuning)
+        tuning = next
+        TuningPrefs.save(context, next)
+        onConfigChanged()
+    }
+
+    fun updateCsc(block: (CscConfig) -> CscConfig) {
+        val next = block(csc)
+        csc = next
+        CscPrefs.save(context, next)
+        onConfigChanged()
+    }
+
     LaunchedEffect(refreshTrigger) {
         refreshState()
     }
@@ -135,34 +181,13 @@ fun DashboardScreen(
         }
     }
 
-    val activeTuningCount = listOf(
-        tuning.stepEnabled,
-        tuning.antiRecall,
-        tuning.brightScreenFastCharge,
-        tuning.passThrough,
-    ).count { it }
+    val isServiceReady = moduleState == ModuleState.ACTIVE || hasRoot
+    val enabledText = if (isZh) "已启用" else "Enabled"
+    val disabledText = if (isZh) "未启用" else "Disabled"
 
     MiuixPageScaffold(
         title = stringResource(R.string.topbar_title),
-        subtitle = stringResource(R.string.dashboard_subtitle),
         snackbarHostState = snackbar,
-        actions = {
-            IconButton(
-                onClick = {
-                    haptics.tap()
-                    LanguageManager.toggle(context)
-                    LanguageManager.recreateActivity(context)
-                },
-                backgroundColor = MiuixTheme.colorScheme.secondaryContainer,
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Language,
-                    contentDescription = stringResource(R.string.switch_language),
-                    tint = MiuixTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp),
-                )
-            }
-        },
     ) {
         Column(
             modifier = Modifier
@@ -191,186 +216,267 @@ fun DashboardScreen(
                 )
             }
 
-            // 智能中枢 Hero 状态总览大卡片
-            OneUiIslandCard(
-                contentPadding = 16.dp,
+            // 第一层：主状态横幅大卡（带右下角超大半裁切圆环对勾水印）
+            val modeLabel = if (moduleState == ModuleState.ACTIVE) {
+                if (isZh) "LSPosed 推荐模式" else "LSPosed Mode"
+            } else {
+                if (isZh) "Root 硬件直控" else "Root Mode"
+            }
+            MiuixHeroStatusCard(
+                statusTitle = when {
+                    moduleState == ModuleState.ACTIVE -> if (isZh) "运行中" else "Active"
+                    hasRoot -> if (isZh) "Root 就绪" else "Root Ready"
+                    else -> if (isZh) "待激活" else "Standby"
+                },
+                pillText = "v${BuildConfig.VERSION_NAME}",
+                line1Text = if (isZh) {
+                    "版本 v${BuildConfig.VERSION_NAME} · $modeLabel · 服务运行正常"
+                } else {
+                    "v${BuildConfig.VERSION_NAME} · $modeLabel · Running normally"
+                },
+                line2Text = if (isZh) {
+                    "物理 SIM 与基带 100% 原生免注入 · 实时状态已同步"
+                } else {
+                    "Physical SIM & baseband 100% native · Live synced"
+                },
+                isWarning = !isServiceReady,
+                onClick = onOpenSettings,
+            )
+
+            // 第二层：3×2 快捷状态磁贴网格（点亮即变柔和天蓝底 #E7F0FD + 小米蓝字 #267AF6）
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                val statusColor = when (moduleState) {
-                    ModuleState.ACTIVE -> IosGlassTokens.IosGreen
-                    ModuleState.NO_SCOPE -> IosGlassTokens.IosAmber
-                    ModuleState.NOT_CONNECTED -> IosGlassTokens.IosRed
-                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(IosGlassTokens.IosIconCorner)
-                            .background(
-                                when (moduleState) {
-                                    ModuleState.ACTIVE -> Brush.linearGradient(listOf(IosGlassTokens.IosGreen, Color(0xFF28CD41)))
-                                    ModuleState.NO_SCOPE -> Brush.linearGradient(listOf(IosGlassTokens.IosAmber, Color(0xFFFF9F0A)))
-                                    ModuleState.NOT_CONNECTED -> Brush.linearGradient(listOf(IosGlassTokens.IosRed, Color(0xFFFF453A)))
-                                }
-                            ),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Security,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = when (moduleState) {
-                                ModuleState.ACTIVE -> stringResource(R.string.lsposed_ready)
-                                ModuleState.NO_SCOPE -> stringResource(R.string.lsposed_scope_missing)
-                                ModuleState.NOT_CONNECTED -> stringResource(R.string.lsposed_not_ready)
-                            },
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MiuixTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            text = when (moduleState) {
-                                ModuleState.ACTIVE -> stringResource(R.string.lsposed_ready_desc, heartbeatCount)
-                                ModuleState.NO_SCOPE -> stringResource(R.string.lsposed_scope_missing_desc)
-                                ModuleState.NOT_CONNECTED -> stringResource(R.string.lsposed_not_ready_desc)
-                            },
-                            fontSize = 13.sp,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-
-                    OneUiBadge(
-                        text = when (moduleState) {
-                            ModuleState.ACTIVE -> stringResource(R.string.badge_active)
-                            ModuleState.NO_SCOPE -> stringResource(R.string.badge_no_scope)
-                            ModuleState.NOT_CONNECTED -> stringResource(R.string.badge_not_connected)
+                    MiuixQuickTile(
+                        label = if (isZh) "商店跨区" else "Store Region",
+                        statusText = if (csc.enabled && csc.salesCode.isNotBlank()) enabledText else disabledText,
+                        icon = Icons.Default.Public,
+                        active = csc.enabled && csc.salesCode.isNotBlank(),
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            if (csc.salesCode.isNotBlank()) {
+                                updateCsc { it.copy(enabled = !it.enabled) }
+                            } else {
+                                onOpenSpoof()
+                            }
                         },
-                        color = statusColor,
+                    )
+                    MiuixQuickTile(
+                        label = if (isZh) "机型伪装" else "Device Spoof",
+                        statusText = if (csc.spoofDevice) enabledText else disabledText,
+                        icon = Icons.Default.Smartphone,
+                        active = csc.spoofDevice,
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            if (csc.deviceName.isNotBlank()) {
+                                updateCsc { it.copy(spoofDevice = !it.spoofDevice) }
+                            } else {
+                                onOpenSpoof()
+                            }
+                        },
+                    )
+                    MiuixQuickTile(
+                        label = if (isZh) "微信计步" else "WeChat Steps",
+                        statusText = if (tuning.stepEnabled) enabledText else disabledText,
+                        icon = Icons.AutoMirrored.Filled.DirectionsRun,
+                        active = tuning.stepEnabled,
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            updateTuning { it.copy(stepEnabled = !it.stepEnabled) }
+                        },
                     )
                 }
 
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 8.dp),
-                )
-
-                // 实时状态网格
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    StatusTile(
+                    MiuixQuickTile(
+                        label = if (isZh) "消息防撤回" else "Anti-Recall",
+                        statusText = if (tuning.antiRecall) enabledText else disabledText,
+                        icon = Icons.Default.Shield,
+                        active = tuning.antiRecall,
                         modifier = Modifier.weight(1f),
-                        label = stringResource(R.string.status_csc_label),
-                        value = if (csc.enabled && csc.salesCode.isNotBlank()) csc.salesCode else "$rawSalesCode (${stringResource(R.string.native_device)})",
-                        isHighlight = csc.enabled,
+                        onClick = {
+                            updateTuning { it.copy(antiRecall = !it.antiRecall) }
+                        },
                     )
-                    StatusTile(
+                    MiuixQuickTile(
+                        label = if (isZh) "亮屏快充" else "Fast Charge",
+                        statusText = if (tuning.brightScreenFastCharge) enabledText else disabledText,
+                        icon = Icons.Default.Bolt,
+                        active = tuning.brightScreenFastCharge,
                         modifier = Modifier.weight(1f),
-                        label = stringResource(R.string.status_model_label),
-                        value = if (csc.enabled && csc.spoofDevice && csc.deviceName.isNotBlank()) csc.deviceName else stringResource(R.string.native_device),
-                        isHighlight = csc.enabled && csc.spoofDevice,
+                        onClick = {
+                            updateTuning { it.copy(brightScreenFastCharge = !it.brightScreenFastCharge) }
+                        },
                     )
-                    StatusTile(
+                    MiuixQuickTile(
+                        label = if (isZh) "旁路供电" else "Bypass Power",
+                        statusText = if (tuning.passThrough) enabledText else disabledText,
+                        icon = Icons.Default.Power,
+                        active = tuning.passThrough,
                         modifier = Modifier.weight(1f),
-                        label = stringResource(R.string.status_tuning_label),
-                        value = if (activeTuningCount > 0) stringResource(R.string.items_active, activeTuningCount) else stringResource(R.string.disabled),
-                        isHighlight = activeTuningCount > 0,
+                        onClick = {
+                            updateTuning { it.copy(passThrough = !it.passThrough) }
+                        },
                     )
                 }
             }
 
-            // 核心业务入口列表（Miuix SuperArrow）
-            OneUiIslandCard(
-                title = stringResource(R.string.section_features),
-                contentPadding = 10.dp,
+            // 第三层：2×2 马卡龙柔和图标 + 大数字/大核心值实时统计卡
+            MiuixSectionTitle(
+                title = if (isZh) "实时状态统计" else "Live Telemetry",
+                trailingText = if (isPlugged) {
+                    if (isZh) "⚡ 已接通电源 · $batteryLevel%" else "⚡ Plugged · $batteryLevel%"
+                } else {
+                    if (isZh) "🔋 电池供电 · $batteryLevel%" else "🔋 On Battery · $batteryLevel%"
+                },
+            )
+
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                OneUiItemRow(
-                    title = stringResource(R.string.dashboard_spoof_title),
-                    subtitle = buildString {
-                        if (csc.enabled) {
-                            append(stringResource(R.string.dashboard_spoof_enabled))
-                            if (csc.salesCode.isNotBlank()) append(" · ${csc.salesCode}")
-                            if (csc.spoofDevice && csc.deviceName.isNotBlank()) append(" · ${csc.deviceName}")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    MiuixMetricCard(
+                        valueText = if (csc.enabled && csc.salesCode.isNotBlank()) {
+                            "${csc.salesCode} · ${csc.countryCode}"
                         } else {
-                            append(stringResource(R.string.dashboard_spoof_disabled))
+                            rawSalesCode.ifBlank { "CHC" }
+                        },
+                        labelText = if (csc.enabled && csc.salesCode.isNotBlank()) {
+                            if (isZh) "伪装商店区域 (${csc.simMcc})" else "Spoofed Region (${csc.simMcc})"
+                        } else {
+                            if (isZh) "原生底包区域 ($rawSimOperator)" else "Native Region ($rawSimOperator)"
+                        },
+                        icon = Icons.Default.Public,
+                        accentColor = IosGlassTokens.IosGreen,
+                        modifier = Modifier.weight(1f),
+                        onClick = onOpenSpoof,
+                    )
+
+                    MiuixMetricCard(
+                        valueText = "${String.format(Locale.US, "%.1f", batteryTemp)} °C",
+                        labelText = if (tuning.brightScreenFastCharge) {
+                            if (isZh) "快充守护中 (44°C 熔断)" else "Fast Charge (44°C Cutoff)"
+                        } else {
+                            if (isZh) "实时电池温度" else "Battery Temperature"
+                        },
+                        icon = Icons.Default.Bolt,
+                        accentColor = IosGlassTokens.IosRed,
+                        modifier = Modifier.weight(1f),
+                        onClick = onOpenTuning,
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    MiuixMetricCard(
+                        valueText = if (tuning.stepEnabled) {
+                            if (tuning.stepAuto) {
+                                if (isZh) "自动递增" else "Auto Step"
+                            } else {
+                                "${tuning.stepMultiplier}x"
+                            }
+                        } else {
+                            if (isZh) "原生步数" else "Native Steps"
+                        },
+                        labelText = if (isZh) {
+                            "每日封顶 ${tuning.stepMaximum} 步"
+                        } else {
+                            "Daily Cap ${tuning.stepMaximum}"
+                        },
+                        icon = Icons.Default.Sync,
+                        accentColor = IosGlassTokens.IosBlue,
+                        modifier = Modifier.weight(1f),
+                        onClick = onOpenTuning,
+                    )
+
+                    MiuixMetricCard(
+                        valueText = if (csc.spoofDevice && csc.deviceName.isNotBlank()) {
+                            csc.deviceName
+                        } else {
+                            Build.MODEL
+                        },
+                        labelText = if (csc.spoofDevice) {
+                            if (isZh) "伪装机型 (${csc.deviceTargetPackages.size} 应用)" else "Spoofed (${csc.deviceTargetPackages.size} apps)"
+                        } else {
+                            if (isZh) "系统原生型号" else "Native Device Model"
+                        },
+                        icon = Icons.Default.Memory,
+                        accentColor = IosGlassTokens.IosAmber,
+                        modifier = Modifier.weight(1f),
+                        onClick = onOpenSpoof,
+                    )
+                }
+            }
+
+            // 第四层：快捷维护双列动作卡
+            MiuixSectionTitle(
+                title = if (isZh) "快捷维护" else "Quick Actions",
+                trailingText = if (isZh) "点击立即执行" else "Tap to run",
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                MiuixMetricCard(
+                    valueText = if (isZh) "重置商店" else "Reset Store",
+                    labelText = if (isZh) "清理缓存立即重判区" else "Clear store cache now",
+                    icon = Icons.Default.CleaningServices,
+                    accentColor = IosGlassTokens.IosPurple,
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        haptics.confirm()
+                        scope.launch {
+                            val ok = withContext(Dispatchers.IO) { StoreCleaner.clearStoreDataRoot() }
+                            if (ok) {
+                                RegionApplyState.markApplied(context)
+                                regionCleanupPending = false
+                                snackbar.showSnackbar(context.getString(R.string.clear_store_success))
+                            } else {
+                                snackbar.showSnackbar(context.getString(R.string.clear_store_fail))
+                            }
                         }
                     },
-                    icon = Icons.Default.Public,
-                    iconTint = IosGlassTokens.IosBlue,
-                    badgeText = if (csc.enabled) csc.salesCode.ifBlank { "ON" } else null,
-                    badgeColor = IosGlassTokens.IosBlue,
-                    showChevron = true,
-                    onClick = onOpenSpoof,
                 )
 
-                HorizontalDivider(
-                    modifier = Modifier.padding(start = 48.dp, end = 8.dp),
-                )
-
-                OneUiItemRow(
-                    title = stringResource(R.string.dashboard_tuning_title),
-                    subtitle = if (activeTuningCount == 0) stringResource(R.string.dashboard_tuning_none)
-                    else stringResource(R.string.dashboard_tuning_count, activeTuningCount),
-                    icon = Icons.Default.Tune,
-                    iconTint = IosGlassTokens.IosGreen,
-                    badgeText = if (activeTuningCount > 0) stringResource(R.string.items_active, activeTuningCount) else null,
-                    badgeColor = IosGlassTokens.IosGreen,
-                    showChevron = true,
-                    onClick = onOpenTuning,
+                MiuixMetricCard(
+                    valueText = if (isZh) "重启微信" else "Restart WeChat",
+                    labelText = if (isZh) "强停并自动拉起微信" else "Force stop & relaunch",
+                    icon = Icons.Default.Refresh,
+                    accentColor = IosGlassTokens.IosTeal,
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        haptics.confirm()
+                        scope.launch {
+                            val code = withContext(Dispatchers.IO) {
+                                RootShell.exec(
+                                    "am force-stop com.tencent.mm && monkey -p com.tencent.mm -c android.intent.category.LAUNCHER 1"
+                                ).first
+                            }
+                            val msg = if (code == 0) {
+                                context.getString(R.string.restart_wechat_done)
+                            } else {
+                                context.getString(R.string.restart_wechat_failed)
+                            }
+                            snackbar.showSnackbar(msg)
+                        }
+                    },
                 )
             }
-
-            Spacer(modifier = Modifier.height(24.dp))
         }
-    }
-}
-
-@Composable
-private fun StatusTile(
-    modifier: Modifier = Modifier,
-    label: String,
-    value: String,
-    isHighlight: Boolean,
-) {
-    val isDark = isSystemInDarkTheme()
-    val tileShape = RoundedCornerShape(12.dp)
-    Column(
-        modifier = modifier
-            .clip(tileShape)
-            .background(
-                if (isDark) MiuixTheme.colorScheme.surfaceContainerHighest
-                else MiuixTheme.colorScheme.surface
-            )
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        Text(
-            text = label,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Medium,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            text = value,
-            fontSize = 13.5.sp,
-            fontWeight = if (isHighlight) FontWeight.Bold else FontWeight.SemiBold,
-            color = if (isHighlight) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
     }
 }

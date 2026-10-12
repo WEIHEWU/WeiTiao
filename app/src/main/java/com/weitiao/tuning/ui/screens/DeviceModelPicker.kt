@@ -45,7 +45,7 @@ import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
-import top.yukonga.miuix.kmp.extra.WindowDialog
+import top.yukonga.miuix.kmp.extra.WindowBottomSheet
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 
@@ -88,7 +88,7 @@ fun DeviceModelPicker(
         }
     }
 
-    WindowDialog(
+    WindowBottomSheet(
         show = show,
         title = stringResource(R.string.choose_device_model, DeviceModels.ALL.size),
         onDismissRequest = onDismiss,

@@ -1,27 +1,20 @@
 package com.weitiao.tuning.ui.screens
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
+import android.os.Build
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -32,17 +25,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.weitiao.tuning.R
 import com.weitiao.tuning.core.CscConfig
 import com.weitiao.tuning.core.CscConstants
@@ -53,20 +40,20 @@ import com.weitiao.tuning.core.RegionApplyState
 import com.weitiao.tuning.core.StoreCleaner
 import com.weitiao.tuning.data.CscEntry
 import com.weitiao.tuning.ui.components.IosGlassTokens
+import com.weitiao.tuning.ui.components.MiuixMetricCard
 import com.weitiao.tuning.ui.components.MiuixPageScaffold
-import com.weitiao.tuning.ui.components.OneUiBadge
+import com.weitiao.tuning.ui.components.MiuixQuickTile
+import com.weitiao.tuning.ui.components.MiuixSectionTitle
 import com.weitiao.tuning.ui.components.OneUiIslandCard
 import com.weitiao.tuning.ui.components.OneUiItemRow
 import com.weitiao.tuning.ui.components.OneUiNoticeBanner
 import com.weitiao.tuning.ui.components.rememberOneUiHaptics
 import com.weitiao.tuning.ui.theme.OneUiTokens
+import java.util.Locale
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
-import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
-import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.extra.WindowDialog
@@ -74,6 +61,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 private data class GlobalPreset(
     val flag: String,
+    val shortLabelZh: String,
+    val shortLabelEn: String,
     val nameRes: Int,
     val salesCode: String,
     val simMcc: String,
@@ -85,12 +74,12 @@ private data class GlobalPreset(
 )
 
 private val CURATED_GLOBAL_PRESETS = listOf(
-    GlobalPreset("🇭🇰", R.string.preset_hk_name, "TGY", "454", "HK", R.string.preset_hk_tag, "45406", "SmarTone", "06"),
-    GlobalPreset("🇺🇸", R.string.preset_us_name, "XAA", "310", "US", R.string.preset_us_tag, "310260", "T-Mobile", "260"),
-    GlobalPreset("🇪🇺", R.string.preset_eu_name, "EUX", "262", "DE", R.string.preset_eu_tag, "26201", "T-Mobile", "01"),
-    GlobalPreset("🇹🇼", R.string.preset_tw_name, "BRI", "466", "TW", R.string.preset_tw_tag, "46688", "Telecom", "88"),
-    GlobalPreset("🇰🇷", R.string.preset_kr_name, "KOO", "450", "KR", R.string.preset_kr_tag, "45005", "SKT", "05"),
-    GlobalPreset("🇨🇳", R.string.preset_cn_name, "CHC", "460", "CN", R.string.preset_cn_tag, "46000", "CHINA MOBILE", "00"),
+    GlobalPreset("🇭🇰", "中国香港", "Hong Kong", R.string.preset_hk_name, "TGY", "454", "HK", R.string.preset_hk_tag, "45406", "SmarTone", "06"),
+    GlobalPreset("🇺🇸", "美国公开", "US Open", R.string.preset_us_name, "XAA", "310", "US", R.string.preset_us_tag, "310260", "T-Mobile", "260"),
+    GlobalPreset("🇪🇺", "欧洲通用", "Europe", R.string.preset_eu_name, "EUX", "262", "DE", R.string.preset_eu_tag, "26201", "T-Mobile", "01"),
+    GlobalPreset("🇹🇼", "中国台湾", "Taiwan", R.string.preset_tw_name, "BRI", "466", "TW", R.string.preset_tw_tag, "46688", "Telecom", "88"),
+    GlobalPreset("🇰🇷", "韩国官方", "Korea", R.string.preset_kr_name, "KOO", "450", "KR", R.string.preset_kr_tag, "45005", "SKT", "05"),
+    GlobalPreset("🇨🇳", "中国大陆", "Mainland", R.string.preset_cn_name, "CHC", "460", "CN", R.string.preset_cn_tag, "46000", "CHINA MOBILE", "00"),
 )
 
 @Composable
@@ -106,6 +95,7 @@ fun SpoofScreen(
     val haptics = rememberOneUiHaptics()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val isZh = remember { Locale.getDefault().language.startsWith("zh") }
 
     var config by remember { mutableStateOf(CscPrefs.load(context)) }
     var salesCodeInput by remember(config.salesCode) { mutableStateOf(config.salesCode) }
@@ -188,25 +178,8 @@ fun SpoofScreen(
 
     MiuixPageScaffold(
         title = stringResource(R.string.dashboard_spoof_title),
-        subtitle = stringResource(R.string.spoof_subtitle),
         onBack = onBack,
         snackbarHostState = snackbar,
-        actions = {
-            IconButton(
-                onClick = {
-                    haptics.tap()
-                    onOpenSettings()
-                },
-                backgroundColor = MiuixTheme.colorScheme.secondaryContainer,
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Settings,
-                    contentDescription = stringResource(R.string.settings_title),
-                    tint = MiuixTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp),
-                )
-            }
-        },
     ) {
         Column(
             modifier = Modifier
@@ -214,213 +187,152 @@ fun SpoofScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            // 卡片 1: 区域画像总览与商店生效状态
-            OneUiIslandCard(contentPadding = 14.dp) {
+            if (regionCleanupPending) {
+                OneUiNoticeBanner(
+                    text = stringResource(R.string.region_changed_banner),
+                    icon = Icons.Default.CleaningServices,
+                    containerColor = OneUiTokens.WarningAmberContainerLight,
+                    contentColor = IosGlassTokens.IosAmber,
+                    actionText = stringResource(R.string.action_clear_now),
+                    onActionClick = {
+                        haptics.confirm()
+                        val success = StoreCleaner.clearStoreDataRoot()
+                        if (success) {
+                            RegionApplyState.markApplied(context)
+                            regionCleanupPending = false
+                            scope.launch { snackbar.showSnackbar(context.getString(R.string.clear_store_success)) }
+                        } else {
+                            scope.launch { snackbar.showSnackbar(context.getString(R.string.clear_store_fail)) }
+                        }
+                    },
+                )
+            }
+
+            // 第一层：系统真实底包 vs 当前伪装区域 2×1 双列对比卡
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                MiuixMetricCard(
+                    valueText = "${nativeInfo.salesCode} · ${nativeInfo.countryCode}",
+                    labelText = if (isZh) "出厂底包 (MCC ${nativeInfo.simMcc})" else "Factory (${nativeInfo.simMcc})",
+                    icon = Icons.Default.Public,
+                    accentColor = IosGlassTokens.IosTeal,
+                    modifier = Modifier.weight(1f),
+                )
+
+                val isSpoofingActive = config.enabled && config.salesCode.isNotBlank()
+                MiuixMetricCard(
+                    valueText = if (isSpoofingActive) {
+                        "${config.salesCode} · ${config.countryCode}"
+                    } else {
+                        if (isZh) "原生未改" else "Native"
+                    },
+                    labelText = if (isSpoofingActive) {
+                        if (isZh) "当前伪装 (MCC ${config.simMcc})" else "Spoofed (${config.simMcc})"
+                    } else {
+                        if (isZh) "点击下方地区启用" else "Select region below"
+                    },
+                    icon = Icons.Default.Public,
+                    accentColor = if (isSpoofingActive) IosGlassTokens.IosBlue else IosGlassTokens.IosGreen,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+
+            // 第二层：6 大精选地区 3×2 点亮式磁贴网格
+            MiuixSectionTitle(
+                title = stringResource(R.string.presets_title),
+                trailingText = if (isZh) "点击一键切换并清理商店" else "Tap to switch region",
+            )
+
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                CURATED_GLOBAL_PRESETS.chunked(3).forEach { rowPresets ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        rowPresets.forEach { preset ->
+                            val isCurrent = config.enabled && config.salesCode.equals(preset.salesCode, ignoreCase = true)
+                            MiuixQuickTile(
+                                label = "${preset.flag} ${if (isZh) preset.shortLabelZh else preset.shortLabelEn}",
+                                statusText = if (isCurrent) {
+                                    "${preset.salesCode} · ${if (isZh) "已启用" else "Active"}"
+                                } else {
+                                    "${preset.salesCode} · ${preset.countryCode}"
+                                },
+                                icon = Icons.Default.Public,
+                                active = isCurrent,
+                                modifier = Modifier.weight(1f),
+                                onClick = { showPresetConfirmDialog = preset },
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 第三层：跨区总开关 + 全球 80 国检索库 + 手动参数微调
+            OneUiIslandCard(
+                title = if (isZh) "区域伪装控制" else "Region Spoof Control",
+                subtitle = if (isZh) "仅对应用商店生效" else "Store apps only",
+                contentPadding = 14.dp,
+            ) {
                 OneUiItemRow(
                     title = stringResource(R.string.module_switch),
                     subtitle = if (config.enabled) stringResource(R.string.module_enabled)
                     else stringResource(R.string.module_disabled),
                     icon = Icons.Default.Public,
-                    iconTint = if (config.enabled) IosGlassTokens.IosGreen else IosGlassTokens.IosGray,
+                    iconTint = if (config.enabled) IosGlassTokens.IosBlue else IosGlassTokens.IosGray,
                     checked = config.enabled,
                     onCheckedChange = {
                         persist(config.copy(enabled = it))
                     },
                 )
 
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 6.dp),
-                )
-
-                // 当前生效参数 vs 出厂基准
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(3.dp),
-                    ) {
-                        Text(
-                            text = stringResource(R.string.target_region),
-                            fontSize = 12.sp,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Text(
-                                text = if (config.enabled && config.salesCode.isNotBlank()) config.salesCode else nativeInfo.salesCode,
-                                fontSize = 22.sp,
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace,
-                                color = if (config.enabled) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface,
-                            )
-                            OneUiBadge(
-                                text = if (config.enabled && config.countryCode.isNotBlank()) "ISO ${config.countryCode} · MCC ${config.simMcc}"
-                                else "ISO ${nativeInfo.countryCode} · MCC ${nativeInfo.simMcc}",
-                                color = MiuixTheme.colorScheme.primary,
-                            )
-                        }
-                        Text(
-                            text = stringResource(R.string.factory_baseline_format, nativeInfo.salesCode, nativeInfo.simMcc),
-                            fontSize = 12.sp,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-
-                    TextButton(
-                        text = stringResource(R.string.action_restore_factory),
-                        insideMargin = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
-                        onClick = {
-                            haptics.confirm()
-                            StoreCleaner.restoreNativeTelephonyProps()
-                            salesCodeInput = nativeInfo.salesCode
-                            countryCodeInput = nativeInfo.countryCode
-                            simMccInput = nativeInfo.simMcc
-                            persist(
-                                config.copy(
-                                    enabled = false,
-                                    salesCode = nativeInfo.salesCode,
-                                    countryCode = nativeInfo.countryCode,
-                                    simMcc = nativeInfo.simMcc,
-                                    simMnc = "",
-                                    simNumeric = "",
-                                    simOperatorName = "",
-                                    simCountryIso = "",
-                                    marketUnlockRaw = "",
-                                    spoofSimInfo = false,
-                                    spoofDevice = false,
-                                ),
-                                context.getString(R.string.restore_factory_success, nativeInfo.salesCode),
-                            )
-                        },
-                    )
-                }
-
-                // 商店判区待清理提示与一键清理按钮
-                if (regionCleanupPending) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    OneUiNoticeBanner(
-                        text = stringResource(R.string.region_changed_banner),
-                        icon = Icons.Default.CleaningServices,
-                        containerColor = OneUiTokens.WarningAmberContainerLight,
-                        contentColor = IosGlassTokens.IosAmber,
-                        actionText = stringResource(R.string.action_clear_now),
-                        onActionClick = {
-                            haptics.confirm()
-                            val success = StoreCleaner.clearStoreDataRoot()
-                            if (success) {
-                                RegionApplyState.markApplied(context)
-                                regionCleanupPending = false
-                                scope.launch { snackbar.showSnackbar(context.getString(R.string.clear_store_success)) }
-                            } else {
-                                scope.launch { snackbar.showSnackbar(context.getString(R.string.clear_store_fail)) }
-                            }
-                        },
-                    )
-                }
-            }
-
-            // 卡片 2: 选择目标区域（单一全局搜索入口 + 6 大精选主流预设 + 参数微调）
-            OneUiIslandCard(
-                title = stringResource(R.string.presets_title),
-                subtitle = stringResource(R.string.presets_subtitle),
-                contentPadding = 14.dp,
-            ) {
                 OneUiItemRow(
                     title = stringResource(R.string.search_all_csc_btn),
                     subtitle = stringResource(R.string.search_all_csc_desc),
                     icon = Icons.Default.Search,
-                    iconTint = MiuixTheme.colorScheme.primary,
+                    iconTint = IosGlassTokens.IosPurple,
                     showChevron = true,
                     onClick = onOpenSearch,
                 )
 
-                Spacer(modifier = Modifier.height(4.dp))
-
-                // 6 大主流精选横向快速选择胶囊
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    CURATED_GLOBAL_PRESETS.forEach { preset ->
-                        val isCurrent = config.enabled && config.salesCode.equals(preset.salesCode, ignoreCase = true)
-                        val presetTag = stringResource(preset.tagRes)
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(
-                                    if (isCurrent) MiuixTheme.colorScheme.primary
-                                    else MiuixTheme.colorScheme.secondaryContainer
-                                )
-                                .border(
-                                    width = if (isCurrent) 1.5.dp else 0.dp,
-                                    color = if (isCurrent) MiuixTheme.colorScheme.primary else Color.Transparent,
-                                    shape = RoundedCornerShape(14.dp),
-                                )
-                                .clickable {
-                                    haptics.tap()
-                                    showPresetConfirmDialog = preset
-                                }
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Text(preset.flag, fontSize = 18.sp)
-                                Column {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                    ) {
-                                        Text(
-                                            text = preset.salesCode,
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = if (isCurrent) Color.White else MiuixTheme.colorScheme.onSurface,
-                                            maxLines = 1,
-                                            softWrap = false,
-                                        )
-                                        Text(
-                                            text = preset.countryCode,
-                                            fontSize = 11.sp,
-                                            color = if (isCurrent) Color.White.copy(alpha = 0.8f)
-                                            else MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                                            maxLines = 1,
-                                            softWrap = false,
-                                        )
-                                    }
-                                    Text(
-                                        text = presetTag,
-                                        fontSize = 11.sp,
-                                        color = if (isCurrent) Color.White.copy(alpha = 0.9f)
-                                        else MiuixTheme.colorScheme.primary,
-                                        maxLines = 1,
-                                        softWrap = false,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 8.dp),
+                OneUiItemRow(
+                    title = stringResource(R.string.action_restore_factory),
+                    subtitle = stringResource(R.string.factory_baseline_format, nativeInfo.salesCode, nativeInfo.simMcc),
+                    icon = Icons.Default.Restore,
+                    iconTint = IosGlassTokens.IosAmber,
+                    showChevron = true,
+                    onClick = {
+                        haptics.confirm()
+                        StoreCleaner.restoreNativeTelephonyProps()
+                        salesCodeInput = nativeInfo.salesCode
+                        countryCodeInput = nativeInfo.countryCode
+                        simMccInput = nativeInfo.simMcc
+                        persist(
+                            config.copy(
+                                enabled = false,
+                                salesCode = nativeInfo.salesCode,
+                                countryCode = nativeInfo.countryCode,
+                                simMcc = nativeInfo.simMcc,
+                                simMnc = "",
+                                simNumeric = "",
+                                simOperatorName = "",
+                                simCountryIso = "",
+                                marketUnlockRaw = "",
+                                spoofSimInfo = false,
+                                spoofDevice = false,
+                            ),
+                            context.getString(R.string.restore_factory_success, nativeInfo.salesCode),
+                        )
+                    },
                 )
 
-                // 联动微调文本框（Miuix TextField：CSC、国家码、SIM MCC）
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -481,63 +393,78 @@ fun SpoofScreen(
                 }
             }
 
-            // 卡片 3: 硬件机型伪装
-            OneUiIslandCard(
+            // 第四层：硬件机型伪装（双列选择卡 + 开关卡）
+            MiuixSectionTitle(
                 title = stringResource(R.string.device_spoof),
-                subtitle = stringResource(R.string.device_spoof_desc),
+                trailingText = stringResource(R.string.device_spoof_desc),
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                MiuixMetricCard(
+                    valueText = config.deviceName.ifBlank { Build.MODEL },
+                    labelText = if (isZh) "点击选择伪装机型 (126款)" else "Tap to pick model (126)",
+                    icon = Icons.Default.Smartphone,
+                    accentColor = IosGlassTokens.IosAmber,
+                    modifier = Modifier.weight(1f),
+                    onClick = { showDeviceModelPicker = true },
+                )
+
+                MiuixMetricCard(
+                    valueText = if (config.deviceTargetFilterEnabled) {
+                        if (isZh) "${config.deviceTargetPackages.size} 个应用" else "${config.deviceTargetPackages.size} Apps"
+                    } else {
+                        if (isZh) "全局作用域" else "All Scopes"
+                    },
+                    labelText = if (isZh) "点击勾选生效应用" else "Tap to select target apps",
+                    icon = Icons.Default.Apps,
+                    accentColor = IosGlassTokens.IosPurple,
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        if (!config.deviceTargetFilterEnabled) {
+                            persist(config.copy(deviceTargetFilterEnabled = true))
+                        }
+                        showDeviceTargetPicker = true
+                    },
+                )
+            }
+
+            OneUiIslandCard(contentPadding = 14.dp) {
                 OneUiItemRow(
                     title = stringResource(R.string.device_spoof_switch),
                     subtitle = if (config.spoofDevice) stringResource(R.string.device_spoof_configured)
                     else stringResource(R.string.device_spoof_keep_native),
                     icon = Icons.Default.Smartphone,
+                    iconTint = IosGlassTokens.IosAmber,
                     checked = config.spoofDevice,
                     onCheckedChange = {
                         persist(config.copy(spoofDevice = it))
                     },
                 )
 
-                if (config.spoofDevice) {
-                    HorizontalDivider(
-                        modifier = Modifier.padding(vertical = 4.dp),
-                    )
-
-                    OneUiItemRow(
-                        title = stringResource(R.string.target_model_label),
-                        subtitle = config.deviceName.ifBlank { stringResource(R.string.click_to_choose_model) },
-                        badgeText = if (config.deviceName.isNotBlank()) "SET" else null,
-                        showChevron = true,
-                        onClick = { showDeviceModelPicker = true },
-                    )
-
-                    OneUiItemRow(
-                        title = stringResource(R.string.filter_apps_label),
-                        subtitle = if (config.deviceTargetFilterEnabled) {
-                            stringResource(R.string.apps_count_applied, config.deviceTargetPackages.size)
-                        } else {
-                            stringResource(R.string.all_scopes_applied)
-                        },
-                        checked = config.deviceTargetFilterEnabled,
-                        onCheckedChange = {
-                            persist(config.copy(deviceTargetFilterEnabled = it))
-                        },
-                    )
-
-                    if (config.deviceTargetFilterEnabled) {
-                        TextButton(
-                            text = stringResource(R.string.select_target_apps_btn, config.deviceTargetPackages.size),
-                            onClick = { showDeviceTargetPicker = true },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                }
+                OneUiItemRow(
+                    title = stringResource(R.string.filter_apps_label),
+                    subtitle = if (config.deviceTargetFilterEnabled) {
+                        stringResource(R.string.apps_count_applied, config.deviceTargetPackages.size)
+                    } else {
+                        stringResource(R.string.all_scopes_applied)
+                    },
+                    icon = Icons.Default.Apps,
+                    iconTint = IosGlassTokens.IosPurple,
+                    checked = config.deviceTargetFilterEnabled,
+                    onCheckedChange = {
+                        persist(config.copy(deviceTargetFilterEnabled = it))
+                    },
+                )
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(12.dp))
         }
     }
 
-    // 预设切换二次确认弹窗（Miuix WindowDialog）
+    // 预设切换二次确认弹窗
     val preset = showPresetConfirmDialog ?: lastConfirmPreset
     val presetName = stringResource(preset.nameRes)
     WindowDialog(
@@ -614,7 +541,7 @@ fun SpoofScreen(
         initialSelection = config.deviceName,
         onDismiss = { showDeviceModelPicker = false },
         onSelect = { selected ->
-            persist(config.copy(deviceName = selected), selected)
+            persist(config.copy(spoofDevice = true, deviceName = selected), selected)
             showDeviceModelPicker = false
         },
     )

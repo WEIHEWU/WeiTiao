@@ -23,18 +23,17 @@ jobs:
       - name: Create GitHub Release and Upload APK
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.4.0
-          name: "微调 WeiTiao v1.4.0 (Miuix UI)"
+          tag_name: v1.4.1
+          name: "微调 WeiTiao v1.4.1 (Miuix 新版网格视觉)"
           body: |
-            ### 微调 (WeiTiao) v1.4.0
+            ### 微调 (WeiTiao) v1.4.1
 
-            - **全面重构为 Miuix (`top.yukonga.miuix.kmp:miuix:0.8.8`) 原生视觉与物理交互**：
-              - 全屏引入 HyperOS 原生级可折叠大标题导航栏 (`TopAppBar` + `MiuixScrollBehavior`) 与物理弹性阻尼越界回弹 (`overScrollVertical`)；
-              - 全部卡片、列表项、开关、滑块、搜索栏与底部弹窗均切换为 `miuix` 原生组件 (`Card`、`SuperSwitch`、`SuperArrow`、`Slider`、`SearchBar`、`WindowDialog`)，启用 G2 连续曲率圆角 (`smoothRounding = true`) 与 `folmeSpring` 弹簧动画；
-              - 移除高负载 Canvas 流体背景，改为纯净零 GPU 占用的 `MiuixTheme` 表面色。
+            - **全新 Miuix 视觉网格与悬浮胶囊导航重塑**：
+              - **底部悬浮圆角胶囊导航栏 (`FloatingNavigationBar`) + `HorizontalPager` 物理弹簧滑页**：常驻 `概览` · `伪装` · `调谐` · `设置` 四大板块，告别套娃式跳页；
+              - **顶部主状态横幅大卡 (`MiuixHeroStatusCard`)**：左上大粗体运行状态 + 浅蓝圆点胶囊 + 右下角超大半裁切圆环对勾水印；
+              - **3×2 点亮式速控磁贴网格 (`MiuixQuickTile`)**：6 大核心功能与 6 大精选跨区预设均采用 3×2 网格，开启即点亮为柔和浅天蓝底色 (`#E7F0FD`) 与小米蓝 (`#267AF6`)，支持首页直接点击切换开关；
+              - **2×2 马卡龙柔和超椭圆图标 + 大数字指标卡 (`MiuixMetricCard`)**：实时展示商店伪装区域、实时电池温度、微信计步策略与伪装机型；
+              - **原生大圆角半屏抽屉 (`WindowBottomSheet`) 与行内悬浮下拉菜单 (`WindowDropdown`)**：126 款机型库、目标应用多选与微信计步模式切换全面升级。
             - **极致轻量化**：R8 深度裁剪后正式版安装包依然仅 **1.6 MB**，O(1) 哈希属性查表，零冗余后台唤醒。
-            - **LSPosed 作用域纯净锁死**：仅需勾选三星应用商店、主题商店、Play 商店、三星账号判区服务与微信，严禁勾选 `android` 系统框架，确保物理 SIM 卡与基带 100% 原生稳定。
-            - **微信运动与防撤回**：单调递增计步引擎（支持自动递增与固定倍率）、消息与媒体防撤回、一键重启并自动拉起微信。
-            - **亮屏快充 & 应用旁路供电**：纯 Root 硬件温控/供电节点直控，44.0°C 安全熔断保护，无需配置 LSPosed 作用域。
           files: |
-            releases/WeiTiao-v1.4.0.apk
+            releases/WeiTiao-v1.4.1.apk

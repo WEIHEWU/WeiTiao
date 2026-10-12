@@ -1,8 +1,12 @@
 package com.weitiao.tuning.ui.screens
 
 import android.Manifest
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.os.BatteryManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -12,6 +16,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -27,6 +32,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Sports
@@ -61,12 +67,14 @@ import com.weitiao.tuning.core.RootShell
 import com.weitiao.tuning.core.TuningConfig
 import com.weitiao.tuning.core.TuningPrefs
 import com.weitiao.tuning.ui.components.IosGlassTokens
+import com.weitiao.tuning.ui.components.MiuixMetricCard
 import com.weitiao.tuning.ui.components.MiuixPageScaffold
 import com.weitiao.tuning.ui.components.OneUiIslandCard
 import com.weitiao.tuning.ui.components.OneUiItemRow
 import com.weitiao.tuning.ui.components.OneUiNoticeBanner
 import com.weitiao.tuning.ui.components.rememberOneUiHaptics
 import com.weitiao.tuning.ui.theme.OneUiTokens
+import java.util.Locale
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Checkbox
@@ -77,7 +85,8 @@ import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
-import top.yukonga.miuix.kmp.extra.WindowDialog
+import top.yukonga.miuix.kmp.extra.WindowBottomSheet
+import top.yukonga.miuix.kmp.extra.WindowDropdown
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 
@@ -96,6 +105,7 @@ fun TuningScreen(
     val haptics = rememberOneUiHaptics()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val isZh = remember { Locale.getDefault().language.startsWith("zh") }
 
     var config by remember { mutableStateOf(TuningPrefs.load(context)) }
     var multiplier by remember(config.stepMultiplier) { mutableStateOf(config.stepMultiplier.toString()) }
@@ -107,6 +117,35 @@ fun TuningScreen(
 
     var selectedApps by remember { mutableStateOf(TuningPrefs.selectedApps(context)) }
     var showAppPicker by remember { mutableStateOf(false) }
+
+    // 实时电池温度与电量监控
+    var batteryTemp by remember { mutableFloatStateOf(34.5f) }
+    var batteryLevel by remember { mutableIntStateOf(80) }
+    var isPlugged by remember { mutableStateOf(false) }
+
+    DisposableEffect(context) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context?, intent: Intent?) {
+                intent ?: return
+                batteryTemp = intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 345) / 10f
+                val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, 80)
+                val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1)
+                batteryLevel = (level * 100) / scale
+                isPlugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
+            }
+        }
+        val sticky = context.registerReceiver(receiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        if (sticky != null) {
+            batteryTemp = sticky.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 345) / 10f
+            val level = sticky.getIntExtra(BatteryManager.EXTRA_LEVEL, 80)
+            val scale = sticky.getIntExtra(BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1)
+            batteryLevel = (level * 100) / scale
+            isPlugged = sticky.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
+        }
+        onDispose {
+            runCatching { context.unregisterReceiver(receiver) }
+        }
+    }
 
     fun notifySaved(message: String) {
         scope.launch {
@@ -135,7 +174,6 @@ fun TuningScreen(
         }
     }
 
-    // 用户从系统电池设置页返回时，重新判定白名单状态并让横幅消失
     val lifecycleOwner = LocalLifecycleOwner.current
     var resumeTick by remember { mutableIntStateOf(0) }
     DisposableEffect(lifecycleOwner) {
@@ -151,7 +189,6 @@ fun TuningScreen(
 
     MiuixPageScaffold(
         title = stringResource(R.string.dashboard_tuning_title),
-        subtitle = stringResource(R.string.tuning_subtitle),
         onBack = onBack,
         snackbarHostState = snackbar,
     ) {
@@ -161,6 +198,32 @@ fun TuningScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
+            // 第一层：实时充电与温控 2×1 双列指标卡
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                MiuixMetricCard(
+                    valueText = "${String.format(Locale.US, "%.1f", batteryTemp)} °C",
+                    labelText = if (isZh) "实时温控 (44.0°C 熔断)" else "Temp (44.0°C Cutoff)",
+                    icon = Icons.Default.Bolt,
+                    accentColor = IosGlassTokens.IosRed,
+                    modifier = Modifier.weight(1f),
+                )
+
+                MiuixMetricCard(
+                    valueText = if (isPlugged) "$batteryLevel% ⚡" else "$batteryLevel%",
+                    labelText = if (isPlugged) {
+                        if (isZh) "已插线 · 旁路阈值 ${config.passThroughLimit}%" else "Plugged · Limit ${config.passThroughLimit}%"
+                    } else {
+                        if (isZh) "未插线 · 旁路阈值 ${config.passThroughLimit}%" else "Unplugged · Limit ${config.passThroughLimit}%"
+                    },
+                    icon = Icons.Default.BatteryChargingFull,
+                    accentColor = IosGlassTokens.IosGreen,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+
             // 电池优化白名单提醒横幅
             if ((config.brightScreenFastCharge || config.passThrough) && batteryRestricted) {
                 OneUiNoticeBanner(
@@ -176,11 +239,10 @@ fun TuningScreen(
                 )
             }
 
-            // 微信增强卡片
+            // 第二层：微信增强卡片（集成 Miuix WindowDropdown 行内悬浮下拉菜单）
             OneUiIslandCard(
                 title = stringResource(R.string.wechat_section_title),
                 subtitle = stringResource(R.string.wechat_steps_desc),
-                icon = Icons.Default.Sports,
             ) {
                 OneUiItemRow(
                     title = stringResource(R.string.wechat_steps),
@@ -194,43 +256,24 @@ fun TuningScreen(
                     },
                 )
 
-                if (!config.stepEnabled) {
-                    OneUiNoticeBanner(
-                        text = stringResource(R.string.wechat_steps_off_hint),
-                        contentColor = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    )
-                }
-
                 if (config.stepEnabled) {
-                    HorizontalDivider(
-                        modifier = Modifier.padding(vertical = 4.dp),
-                    )
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
-                    OneUiItemRow(
-                        title = stringResource(R.string.step_auto_mode),
-                        subtitle = stringResource(R.string.step_auto_mode_desc),
-                        checked = config.stepAuto,
-                        onCheckedChange = {
-                            persist(config.copy(stepAuto = it))
-                        },
-                    )
-
-                    val currentMult = config.stepMultiplier.coerceIn(1, 1000)
-                    val bannerText = if (config.stepAuto) {
-                        stringResource(
-                            R.string.step_simulator_auto_calc,
-                            currentMult,
-                            config.stepMaximum,
-                        )
+                    val stepModes = if (isZh) {
+                        listOf("自动递增模式（推荐）", "固定倍率模式")
                     } else {
-                        stringResource(
-                            R.string.step_simulator_calc,
-                            (1000 * currentMult).coerceAtMost(config.stepMaximum),
-                        )
+                        listOf("Auto Increment (Recommended)", "Fixed Multiplier")
                     }
-                    OneUiNoticeBanner(
-                        text = bannerText,
-                        contentColor = MiuixTheme.colorScheme.primary,
+                    WindowDropdown(
+                        title = stringResource(R.string.step_auto_mode),
+                        summary = stringResource(R.string.step_auto_mode_desc),
+                        items = stepModes,
+                        selectedIndex = if (config.stepAuto) 0 else 1,
+                        insideMargin = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
+                        onSelectedIndexChange = { index ->
+                            haptics.tap()
+                            persist(config.copy(stepAuto = index == 0))
+                        },
                     )
 
                     Row(
@@ -266,35 +309,28 @@ fun TuningScreen(
                             singleLine = true,
                             insideMargin = DpSize(12.dp, 12.dp),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1.2f),
+                        )
+
+                        TextField(
+                            value = endHour,
+                            onValueChange = { raw ->
+                                val digits = raw.filter(Char::isDigit).take(2)
+                                endHour = digits
+                                digits.toIntOrNull()?.let {
+                                    persist(config.copy(stepEndHour = it.coerceIn(0, 24)))
+                                }
+                            },
+                            label = if (isZh) "截止点(h)" else "End(h)",
+                            singleLine = true,
+                            insideMargin = DpSize(12.dp, 12.dp),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(0.9f),
                         )
                     }
-
-                    TextField(
-                        value = endHour,
-                        onValueChange = { raw ->
-                            val digits = raw.filter(Char::isDigit).take(2)
-                            endHour = digits
-                            digits.toIntOrNull()?.let {
-                                persist(config.copy(stepEndHour = it.coerceIn(0, 24)))
-                            }
-                        },
-                        label = stringResource(R.string.step_end_hour),
-                        singleLine = true,
-                        insideMargin = DpSize(12.dp, 12.dp),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-
-                    OneUiNoticeBanner(
-                        text = stringResource(R.string.step_cap_desc),
-                        contentColor = IosGlassTokens.IosGreen,
-                    )
                 }
 
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 4.dp),
-                )
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
                 OneUiItemRow(
                     title = stringResource(R.string.wechat_anti_recall),
@@ -307,8 +343,12 @@ fun TuningScreen(
                     },
                 )
 
-                TextButton(
-                    text = stringResource(R.string.restart_wechat_btn),
+                OneUiItemRow(
+                    title = stringResource(R.string.restart_wechat_btn),
+                    subtitle = if (isZh) "通过 Root 强停并自动重新拉起微信" else "Force-stop and relaunch WeChat via Root",
+                    icon = Icons.Default.Refresh,
+                    iconTint = IosGlassTokens.IosTeal,
+                    showChevron = true,
                     onClick = {
                         haptics.confirm()
                         val (code, _) = RootShell.exec(
@@ -320,16 +360,13 @@ fun TuningScreen(
                             notifySaved(context.getString(R.string.restart_wechat_failed))
                         }
                     },
-                    modifier = Modifier.fillMaxWidth(),
                 )
             }
 
-            // 亮屏快充卡片 (纯 Root 温控节点管理，无需 LSPosed)
+            // 第三层：亮屏快充卡片 (纯 Root 温控节点管理，无需 LSPosed)
             OneUiIslandCard(
                 title = stringResource(R.string.fast_charge_section),
-                subtitle = stringResource(R.string.fast_charge_desc),
-                icon = Icons.Default.Bolt,
-                iconTint = IosGlassTokens.IosAmber,
+                subtitle = if (isZh) "Root 温控节点直控 · 44°C 安全熔断" else "Root thermal control · 44°C cutoff",
             ) {
                 OneUiItemRow(
                     title = stringResource(R.string.fast_charge_enable),
@@ -352,12 +389,10 @@ fun TuningScreen(
                 }
             }
 
-            // 旁路供电卡片 (纯 Root 供电节点管理，无需 LSPosed)
+            // 第四层：旁路供电卡片 (纯 Root 供电节点管理，无需 LSPosed)
             OneUiIslandCard(
                 title = stringResource(R.string.pass_through_section),
-                subtitle = stringResource(R.string.pass_through_desc),
-                icon = Icons.Default.BatteryChargingFull,
-                iconTint = IosGlassTokens.IosBlue,
+                subtitle = if (isZh) "前台运行指定游戏时直接向主板供电" else "Direct board power for selected games",
             ) {
                 OneUiItemRow(
                     title = stringResource(R.string.pass_through_enable),
@@ -372,13 +407,11 @@ fun TuningScreen(
                 )
 
                 if (config.passThrough) {
-                    HorizontalDivider(
-                        modifier = Modifier.padding(vertical = 4.dp),
-                    )
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
                     Text(
                         text = stringResource(R.string.pass_through_threshold_desc, passThroughSlider.toInt()),
-                        fontSize = 14.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.Medium,
                         color = MiuixTheme.colorScheme.onSurface,
                         modifier = Modifier.padding(horizontal = 4.dp),
@@ -411,7 +444,7 @@ fun TuningScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(12.dp))
         }
     }
 
@@ -464,7 +497,7 @@ private fun ModernAppPickerDialog(
 
     var selected by remember(initial) { mutableStateOf(initial.toSet()) }
 
-    WindowDialog(
+    WindowBottomSheet(
         show = show,
         title = stringResource(R.string.choose_pass_through_apps),
         onDismissRequest = onDismiss,

@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -23,16 +25,21 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import com.weitiao.tuning.App
+import com.weitiao.tuning.BuildConfig
 import com.weitiao.tuning.R
 import com.weitiao.tuning.core.CscConfig
 import com.weitiao.tuning.core.CscPrefs
+import com.weitiao.tuning.core.LanguageManager
 import com.weitiao.tuning.core.RegionApplyState
 import com.weitiao.tuning.ui.components.IosGlassTokens
+import com.weitiao.tuning.ui.components.MiuixMetricCard
 import com.weitiao.tuning.ui.components.MiuixPageScaffold
 import com.weitiao.tuning.ui.components.OneUiIslandCard
 import com.weitiao.tuning.ui.components.OneUiItemRow
 import com.weitiao.tuning.ui.components.OneUiNoticeBanner
 import com.weitiao.tuning.ui.components.rememberOneUiHaptics
+import java.util.Locale
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
@@ -43,16 +50,21 @@ import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit) {
+fun SettingsScreen(
+    onBack: (() -> Unit)? = null,
+) {
     val context = LocalContext.current
     val haptics = rememberOneUiHaptics()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val isZh = remember { Locale.getDefault().language.startsWith("zh") }
 
     var config by remember { mutableStateOf(CscPrefs.load(context)) }
     var customPropsText by rememberSaveable { mutableStateOf(config.customProps.toJson()) }
     var customFeaturesText by rememberSaveable { mutableStateOf(config.customCscFeatures.toJson()) }
     var error by remember { mutableStateOf<String?>(null) }
+
+    val xposedConnected = App.getXposedService() != null || App.getRemotePrefs() != null
 
     fun persistSwitch(updated: CscConfig) {
         val changed = updated != config
@@ -66,7 +78,6 @@ fun SettingsScreen(onBack: () -> Unit) {
 
     MiuixPageScaffold(
         title = stringResource(R.string.settings_title),
-        subtitle = stringResource(R.string.settings_subtitle),
         onBack = onBack,
         snackbarHostState = snackbarHostState,
     ) {
@@ -76,7 +87,38 @@ fun SettingsScreen(onBack: () -> Unit) {
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            // 细分欺骗项开关（Miuix SuperSwitch）
+            // 第一层：环境与语言 2×1 双列指标卡
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                MiuixMetricCard(
+                    valueText = if (xposedConnected) {
+                        if (isZh) "API 102 已就绪" else "API 102 Ready"
+                    } else {
+                        if (isZh) "未连接框架" else "Disconnected"
+                    },
+                    labelText = "LSPosed · v${BuildConfig.VERSION_NAME}",
+                    icon = Icons.Default.Security,
+                    accentColor = if (xposedConnected) IosGlassTokens.IosGreen else IosGlassTokens.IosAmber,
+                    modifier = Modifier.weight(1f),
+                )
+
+                MiuixMetricCard(
+                    valueText = if (isZh) "简体中文" else "English",
+                    labelText = if (isZh) "点击切换界面语言" else "Tap to switch language",
+                    icon = Icons.Default.Language,
+                    accentColor = IosGlassTokens.IosBlue,
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        haptics.tap()
+                        LanguageManager.toggle(context)
+                        LanguageManager.recreateActivity(context)
+                    },
+                )
+            }
+
+            // 第二层：细分欺骗项开关（Miuix SuperSwitch）
             OneUiIslandCard(
                 title = stringResource(R.string.settings_inject_title),
                 subtitle = stringResource(R.string.settings_inject_desc),
@@ -89,9 +131,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                     onCheckedChange = { persistSwitch(config.copy(spoofSalesCode = it)) },
                 )
 
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 4.dp),
-                )
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
                 OneUiItemRow(
                     title = stringResource(R.string.spoof_country_code_setting),
@@ -100,9 +140,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                     onCheckedChange = { persistSwitch(config.copy(spoofCountryCode = it)) },
                 )
 
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 4.dp),
-                )
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
                 OneUiItemRow(
                     title = stringResource(R.string.spoof_ril_code_setting),
@@ -111,9 +149,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                     onCheckedChange = { persistSwitch(config.copy(spoofRilSalesCode = it)) },
                 )
 
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 4.dp),
-                )
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
                 OneUiItemRow(
                     title = stringResource(R.string.spoof_omc_setting),
@@ -122,9 +158,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                     onCheckedChange = { persistSwitch(config.copy(spoofOmcCodes = it)) },
                 )
 
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 4.dp),
-                )
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
                 OneUiItemRow(
                     title = stringResource(R.string.hook_csc_feature_setting),
@@ -134,7 +168,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 )
             }
 
-            // 自定义属性覆盖
+            // 第三层：自定义属性覆盖
             OneUiIslandCard(
                 title = stringResource(R.string.custom_props),
                 subtitle = stringResource(R.string.custom_props_desc),
@@ -177,7 +211,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 }
             }
 
-            // 自定义 CscFeature 覆盖
+            // 第四层：自定义 CscFeature 覆盖
             OneUiIslandCard(
                 title = stringResource(R.string.custom_features),
                 subtitle = stringResource(R.string.custom_features_desc),
@@ -220,7 +254,6 @@ fun SettingsScreen(onBack: () -> Unit) {
                 }
             }
 
-            // 应用自定义属性按钮
             TextButton(
                 text = stringResource(R.string.save_and_apply_btn),
                 colors = ButtonDefaults.textButtonColorsPrimary(),
@@ -249,14 +282,13 @@ fun SettingsScreen(onBack: () -> Unit) {
                 )
             }
 
-            // 作用域说明
             OneUiNoticeBanner(
                 text = stringResource(R.string.scope_note),
                 icon = Icons.Default.Info,
                 contentColor = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(12.dp))
         }
     }
 }

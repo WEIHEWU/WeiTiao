@@ -1,6 +1,7 @@
 package com.weitiao.tuning.ui.components
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -17,9 +18,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -30,8 +34,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
@@ -49,7 +57,6 @@ import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
-import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.SnackbarHost
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Text
@@ -58,10 +65,12 @@ import top.yukonga.miuix.kmp.basic.rememberTopAppBarState
 import top.yukonga.miuix.kmp.extra.SuperArrow
 import top.yukonga.miuix.kmp.extra.SuperSwitch
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.theme.miuixShape
 import top.yukonga.miuix.kmp.utils.overScrollVertical
+import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 
 /**
- * Miuix 丝滑阻尼折叠大标题页面脚手架 (Scaffold + Collapsible TopAppBar + overScrollVertical)
+ * Miuix 丝滑阻尼折叠大标题页面脚手架
  */
 @Composable
 fun MiuixPageScaffold(
@@ -71,6 +80,7 @@ fun MiuixPageScaffold(
     onBack: (() -> Unit)? = null,
     actions: @Composable (RowScope.() -> Unit)? = null,
     snackbarHostState: SnackbarHostState? = null,
+    bottomNavigationPadding: Dp = 96.dp,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val scrollBehavior = MiuixScrollBehavior(rememberTopAppBarState())
@@ -126,25 +136,360 @@ fun MiuixPageScaffold(
             modifier = Modifier
                 .fillMaxSize()
                 .nestedScroll(scrollBehavior.nestedScrollConnection)
+                .scrollEndHaptic()
                 .overScrollVertical()
                 .verticalScroll(rememberScrollState())
                 .padding(
                     top = padding.calculateTopPadding(),
-                    bottom = padding.calculateBottomPadding(),
+                    bottom = padding.calculateBottomPadding() + bottomNavigationPadding,
                 ),
         ) {
             if (!subtitle.isNullOrBlank()) {
                 Text(
                     text = subtitle,
-                    fontSize = MiuixTheme.textStyles.body2.fontSize,
+                    fontSize = 13.sp,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(start = 26.dp, end = 26.dp, bottom = 10.dp),
+                    modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 10.dp),
                 )
             } else {
                 Spacer(modifier = Modifier.height(6.dp))
             }
 
             content()
+        }
+    }
+}
+
+/**
+ * 顶部主状态横幅大卡（左上粗体大字 + 浅蓝圆点胶囊 + 双行浅灰摘要 + 右下角超大半裁切圆环对勾水印）
+ */
+@Composable
+fun MiuixHeroStatusCard(
+    statusTitle: String,
+    pillText: String,
+    line1Text: String,
+    line2Text: String,
+    modifier: Modifier = Modifier,
+    accentColor: Color = IosGlassTokens.IosBlue,
+    isWarning: Boolean = false,
+    onClick: (() -> Unit)? = null,
+) {
+    val isDark = isSystemInDarkTheme()
+    val cardShape = miuixShape(22.dp)
+    val pillBg = if (isWarning) {
+        IosGlassTokens.pastelBg(IosGlassTokens.IosAmber)
+    } else {
+        IosGlassTokens.activeTileBg()
+    }
+    val pillFg = if (isWarning) IosGlassTokens.IosAmber else IosGlassTokens.activeTileFg()
+    val watermarkColor = if (isWarning) {
+        IosGlassTokens.IosAmber.copy(alpha = if (isDark) 0.75f else 0.88f)
+    } else {
+        accentColor.copy(alpha = if (isDark) 0.78f else 0.90f)
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(cardShape)
+            .clipToBounds()
+            .background(MiuixTheme.colorScheme.surfaceContainer)
+            .then(
+                if (onClick != null) {
+                    Modifier.clickable(onClick = onClick)
+                } else {
+                    Modifier
+                }
+            ),
+    ) {
+        // 右下角超大半裁切圆环对勾水印
+        Canvas(
+            modifier = Modifier
+                .size(116.dp)
+                .align(Alignment.BottomEnd)
+                .offset(x = 24.dp, y = 26.dp),
+        ) {
+            val strokeWidth = 10.dp.toPx()
+            val radius = (size.minDimension - strokeWidth) / 2f
+            drawCircle(
+                color = watermarkColor,
+                radius = radius,
+                style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
+            )
+            if (isWarning) {
+                // 感叹号水印
+                val cx = size.width * 0.50f
+                val path = Path().apply {
+                    moveTo(cx, size.height * 0.30f)
+                    lineTo(cx, size.height * 0.56f)
+                }
+                drawPath(
+                    path = path,
+                    color = watermarkColor,
+                    style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
+                )
+                drawCircle(
+                    color = watermarkColor,
+                    radius = strokeWidth * 0.55f,
+                    center = androidx.compose.ui.geometry.Offset(cx, size.height * 0.71f),
+                )
+            } else {
+                // 经典圆润对勾水印
+                val checkPath = Path().apply {
+                    moveTo(size.width * 0.30f, size.height * 0.52f)
+                    lineTo(size.width * 0.45f, size.height * 0.67f)
+                    lineTo(size.width * 0.72f, size.height * 0.37f)
+                }
+                drawPath(
+                    path = checkPath,
+                    color = watermarkColor,
+                    style = Stroke(
+                        width = strokeWidth,
+                        cap = StrokeCap.Round,
+                        join = StrokeJoin.Round,
+                    ),
+                )
+            }
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 22.dp, top = 22.dp, end = 92.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = statusTitle,
+                    fontSize = 25.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MiuixTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                )
+
+                // ● v1.4.0 胶囊徽章
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(pillBg)
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(pillFg),
+                    )
+                    Text(
+                        text = pillText,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = pillFg,
+                        maxLines = 1,
+                    )
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                    text = line1Text,
+                    fontSize = 12.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = line2Text,
+                    fontSize = 12.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.82f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 3×2 快捷点亮式状态磁贴（启用时变为柔和浅天蓝底 #E7F0FD + 小米蓝字 #267AF6；未启用时纯白底）
+ */
+@Composable
+fun MiuixQuickTile(
+    label: String,
+    statusText: String,
+    icon: ImageVector,
+    active: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val haptics = rememberOneUiHaptics()
+    val tileShape = miuixShape(18.dp)
+    val bgColor by animateColorAsState(
+        targetValue = if (active) IosGlassTokens.activeTileBg() else MiuixTheme.colorScheme.surfaceContainer,
+        label = "quickTileBg",
+    )
+    val iconColor by animateColorAsState(
+        targetValue = if (active) IosGlassTokens.activeTileFg() else MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        label = "quickTileIcon",
+    )
+    val labelColor by animateColorAsState(
+        targetValue = if (active) IosGlassTokens.activeTileFg().copy(alpha = 0.85f) else MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        label = "quickTileLabel",
+    )
+    val statusColor by animateColorAsState(
+        targetValue = if (active) IosGlassTokens.activeTileFg() else MiuixTheme.colorScheme.onSurface,
+        label = "quickTileStatus",
+    )
+
+    Row(
+        modifier = modifier
+            .clip(tileShape)
+            .background(bgColor)
+            .clickable {
+                haptics.tap()
+                onClick()
+            }
+            .padding(horizontal = 11.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = iconColor,
+            modifier = Modifier.size(20.dp),
+        )
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(1.dp),
+        ) {
+            Text(
+                text = label,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Normal,
+                color = labelColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = statusText,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = statusColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/**
+ * 2×2 马卡龙柔和超椭圆图标 + 大数字/大核心值指标卡
+ */
+@Composable
+fun MiuixMetricCard(
+    valueText: String,
+    labelText: String,
+    icon: ImageVector,
+    accentColor: Color,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+) {
+    val haptics = rememberOneUiHaptics()
+    val cardShape = miuixShape(18.dp)
+    val iconBoxShape = miuixShape(12.dp)
+    val iconBg = IosGlassTokens.pastelBg(accentColor)
+
+    Row(
+        modifier = modifier
+            .clip(cardShape)
+            .background(MiuixTheme.colorScheme.surfaceContainer)
+            .then(
+                if (onClick != null) {
+                    Modifier.clickable {
+                        haptics.tap()
+                        onClick()
+                    }
+                } else {
+                    Modifier
+                }
+            )
+            .padding(horizontal = 14.dp, vertical = 15.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(iconBoxShape)
+                .background(iconBg),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = labelText,
+                tint = accentColor,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = valueText,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                color = MiuixTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = labelText,
+                fontSize = 11.sp,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/**
+ * 干净利落的左对齐粗体分组标题（右侧可选状态摘要）
+ */
+@Composable
+fun MiuixSectionTitle(
+    title: String,
+    modifier: Modifier = Modifier,
+    trailingText: String? = null,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = title,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold,
+            color = MiuixTheme.colorScheme.onSurface,
+        )
+        if (!trailingText.isNullOrBlank()) {
+            Text(
+                text = trailingText,
+                fontSize = 12.sp,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
         }
     }
 }
@@ -226,7 +571,7 @@ fun OneUiLargeHeader(
 }
 
 /**
- * Miuix 卡片分组容器 (SmallTitle + Miuix Card)
+ * Miuix 纯白无边框卡片分组容器 (MiuixSectionTitle + 20.dp Miuix Card)
  */
 @Composable
 fun OneUiIslandCard(
@@ -240,17 +585,20 @@ fun OneUiIslandCard(
     contentPadding: Dp = 14.dp,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Column(modifier = modifier.fillMaxWidth()) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         if (title != null) {
-            SmallTitle(
-                text = if (!subtitle.isNullOrBlank()) "$title · $subtitle" else title,
-                insideMargin = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+            MiuixSectionTitle(
+                title = title,
+                trailingText = subtitle,
             )
         }
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            cornerRadius = 16.dp,
+            cornerRadius = 20.dp,
             insideMargin = PaddingValues(contentPadding),
             colors = CardDefaults.defaultColors(
                 color = containerColor,
@@ -268,10 +616,7 @@ fun OneUiIslandCard(
 }
 
 /**
- * Miuix 原生交互列表项：
- * - 带开关时自动使用 Miuix [SuperSwitch]
- * - 带箭头或点击跳转时自动使用 Miuix [SuperArrow]
- * - 纯展示行使用 Miuix [BasicComponent]
+ * Miuix 原生交互列表项（统一使用柔和马卡龙圆角方块图标底座 + SuperSwitch / SuperArrow / BasicComponent）
  */
 @Composable
 fun OneUiItemRow(
@@ -292,35 +637,25 @@ fun OneUiItemRow(
 ) {
     val haptics = rememberOneUiHaptics()
     val itemMargin = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
-    val itemModifier = modifier.clip(RoundedCornerShape(12.dp))
+    val itemModifier = modifier.clip(miuixShape(14.dp))
 
     val startIconSlot: (@Composable () -> Unit)? = if (icon != null) {
         {
-            val iconBgModifier = if (iconBackground != null) {
-                Modifier.background(iconBackground)
-            } else {
-                Modifier.background(
-                    Brush.linearGradient(
-                        listOf(
-                            iconTint.copy(alpha = 0.92f),
-                            iconTint.copy(alpha = 0.72f),
-                        )
-                    )
-                )
-            }
+            val resolvedBg = iconBackground ?: IosGlassTokens.pastelBg(iconTint)
+            val resolvedIconTint = if (iconBackground != null) Color.White else iconTint
             Box(
                 modifier = Modifier
-                    .padding(end = 6.dp)
-                    .size(34.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .then(iconBgModifier),
+                    .padding(end = 8.dp)
+                    .size(38.dp)
+                    .clip(miuixShape(11.dp))
+                    .background(resolvedBg),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(18.dp),
+                    tint = resolvedIconTint,
+                    modifier = Modifier.size(19.dp),
                 )
             }
         }
@@ -396,24 +731,19 @@ fun OneUiItemRow(
 }
 
 /**
- * Miuix 状态胶囊徽章 (Badge Pill)
+ * Miuix 柔和胶囊徽章 (Badge Pill)
  */
 @Composable
 fun OneUiBadge(
     text: String,
     modifier: Modifier = Modifier,
     color: Color = MiuixTheme.colorScheme.primary,
-    backgroundColor: Color = color.copy(alpha = if (isSystemInDarkTheme()) 0.18f else 0.12f),
+    backgroundColor: Color = IosGlassTokens.pastelBg(color),
 ) {
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(50))
             .background(backgroundColor)
-            .border(
-                width = 0.6.dp,
-                color = color.copy(alpha = 0.30f),
-                shape = RoundedCornerShape(50),
-            )
             .padding(horizontal = 9.dp, vertical = 3.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -446,7 +776,7 @@ fun <T> OneUiSegmentedControl(
         modifier = modifier
             .fillMaxWidth()
             .height(38.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(miuixShape(12.dp))
             .background(MiuixTheme.colorScheme.secondaryContainer)
             .padding(3.dp),
         horizontalArrangement = Arrangement.spacedBy(3.dp),
@@ -473,7 +803,7 @@ fun <T> OneUiSegmentedControl(
                 modifier = Modifier
                     .weight(1f)
                     .height(32.dp)
-                    .clip(RoundedCornerShape(9.dp))
+                    .clip(miuixShape(9.dp))
                     .background(thumbBgColor)
                     .clickable(
                         interactionSource = interactionSource,
@@ -513,18 +843,14 @@ fun OneUiNoticeBanner(
     actionText: String? = null,
     onActionClick: (() -> Unit)? = null,
 ) {
-    val bannerShape = RoundedCornerShape(14.dp)
+    val bannerShape = miuixShape(16.dp)
+    val bg = IosGlassTokens.pastelBg(contentColor)
 
     Row(
         modifier = modifier
             .fillMaxWidth()
             .clip(bannerShape)
-            .background(contentColor.copy(alpha = if (isSystemInDarkTheme()) 0.16f else 0.10f))
-            .border(
-                width = 0.7.dp,
-                color = contentColor.copy(alpha = 0.30f),
-                shape = bannerShape,
-            )
+            .background(bg)
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -540,7 +866,7 @@ fun OneUiNoticeBanner(
 
         Text(
             text = text,
-            fontSize = 13.sp,
+            fontSize = 12.sp,
             fontWeight = FontWeight.Medium,
             color = contentColor,
             modifier = Modifier.weight(1f),
@@ -549,7 +875,7 @@ fun OneUiNoticeBanner(
         if (!actionText.isNullOrBlank() && onActionClick != null) {
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(10.dp))
+                    .clip(miuixShape(10.dp))
                     .background(contentColor)
                     .clickable(onClick = onActionClick)
                     .padding(horizontal = 12.dp, vertical = 6.dp),
