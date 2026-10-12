@@ -40,7 +40,6 @@ import com.weitiao.tuning.core.RegionApplyState
 import com.weitiao.tuning.core.StoreCleaner
 import com.weitiao.tuning.data.CscEntry
 import com.weitiao.tuning.ui.components.IosGlassTokens
-import com.weitiao.tuning.ui.components.MiuixMetricCard
 import com.weitiao.tuning.ui.components.MiuixPageScaffold
 import com.weitiao.tuning.ui.components.MiuixQuickTile
 import com.weitiao.tuning.ui.components.MiuixSectionTitle
@@ -208,38 +207,7 @@ fun SpoofScreen(
                 )
             }
 
-            // 第一层：系统真实底包 vs 当前伪装区域 2×1 双列对比卡
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                MiuixMetricCard(
-                    valueText = "${nativeInfo.salesCode} · ${nativeInfo.countryCode}",
-                    labelText = if (isZh) "出厂底包 (MCC ${nativeInfo.simMcc})" else "Factory (${nativeInfo.simMcc})",
-                    icon = Icons.Default.Public,
-                    accentColor = IosGlassTokens.IosTeal,
-                    modifier = Modifier.weight(1f),
-                )
-
-                val isSpoofingActive = config.enabled && config.salesCode.isNotBlank()
-                MiuixMetricCard(
-                    valueText = if (isSpoofingActive) {
-                        "${config.salesCode} · ${config.countryCode}"
-                    } else {
-                        if (isZh) "原生未改" else "Native"
-                    },
-                    labelText = if (isSpoofingActive) {
-                        if (isZh) "当前伪装 (MCC ${config.simMcc})" else "Spoofed (${config.simMcc})"
-                    } else {
-                        if (isZh) "点击下方地区启用" else "Select region below"
-                    },
-                    icon = Icons.Default.Public,
-                    accentColor = if (isSpoofingActive) IosGlassTokens.IosBlue else IosGlassTokens.IosGreen,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-
-            // 第二层：6 大精选地区 3×2 点亮式磁贴网格
+            // 第一层：6 大精选地区 2×3 宽幅点亮式磁贴网格（双列宽幅布局，国旗+地区名+代码完整显示不截断）
             MiuixSectionTitle(
                 title = stringResource(R.string.presets_title),
                 trailingText = if (isZh) "点击一键切换并清理商店" else "Tap to switch region",
@@ -249,7 +217,7 @@ fun SpoofScreen(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                CURATED_GLOBAL_PRESETS.chunked(3).forEach { rowPresets ->
+                CURATED_GLOBAL_PRESETS.chunked(2).forEach { rowPresets ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -259,9 +227,9 @@ fun SpoofScreen(
                             MiuixQuickTile(
                                 label = "${preset.flag} ${if (isZh) preset.shortLabelZh else preset.shortLabelEn}",
                                 statusText = if (isCurrent) {
-                                    "${preset.salesCode} · ${if (isZh) "已启用" else "Active"}"
+                                    "${preset.salesCode} · ${if (isZh) "当前已启用" else "Active"}"
                                 } else {
-                                    "${preset.salesCode} · ${preset.countryCode}"
+                                    "${preset.salesCode} · ${preset.countryCode} (${preset.simMcc})"
                                 },
                                 icon = Icons.Default.Public,
                                 active = isCurrent,
@@ -273,10 +241,22 @@ fun SpoofScreen(
                 }
             }
 
-            // 第三层：跨区总开关 + 全球 80 国检索库 + 手动参数微调
+            // 第二层：跨区总开关 + 全球 80 国检索库 + 手动参数微调
             OneUiIslandCard(
                 title = if (isZh) "区域伪装控制" else "Region Spoof Control",
-                subtitle = if (isZh) "仅对应用商店生效" else "Store apps only",
+                subtitle = if (config.enabled && config.salesCode.isNotBlank()) {
+                    if (isZh) {
+                        "当前伪装: ${config.salesCode} · ${config.countryCode} (MCC ${config.simMcc}) | 出厂: ${nativeInfo.salesCode}"
+                    } else {
+                        "Spoofed: ${config.salesCode} · ${config.countryCode} (MCC ${config.simMcc}) | Factory: ${nativeInfo.salesCode}"
+                    }
+                } else {
+                    if (isZh) {
+                        "当前保持出厂原生区域: ${nativeInfo.salesCode} · ${nativeInfo.countryCode} (MCC ${nativeInfo.simMcc})"
+                    } else {
+                        "Native factory region: ${nativeInfo.salesCode} · ${nativeInfo.countryCode} (MCC ${nativeInfo.simMcc})"
+                    }
+                },
                 contentPadding = 14.dp,
             ) {
                 OneUiItemRow(
@@ -333,35 +313,35 @@ fun SpoofScreen(
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
+                TextField(
+                    value = salesCodeInput,
+                    onValueChange = { input ->
+                        val filtered = input.take(3).uppercase()
+                        salesCodeInput = filtered
+                        val autoCountry = CscConstants.countryCodeOf(filtered).orEmpty()
+                        countryCodeInput = autoCountry
+                        val autoMcc = CscSim.mccOfSalesCode(filtered).orEmpty()
+                        if (autoMcc.isNotBlank()) simMccInput = autoMcc
+                        persist(
+                            config.copy(
+                                salesCode = filtered,
+                                countryCode = autoCountry,
+                                simMcc = if (autoMcc.isNotBlank()) autoMcc else config.simMcc,
+                            ),
+                        )
+                    },
+                    label = stringResource(R.string.sales_code_label),
+                    singleLine = true,
+                    enabled = config.enabled,
+                    insideMargin = DpSize(12.dp, 12.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    TextField(
-                        value = salesCodeInput,
-                        onValueChange = { input ->
-                            val filtered = input.take(3).uppercase()
-                            salesCodeInput = filtered
-                            val autoCountry = CscConstants.countryCodeOf(filtered).orEmpty()
-                            countryCodeInput = autoCountry
-                            val autoMcc = CscSim.mccOfSalesCode(filtered).orEmpty()
-                            if (autoMcc.isNotBlank()) simMccInput = autoMcc
-                            persist(
-                                config.copy(
-                                    salesCode = filtered,
-                                    countryCode = autoCountry,
-                                    simMcc = if (autoMcc.isNotBlank()) autoMcc else config.simMcc,
-                                ),
-                            )
-                        },
-                        label = stringResource(R.string.sales_code_label),
-                        singleLine = true,
-                        enabled = config.enabled,
-                        insideMargin = DpSize(12.dp, 12.dp),
-                        modifier = Modifier.weight(1.3f),
-                    )
-
                     TextField(
                         value = countryCodeInput,
                         onValueChange = { input ->
@@ -373,7 +353,7 @@ fun SpoofScreen(
                         singleLine = true,
                         enabled = config.enabled,
                         insideMargin = DpSize(12.dp, 12.dp),
-                        modifier = Modifier.weight(1.1f),
+                        modifier = Modifier.weight(1f),
                     )
 
                     TextField(
@@ -383,55 +363,22 @@ fun SpoofScreen(
                             simMccInput = filtered
                             persist(config.copy(simMcc = filtered))
                         },
-                        label = "MCC",
+                        label = if (isZh) "运营商 MCC (如 466)" else "SIM MCC (e.g. 466)",
                         singleLine = true,
                         enabled = config.enabled,
                         insideMargin = DpSize(12.dp, 12.dp),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(0.9f),
+                        modifier = Modifier.weight(1f),
                     )
                 }
             }
 
-            // 第四层：硬件机型伪装（双列选择卡 + 开关卡）
-            MiuixSectionTitle(
+            // 第三层：硬件机型伪装（整合为单一卡片，消除重复按钮）
+            OneUiIslandCard(
                 title = stringResource(R.string.device_spoof),
-                trailingText = stringResource(R.string.device_spoof_desc),
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                subtitle = stringResource(R.string.device_spoof_desc),
+                contentPadding = 14.dp,
             ) {
-                MiuixMetricCard(
-                    valueText = config.deviceName.ifBlank { Build.MODEL },
-                    labelText = if (isZh) "点击选择伪装机型 (126款)" else "Tap to pick model (126)",
-                    icon = Icons.Default.Smartphone,
-                    accentColor = IosGlassTokens.IosAmber,
-                    modifier = Modifier.weight(1f),
-                    onClick = { showDeviceModelPicker = true },
-                )
-
-                MiuixMetricCard(
-                    valueText = if (config.deviceTargetFilterEnabled) {
-                        if (isZh) "${config.deviceTargetPackages.size} 个应用" else "${config.deviceTargetPackages.size} Apps"
-                    } else {
-                        if (isZh) "全局作用域" else "All Scopes"
-                    },
-                    labelText = if (isZh) "点击勾选生效应用" else "Tap to select target apps",
-                    icon = Icons.Default.Apps,
-                    accentColor = IosGlassTokens.IosPurple,
-                    modifier = Modifier.weight(1f),
-                    onClick = {
-                        if (!config.deviceTargetFilterEnabled) {
-                            persist(config.copy(deviceTargetFilterEnabled = true))
-                        }
-                        showDeviceTargetPicker = true
-                    },
-                )
-            }
-
-            OneUiIslandCard(contentPadding = 14.dp) {
                 OneUiItemRow(
                     title = stringResource(R.string.device_spoof_switch),
                     subtitle = if (config.spoofDevice) stringResource(R.string.device_spoof_configured)
@@ -445,6 +392,18 @@ fun SpoofScreen(
                 )
 
                 OneUiItemRow(
+                    title = if (isZh) "选择伪装机型" else "Target Device Model",
+                    subtitle = if (isZh) "内置 126 款主流旗舰机型库" else "126 flagship models built-in",
+                    icon = Icons.Default.Smartphone,
+                    iconTint = IosGlassTokens.IosBlue,
+                    trailingValue = config.deviceName.ifBlank { Build.MODEL },
+                    showChevron = true,
+                    onClick = { showDeviceModelPicker = true },
+                )
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                OneUiItemRow(
                     title = stringResource(R.string.filter_apps_label),
                     subtitle = if (config.deviceTargetFilterEnabled) {
                         stringResource(R.string.apps_count_applied, config.deviceTargetPackages.size)
@@ -456,6 +415,21 @@ fun SpoofScreen(
                     checked = config.deviceTargetFilterEnabled,
                     onCheckedChange = {
                         persist(config.copy(deviceTargetFilterEnabled = it))
+                    },
+                )
+
+                OneUiItemRow(
+                    title = if (isZh) "勾选生效应用" else "Select Target Apps",
+                    subtitle = if (isZh) "指定需要伪装机型标识的应用列表" else "Choose apps to spoof device model",
+                    icon = Icons.Default.Apps,
+                    iconTint = IosGlassTokens.IosTeal,
+                    trailingValue = if (isZh) "${config.deviceTargetPackages.size} 个应用" else "${config.deviceTargetPackages.size} Apps",
+                    showChevron = true,
+                    onClick = {
+                        if (!config.deviceTargetFilterEnabled) {
+                            persist(config.copy(deviceTargetFilterEnabled = true))
+                        }
+                        showDeviceTargetPicker = true
                     },
                 )
             }

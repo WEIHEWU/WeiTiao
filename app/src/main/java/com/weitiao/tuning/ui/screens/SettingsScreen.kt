@@ -33,7 +33,6 @@ import com.weitiao.tuning.core.CscPrefs
 import com.weitiao.tuning.core.LanguageManager
 import com.weitiao.tuning.core.RegionApplyState
 import com.weitiao.tuning.ui.components.IosGlassTokens
-import com.weitiao.tuning.ui.components.MiuixMetricCard
 import com.weitiao.tuning.ui.components.MiuixPageScaffold
 import com.weitiao.tuning.ui.components.OneUiIslandCard
 import com.weitiao.tuning.ui.components.OneUiItemRow
@@ -87,29 +86,32 @@ fun SettingsScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            // 第一层：环境与语言 2×1 双列指标卡
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            // 第一层：运行环境与界面语言（全宽列表项，文案完整显示不截断）
+            OneUiIslandCard(
+                title = if (isZh) "运行环境与语言" else "Environment & Language",
             ) {
-                MiuixMetricCard(
-                    valueText = if (xposedConnected) {
-                        if (isZh) "API 102 已就绪" else "API 102 Ready"
-                    } else {
-                        if (isZh) "未连接框架" else "Disconnected"
-                    },
-                    labelText = "LSPosed · v${BuildConfig.VERSION_NAME}",
+                OneUiItemRow(
+                    title = if (isZh) "LSPosed 框架状态" else "LSPosed Framework",
+                    subtitle = "Modern Xposed API 102 · v${BuildConfig.VERSION_NAME}",
                     icon = Icons.Default.Security,
-                    accentColor = if (xposedConnected) IosGlassTokens.IosGreen else IosGlassTokens.IosAmber,
-                    modifier = Modifier.weight(1f),
+                    iconTint = if (xposedConnected) IosGlassTokens.IosGreen else IosGlassTokens.IosAmber,
+                    badgeText = if (xposedConnected) {
+                        if (isZh) "已就绪" else "Ready"
+                    } else {
+                        if (isZh) "未连接" else "Disconnected"
+                    },
+                    badgeColor = if (xposedConnected) IosGlassTokens.IosGreen else IosGlassTokens.IosAmber,
                 )
 
-                MiuixMetricCard(
-                    valueText = if (isZh) "简体中文" else "English",
-                    labelText = if (isZh) "点击切换界面语言" else "Tap to switch language",
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                OneUiItemRow(
+                    title = if (isZh) "界面语言 / Language" else "UI Language",
+                    subtitle = if (isZh) "点击立即切换中英文界面" else "Tap to switch UI language",
                     icon = Icons.Default.Language,
-                    accentColor = IosGlassTokens.IosBlue,
-                    modifier = Modifier.weight(1f),
+                    iconTint = IosGlassTokens.IosBlue,
+                    trailingValue = if (isZh) "简体中文" else "English",
+                    showChevron = true,
                     onClick = {
                         haptics.tap()
                         LanguageManager.toggle(context)

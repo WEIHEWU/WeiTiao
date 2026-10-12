@@ -182,8 +182,8 @@ fun DashboardScreen(
     }
 
     val isServiceReady = moduleState == ModuleState.ACTIVE || hasRoot
-    val enabledText = if (isZh) "已启用" else "Enabled"
-    val disabledText = if (isZh) "未启用" else "Disabled"
+    val enabledText = if (isZh) "已启用" else "On"
+    val disabledText = if (isZh) "未启用" else "Off"
 
     MiuixPageScaffold(
         title = stringResource(R.string.topbar_title),
@@ -230,20 +230,20 @@ fun DashboardScreen(
                 },
                 pillText = "v${BuildConfig.VERSION_NAME}",
                 line1Text = if (isZh) {
-                    "版本 v${BuildConfig.VERSION_NAME} · $modeLabel · 服务运行正常"
+                    "$modeLabel · 核心服务运行正常"
                 } else {
-                    "v${BuildConfig.VERSION_NAME} · $modeLabel · Running normally"
+                    "$modeLabel · Service running normally"
                 },
                 line2Text = if (isZh) {
-                    "物理 SIM 与基带 100% 原生免注入 · 实时状态已同步"
+                    "物理 SIM 与基带 100% 原生免注入"
                 } else {
-                    "Physical SIM & baseband 100% native · Live synced"
+                    "Physical SIM & baseband 100% native"
                 },
                 isWarning = !isServiceReady,
                 onClick = onOpenSettings,
             )
 
-            // 第二层：3×2 快捷状态磁贴网格（点亮即变柔和天蓝底 #E7F0FD + 小米蓝字 #267AF6）
+            // 第二层：3×2 快捷功能总控磁贴（4字以内精炼文案，绝不截断）
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -253,7 +253,7 @@ fun DashboardScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     MiuixQuickTile(
-                        label = if (isZh) "商店跨区" else "Store Region",
+                        label = if (isZh) "商店跨区" else "Store",
                         statusText = if (csc.enabled && csc.salesCode.isNotBlank()) enabledText else disabledText,
                         icon = Icons.Default.Public,
                         active = csc.enabled && csc.salesCode.isNotBlank(),
@@ -267,7 +267,7 @@ fun DashboardScreen(
                         },
                     )
                     MiuixQuickTile(
-                        label = if (isZh) "机型伪装" else "Device Spoof",
+                        label = if (isZh) "机型伪装" else "Model",
                         statusText = if (csc.spoofDevice) enabledText else disabledText,
                         icon = Icons.Default.Smartphone,
                         active = csc.spoofDevice,
@@ -281,7 +281,7 @@ fun DashboardScreen(
                         },
                     )
                     MiuixQuickTile(
-                        label = if (isZh) "微信计步" else "WeChat Steps",
+                        label = if (isZh) "微信计步" else "Steps",
                         statusText = if (tuning.stepEnabled) enabledText else disabledText,
                         icon = Icons.AutoMirrored.Filled.DirectionsRun,
                         active = tuning.stepEnabled,
@@ -297,7 +297,7 @@ fun DashboardScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     MiuixQuickTile(
-                        label = if (isZh) "消息防撤回" else "Anti-Recall",
+                        label = if (isZh) "防撤回" else "Recall",
                         statusText = if (tuning.antiRecall) enabledText else disabledText,
                         icon = Icons.Default.Shield,
                         active = tuning.antiRecall,
@@ -307,7 +307,7 @@ fun DashboardScreen(
                         },
                     )
                     MiuixQuickTile(
-                        label = if (isZh) "亮屏快充" else "Fast Charge",
+                        label = if (isZh) "亮屏快充" else "Charge",
                         statusText = if (tuning.brightScreenFastCharge) enabledText else disabledText,
                         icon = Icons.Default.Bolt,
                         active = tuning.brightScreenFastCharge,
@@ -317,7 +317,7 @@ fun DashboardScreen(
                         },
                     )
                     MiuixQuickTile(
-                        label = if (isZh) "旁路供电" else "Bypass Power",
+                        label = if (isZh) "旁路供电" else "Bypass",
                         statusText = if (tuning.passThrough) enabledText else disabledText,
                         icon = Icons.Default.Power,
                         active = tuning.passThrough,
@@ -329,13 +329,13 @@ fun DashboardScreen(
                 }
             }
 
-            // 第三层：2×2 马卡龙柔和图标 + 大数字/大核心值实时统计卡
+            // 第三层：2×2 实时硬件与参数遥测卡（只读看板，与上方开关职责分离）
             MiuixSectionTitle(
-                title = if (isZh) "实时状态统计" else "Live Telemetry",
+                title = if (isZh) "实时状态看板" else "Live Telemetry",
                 trailingText = if (isPlugged) {
                     if (isZh) "⚡ 已接通电源 · $batteryLevel%" else "⚡ Plugged · $batteryLevel%"
                 } else {
-                    if (isZh) "🔋 电池供电 · $batteryLevel%" else "🔋 On Battery · $batteryLevel%"
+                    if (isZh) "🔋 电池供电 · $batteryLevel%" else "🔋 Battery · $batteryLevel%"
                 },
             )
 
@@ -354,9 +354,9 @@ fun DashboardScreen(
                             rawSalesCode.ifBlank { "CHC" }
                         },
                         labelText = if (csc.enabled && csc.salesCode.isNotBlank()) {
-                            if (isZh) "伪装商店区域 (${csc.simMcc})" else "Spoofed Region (${csc.simMcc})"
+                            if (isZh) "当前伪装区域" else "Spoofed Region"
                         } else {
-                            if (isZh) "原生底包区域 ($rawSimOperator)" else "Native Region ($rawSimOperator)"
+                            if (isZh) "原生底包区域" else "Native Region"
                         },
                         icon = Icons.Default.Public,
                         accentColor = IosGlassTokens.IosGreen,
@@ -366,11 +366,7 @@ fun DashboardScreen(
 
                     MiuixMetricCard(
                         valueText = "${String.format(Locale.US, "%.1f", batteryTemp)} °C",
-                        labelText = if (tuning.brightScreenFastCharge) {
-                            if (isZh) "快充守护中 (44°C 熔断)" else "Fast Charge (44°C Cutoff)"
-                        } else {
-                            if (isZh) "实时电池温度" else "Battery Temperature"
-                        },
+                        labelText = if (isZh) "实时电池温度" else "Battery Temp",
                         icon = Icons.Default.Bolt,
                         accentColor = IosGlassTokens.IosRed,
                         modifier = Modifier.weight(1f),
@@ -387,16 +383,12 @@ fun DashboardScreen(
                             if (tuning.stepAuto) {
                                 if (isZh) "自动递增" else "Auto Step"
                             } else {
-                                "${tuning.stepMultiplier}x"
+                                "${tuning.stepMultiplier}x 倍率"
                             }
                         } else {
                             if (isZh) "原生步数" else "Native Steps"
                         },
-                        labelText = if (isZh) {
-                            "每日封顶 ${tuning.stepMaximum} 步"
-                        } else {
-                            "Daily Cap ${tuning.stepMaximum}"
-                        },
+                        labelText = if (isZh) "封顶 ${tuning.stepMaximum} 步" else "Cap ${tuning.stepMaximum}",
                         icon = Icons.Default.Sync,
                         accentColor = IosGlassTokens.IosBlue,
                         modifier = Modifier.weight(1f),
@@ -410,9 +402,9 @@ fun DashboardScreen(
                             Build.MODEL
                         },
                         labelText = if (csc.spoofDevice) {
-                            if (isZh) "伪装机型 (${csc.deviceTargetPackages.size} 应用)" else "Spoofed (${csc.deviceTargetPackages.size} apps)"
+                            if (isZh) "当前伪装机型" else "Spoofed Model"
                         } else {
-                            if (isZh) "系统原生型号" else "Native Device Model"
+                            if (isZh) "系统原生型号" else "Native Model"
                         },
                         icon = Icons.Default.Memory,
                         accentColor = IosGlassTokens.IosAmber,
@@ -422,7 +414,7 @@ fun DashboardScreen(
                 }
             }
 
-            // 第四层：快捷维护双列动作卡
+            // 第四层：快捷维护双列动作卡（全局唯一维护入口，子页面不再重复放置）
             MiuixSectionTitle(
                 title = if (isZh) "快捷维护" else "Quick Actions",
                 trailingText = if (isZh) "点击立即执行" else "Tap to run",
@@ -434,7 +426,7 @@ fun DashboardScreen(
             ) {
                 MiuixMetricCard(
                     valueText = if (isZh) "重置商店" else "Reset Store",
-                    labelText = if (isZh) "清理缓存立即重判区" else "Clear store cache now",
+                    labelText = if (isZh) "清理缓存重判区" else "Clear store cache",
                     icon = Icons.Default.CleaningServices,
                     accentColor = IosGlassTokens.IosPurple,
                     modifier = Modifier.weight(1f),
@@ -455,7 +447,7 @@ fun DashboardScreen(
 
                 MiuixMetricCard(
                     valueText = if (isZh) "重启微信" else "Restart WeChat",
-                    labelText = if (isZh) "强停并自动拉起微信" else "Force stop & relaunch",
+                    labelText = if (isZh) "强停并重新拉起" else "Force stop & launch",
                     icon = Icons.Default.Refresh,
                     accentColor = IosGlassTokens.IosTeal,
                     modifier = Modifier.weight(1f),

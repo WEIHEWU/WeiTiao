@@ -161,7 +161,7 @@ fun MiuixPageScaffold(
 }
 
 /**
- * 顶部主状态横幅大卡（左上粗体大字 + 浅蓝圆点胶囊 + 双行浅灰摘要 + 右下角超大半裁切圆环对勾水印）
+ * 顶部主状态横幅大卡（左上粗体大字 + 浅蓝圆点胶囊 + 双行完整摘要 + 右下角超大半裁切圆环对勾水印）
  */
 @Composable
 fun MiuixHeroStatusCard(
@@ -183,9 +183,9 @@ fun MiuixHeroStatusCard(
     }
     val pillFg = if (isWarning) IosGlassTokens.IosAmber else IosGlassTokens.activeTileFg()
     val watermarkColor = if (isWarning) {
-        IosGlassTokens.IosAmber.copy(alpha = if (isDark) 0.75f else 0.88f)
+        IosGlassTokens.IosAmber.copy(alpha = if (isDark) 0.70f else 0.85f)
     } else {
-        accentColor.copy(alpha = if (isDark) 0.78f else 0.90f)
+        accentColor.copy(alpha = if (isDark) 0.72f else 0.88f)
     }
 
     Box(
@@ -205,11 +205,11 @@ fun MiuixHeroStatusCard(
         // 右下角超大半裁切圆环对勾水印
         Canvas(
             modifier = Modifier
-                .size(116.dp)
+                .size(110.dp)
                 .align(Alignment.BottomEnd)
-                .offset(x = 24.dp, y = 26.dp),
+                .offset(x = 28.dp, y = 28.dp),
         ) {
-            val strokeWidth = 10.dp.toPx()
+            val strokeWidth = 9.5.dp.toPx()
             val radius = (size.minDimension - strokeWidth) / 2f
             drawCircle(
                 color = watermarkColor,
@@ -217,7 +217,6 @@ fun MiuixHeroStatusCard(
                 style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
             )
             if (isWarning) {
-                // 感叹号水印
                 val cx = size.width * 0.50f
                 val path = Path().apply {
                     moveTo(cx, size.height * 0.30f)
@@ -234,7 +233,6 @@ fun MiuixHeroStatusCard(
                     center = androidx.compose.ui.geometry.Offset(cx, size.height * 0.71f),
                 )
             } else {
-                // 经典圆润对勾水印
                 val checkPath = Path().apply {
                     moveTo(size.width * 0.30f, size.height * 0.52f)
                     lineTo(size.width * 0.45f, size.height * 0.67f)
@@ -255,7 +253,7 @@ fun MiuixHeroStatusCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 22.dp, top = 22.dp, end = 92.dp, bottom = 24.dp),
+                .padding(start = 20.dp, top = 20.dp, end = 64.dp, bottom = 22.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Row(
@@ -264,13 +262,13 @@ fun MiuixHeroStatusCard(
             ) {
                 Text(
                     text = statusTitle,
-                    fontSize = 25.sp,
+                    fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
                     color = MiuixTheme.colorScheme.onSurface,
                     maxLines = 1,
                 )
 
-                // ● v1.4.0 胶囊徽章
+                // ● 版本胶囊徽章
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(50))
@@ -300,15 +298,13 @@ fun MiuixHeroStatusCard(
                     text = line1Text,
                     fontSize = 12.sp,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    maxLines = 2,
                 )
                 Text(
                     text = line2Text,
                     fontSize = 12.sp,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.82f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    maxLines = 2,
                 )
             }
         }
@@ -354,15 +350,15 @@ fun MiuixQuickTile(
                 haptics.tap()
                 onClick()
             }
-            .padding(horizontal = 11.dp, vertical = 13.dp),
+            .padding(horizontal = 10.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Icon(
             imageVector = icon,
             contentDescription = label,
             tint = iconColor,
-            modifier = Modifier.size(20.dp),
+            modifier = Modifier.size(18.dp),
         )
 
         Column(
@@ -375,15 +371,15 @@ fun MiuixQuickTile(
                 fontWeight = FontWeight.Normal,
                 color = labelColor,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                softWrap = false,
             )
             Text(
                 text = statusText,
-                fontSize = 13.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
                 color = statusColor,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                softWrap = false,
             )
         }
     }
@@ -420,13 +416,13 @@ fun MiuixMetricCard(
                     Modifier
                 }
             )
-            .padding(horizontal = 14.dp, vertical = 15.dp),
+            .padding(horizontal = 12.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Box(
             modifier = Modifier
-                .size(40.dp)
+                .size(36.dp)
                 .clip(iconBoxShape)
                 .background(iconBg),
             contentAlignment = Alignment.Center,
@@ -435,7 +431,7 @@ fun MiuixMetricCard(
                 imageVector = icon,
                 contentDescription = labelText,
                 tint = accentColor,
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(18.dp),
             )
         }
 
@@ -445,7 +441,7 @@ fun MiuixMetricCard(
         ) {
             Text(
                 text = valueText,
-                fontSize = 17.sp,
+                fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
                 color = MiuixTheme.colorScheme.onSurface,
                 maxLines = 1,
@@ -455,7 +451,7 @@ fun MiuixMetricCard(
                 text = labelText,
                 fontSize = 11.sp,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
         }
@@ -463,30 +459,43 @@ fun MiuixMetricCard(
 }
 
 /**
- * 干净利落的左对齐粗体分组标题（右侧可选状态摘要）
+ * 干净利落的左对齐粗体分组标题（支持下方完整副标题描述或右侧简短状态摘要）
  */
 @Composable
 fun MiuixSectionTitle(
     title: String,
     modifier: Modifier = Modifier,
+    subtitle: String? = null,
     trailingText: String? = null,
 ) {
-    Row(
+    Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 4.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(horizontal = 4.dp, vertical = 2.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        Text(
-            text = title,
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Bold,
-            color = MiuixTheme.colorScheme.onSurface,
-        )
-        if (!trailingText.isNullOrBlank()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
-                text = trailingText,
+                text = title,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+                color = MiuixTheme.colorScheme.onSurface,
+            )
+            if (!trailingText.isNullOrBlank()) {
+                Text(
+                    text = trailingText,
+                    fontSize = 12.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            }
+        }
+        if (!subtitle.isNullOrBlank()) {
+            Text(
+                text = subtitle,
                 fontSize = 12.sp,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
@@ -592,7 +601,7 @@ fun OneUiIslandCard(
         if (title != null) {
             MiuixSectionTitle(
                 title = title,
-                trailingText = subtitle,
+                subtitle = subtitle,
             )
         }
 
