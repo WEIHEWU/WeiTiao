@@ -1,5 +1,7 @@
 package com.weitiao.tuning.core
 
+import android.os.Build
+
 /**
  * 核心欺骗逻辑：根据配置计算某个属性 key 应返回的值。
  * Hook 端在 beforeHookedMethod 中调用 [match] 决定是否覆盖返回值。
@@ -83,8 +85,11 @@ object CscSpoof {
             "ro.build.flavor" -> "${profile.productName}-user"
 
             "ro.build.fingerprint", "ro.bootimage.build.fingerprint", "ro.vendor.build.fingerprint",
-            "ro.odm.build.fingerprint", "ro.system.build.fingerprint", "ro.system_ext.build.fingerprint" ->
-                "${profile.brand}/${profile.productName}/${profile.device}:14/UP1A.231005.007/${profile.model}:user/release-keys"
+            "ro.odm.build.fingerprint", "ro.system.build.fingerprint", "ro.system_ext.build.fingerprint" -> {
+                val osRelease = Build.VERSION.RELEASE.ifBlank { "17" }
+                val buildId = Build.ID.ifBlank { "UP1A.231005.007" }
+                "${profile.brand}/${profile.productName}/${profile.device}:$osRelease/$buildId/${profile.model}:user/release-keys"
+            }
 
             "ro.soc.model", "ro.vendor.qti.soc_name" -> profile.device
 

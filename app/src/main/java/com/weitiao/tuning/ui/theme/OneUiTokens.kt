@@ -5,7 +5,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
 /**
- * Samsung One UI 8.5 官方设计系统 Tokens
+ * Samsung One UI 8.5 / One UI 9 (Android 17) 官方设计系统 Tokens
  * 遵循三星设计语言：26dp 超椭圆曲率、AMOLED 纯黑基底、Galaxy 品牌色阶
  */
 object OneUiTokens {

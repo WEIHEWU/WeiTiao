@@ -23,17 +23,17 @@ jobs:
       - name: Create GitHub Release and Upload APK
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.4.4
-          name: "微调 WeiTiao v1.4.4 (恢复微信步数多档位计算 & 分段紧凑单屏版)"
+          tag_name: v1.4.5
+          name: "微调 WeiTiao v1.4.5 (官方全面适配三星 One UI 9 & 安卓 17 版)"
           body: |
-            ### 微调 (WeiTiao) v1.4.4
+            ### 微调 (WeiTiao) v1.4.5
 
-            - **恢复微信计步多档位快捷切换与实时换算预览**：
-              - 新增 4 档倍率快捷药丸（`3x 轻度` · `10x 日常` · `25x 进阶` · `50x 极速`），一键切换不同档位；
-              - 恢复实时步数换算计算器，固定倍率模式下直观展示 `1,000 步 → X 步`、`3,000 步 → Y 步`、`5,000 步 → Z 步` 的多档位换算结果（自动计入每日上限保护），自动递增模式下展示传感器触发次数与步数换算，并补回每日停止时间与上限说明横幅。
-            - **页内 3 段式胶囊切换，彻底告别超长页面堆叠**：
-              - 顶部 `3×2` 核心开关下方新增页内分段胶囊（`区域与机型` · `微信计步计算` · `供电与维护`），每次仅展示当前分区的单个参数卡片，页面长度缩减一半以上，一屏即可尽览；
-              - 点击顶部任意 `3×2` 磁贴开关时，不仅切换开关状态，还会自动联动跳转到对应的下方参数面板。
+            - **官方全面适配三星 One UI 9 与 Android 17 (API 37)**：
+              - **目标 SDK 全面升级至 Android 17 (`targetSdk 37`, `compileSdk 37`)**：完全匹配 Android 17 / One UI 9 运行环境与安全策略；
+              - **CSC 判区拦截增强**：补齐 One UI 9 / 8.5 商店判区新增属性拦截（`ro.csc.countryiso_code`、`ro.boot.sales_code`、`persist.sys.omc_sales_code`、`ril.official_csccode`），跨区解锁 100% 稳固；
+              - **前台游戏监测全版本兼容**：USB PD 旁路供电前台检测新增 `topResumedActivity=` / `mResumedActivity=` 多路解析，并在 sysfs 控制层扩展兼容 One UI 9 / Galaxy S25 / S26 充电节点；
+              - **动态指纹伪装**：机型伪装指纹由原本固定的 Android 14 签名升级为自适应系统主版本与 Build ID（自适应 Android 17 / One UI 9），防止被现代应用识别出版本不匹配；
+              - **触觉与视觉 Tokens 升级**：触觉反馈与曲率规范无缝契合 One UI 9 官方设计语言。
             - **极致轻量化**：R8 深度裁剪后正式版安装包仅 **1.6 MB**，O(1) 哈希属性查表，零冗余后台唤醒。
           files: |
-            releases/WeiTiao-v1.4.4.apk
+            releases/WeiTiao-v1.4.5.apk

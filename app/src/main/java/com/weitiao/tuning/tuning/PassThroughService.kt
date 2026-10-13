@@ -186,6 +186,11 @@ class PassThroughService : Service() {
             val matcher = FOCUSED_WINDOW_PATTERN.matcher(out)
             if (matcher.find()) return matcher.group(1).orEmpty()
         }
+        val (codeActivities, outActivities) = RootShell.exec("dumpsys activity activities | grep -m 1 -E 'topResumedActivity=|mResumedActivity='", timeoutSeconds = 2)
+        if (codeActivities == 0 && outActivities.isNotBlank()) {
+            val matcher = RESUMED_ACTIVITY_PATTERN.matcher(outActivities)
+            if (matcher.find()) return matcher.group(1).orEmpty()
+        }
         val (codeRecents, outRecents) = RootShell.exec("dumpsys activity recents | grep -m 1 -E 'topActivity='", timeoutSeconds = 2)
         if (codeRecents == 0 && outRecents.isNotBlank()) {
             val matcher = RECENTS_PATTERN.matcher(outRecents)
@@ -209,7 +214,7 @@ class PassThroughService : Service() {
 
     private fun setPassThroughSysfs(enabled: Boolean): Boolean {
         val value = if (enabled) "1" else "0"
-        val cmd = "echo $value > /sys/class/power_supply/battery/pass_through; echo $value > /sys/class/power_supply/battery/batt_slate_mode; echo __OK__sysfs"
+        val cmd = "for p in /sys/class/power_supply/battery/pass_through /sys/class/power_supply/battery/batt_slate_mode /sys/class/sec/battery/pass_through /sys/class/power_supply/sec-battery/pass_through; do [ -e \"\$p\" ] && echo $value > \"\$p\"; done; echo __OK__sysfs"
         val (code, out) = RootShell.exec(cmd, timeoutSeconds = 4)
         return code == 0 && out.contains("__OK__sysfs")
     }
@@ -354,6 +359,9 @@ class PassThroughService : Service() {
         private const val POLL_IDLE_MS = 15_000L
         private val FOCUSED_WINDOW_PATTERN = Pattern.compile(
             "mCurrentFocus=Window\\{[^\\}]*?\\s+(?:u[0-9]+\\s+)?([A-Za-z0-9_.$]+)/"
+        )
+        private val RESUMED_ACTIVITY_PATTERN = Pattern.compile(
+            "(?:topResumedActivity|mResumedActivity)(?:=|:)\\s*(?:ActivityRecord\\{[^\\}]*?\\s+)?(?:u[0-9]+\\s+)?([A-Za-z0-9_.$]+)/"
         )
         private val RECENTS_PATTERN = Pattern.compile(
             "topActivity=\\{([A-Za-z0-9_.$]+)/"

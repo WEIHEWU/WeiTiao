@@ -32,6 +32,10 @@ object CscConstants {
     const val PROP_OMCNW_CODE = "ro.csc.omcnw_code"
     const val PROP_OFFICIAL_CSC = "ro.csc.official_csc"
     const val PROP_CSC_CODE = "ro.csc.csc_code"
+    const val PROP_COUNTRYISO_CODE = "ro.csc.countryiso_code"
+    const val PROP_BOOT_SALES_CODE = "ro.boot.sales_code"
+    const val PROP_PERSIST_SYS_OMC_SALES_CODE = "persist.sys.omc_sales_code"
+    const val PROP_RIL_OFFICIAL_CSCCODE = "ril.official_csccode"
 
     const val PROP_GSM_SIM_NUMERIC = "gsm.sim.operator.numeric"
     const val PROP_GSM_OPERATOR_NUMERIC = "gsm.operator.numeric"
@@ -48,8 +52,12 @@ object CscConstants {
         PROP_OMCNW_CODE to PropKind.SALES_CODE,
         PROP_OFFICIAL_CSC to PropKind.SALES_CODE,
         PROP_CSC_CODE to PropKind.SALES_CODE,
+        PROP_BOOT_SALES_CODE to PropKind.SALES_CODE,
+        PROP_PERSIST_SYS_OMC_SALES_CODE to PropKind.SALES_CODE,
+        PROP_RIL_OFFICIAL_CSCCODE to PropKind.SALES_CODE,
 
         PROP_COUNTRY_CODE to PropKind.COUNTRY_CODE,
+        PROP_COUNTRYISO_CODE to PropKind.COUNTRY_CODE,
         PROP_PERSIST_OMC_COUNTRY_CODE to PropKind.COUNTRY_CODE,
         PROP_RO_OMC_COUNTRY_CODE to PropKind.COUNTRY_CODE,
 

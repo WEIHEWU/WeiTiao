@@ -15,9 +15,9 @@ android {
     defaultConfig {
         applicationId = "com.weitiao.tuning"
         minSdk = 26
-        targetSdk = 36
-        versionCode = 24
-        versionName = "1.4.4"
+        targetSdk = 37
+        versionCode = 25
+        versionName = "1.4.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

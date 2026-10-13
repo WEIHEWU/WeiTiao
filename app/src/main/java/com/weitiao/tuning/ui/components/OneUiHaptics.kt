@@ -8,7 +8,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalView
 
 /**
- * Samsung One UI 8.5 原生触觉反馈引擎
+ * Samsung One UI 8.5 / One UI 9 (Android 17) 原生触觉反馈引擎
  * 提供开关切换、模式点按、成功吸附与轻微确认反馈
  */
 class OneUiHaptics(private val view: View) {

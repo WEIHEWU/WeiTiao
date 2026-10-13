@@ -275,7 +275,9 @@ class MainHook : XposedModule() {
     private fun applyBuildFields(config: CscConfig, packageName: String) {
         if (!isDeviceTarget(config, packageName)) return
         val profile = CscSpoof.deviceProfileFor(config) ?: return
-        val fingerprint = "${profile.brand}/${profile.productName}/${profile.device}:14/UP1A.231005.007/${profile.model}:user/release-keys"
+        val osRelease = Build.VERSION.RELEASE.ifBlank { "17" }
+        val buildId = Build.ID.ifBlank { "UP1A.231005.007" }
+        val fingerprint = "${profile.brand}/${profile.productName}/${profile.device}:$osRelease/$buildId/${profile.model}:user/release-keys"
         val values = mapOf(
             "MODEL" to profile.model,
             "DEVICE" to profile.device,
@@ -285,8 +287,8 @@ class MainHook : XposedModule() {
             "BOARD" to profile.device,
             "HARDWARE" to profile.device,
             "FINGERPRINT" to fingerprint,
-            "ID" to "UP1A.231005.007",
-            "DISPLAY" to "${profile.model}_UP1A.231005.007",
+            "ID" to buildId,
+            "DISPLAY" to "${profile.model}_$buildId",
             "SOC_MODEL" to profile.device,
             "TAGS" to "release-keys",
             "TYPE" to "user",
