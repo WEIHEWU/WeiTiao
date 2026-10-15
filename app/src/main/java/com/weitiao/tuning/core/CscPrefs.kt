@@ -2,6 +2,7 @@ package com.weitiao.tuning.core
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import com.weitiao.tuning.App
 
 /**
@@ -27,9 +28,13 @@ object CscPrefs {
     fun save(context: Context, config: CscConfig) {
         val remote = App.getXposedService()?.getRemotePreferences(CscConstants.PREFS_NAME)
         if (remote != null) {
-            val editor = remote.edit()
-            CscConfig.toPrefs(editor, config)
-            editor.apply()
+            runCatching {
+                val editor = remote.edit()
+                CscConfig.toPrefs(editor, config)
+                editor.apply()
+            }.onFailure {
+                Log.e("CscPrefs", "写入 LSPosed remote preferences 失败", it)
+            }
             // 双写本地，保证 UI 进程自己也能读到（框架掉线/重启后仍有值）
             val localEditor = localPrefs(context).edit()
             CscConfig.toPrefs(localEditor, config)

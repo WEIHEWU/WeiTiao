@@ -1,5 +1,6 @@
 package com.weitiao.tuning.core
 
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -110,8 +111,19 @@ data class CscConfig(
             marketUnlockRaw = prefs.getString(KEY_MARKET_UNLOCK_RAW, "") ?: "",
             spoofDevice = prefs.getBoolean(KEY_SPOOF_DEVICE, false),
             deviceName = prefs.getString(KEY_DEVICE_NAME, "") ?: "",
-            deviceTargetPackages = prefs.getStringSet(KEY_DEVICE_TARGET_PACKAGES, emptySet())
-                ?.toSet().orEmpty(),
+            deviceTargetPackages = runCatching {
+                val raw = runCatching { prefs.getString(KEY_DEVICE_TARGET_PACKAGES, null) }.getOrNull()
+                if (!raw.isNullOrBlank()) {
+                    if (raw.startsWith("[")) {
+                        val arr = JSONArray(raw)
+                        (0 until arr.length()).map { arr.getString(it) }.toSet()
+                    } else {
+                        raw.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+                    }
+                } else {
+                    runCatching { prefs.getStringSet(KEY_DEVICE_TARGET_PACKAGES, null)?.toSet() }.getOrNull().orEmpty()
+                }
+            }.getOrDefault(emptySet()),
             deviceTargetFilterEnabled = prefs.getBoolean(KEY_DEVICE_TARGET_FILTER, false),
             customProps = jsonToMap(prefs.getString(KEY_CUSTOM_PROPS, null)),
             customCscFeatures = jsonToMap(prefs.getString(KEY_CUSTOM_FEATURES, null)),
@@ -136,7 +148,11 @@ data class CscConfig(
             prefs.putString(KEY_MARKET_UNLOCK_RAW, config.marketUnlockRaw)
             prefs.putBoolean(KEY_SPOOF_DEVICE, config.spoofDevice)
             prefs.putString(KEY_DEVICE_NAME, config.deviceName)
-            prefs.putStringSet(KEY_DEVICE_TARGET_PACKAGES, config.deviceTargetPackages.toSet())
+            // 采用 JSON 字符串传输，彻底杜绝 Binder 跨进程传输 EmptySet/Set 抛 BadParcelableException 崩溃
+            val targetPkgsJson = JSONArray().apply {
+                config.deviceTargetPackages.forEach { put(it) }
+            }.toString()
+            prefs.putString(KEY_DEVICE_TARGET_PACKAGES, targetPkgsJson)
             prefs.putBoolean(KEY_DEVICE_TARGET_FILTER, config.deviceTargetFilterEnabled)
             prefs.putString(KEY_CUSTOM_PROPS, mapToJson(config.customProps))
             prefs.putString(KEY_CUSTOM_FEATURES, mapToJson(config.customCscFeatures))

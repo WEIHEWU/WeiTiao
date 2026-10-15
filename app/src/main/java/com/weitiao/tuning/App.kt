@@ -170,8 +170,15 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
             true
         }
         is Set<*> -> {
-            @Suppress("UNCHECKED_CAST")
-            editor.putStringSet(key, value as Set<String>)
+            val set = java.util.HashSet<String>()
+            for (item in value) {
+                if (item is String) set.add(item)
+            }
+            if (set.isNotEmpty()) {
+                editor.putStringSet(key, set)
+            } else {
+                editor.remove(key)
+            }
             true
         }
         else -> {

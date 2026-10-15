@@ -23,17 +23,19 @@ jobs:
       - name: Create GitHub Release and Upload APK
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.4.5
-          name: "微调 WeiTiao v1.4.5 (官方全面适配三星 One UI 9 & 安卓 17 版)"
+          tag_name: v1.4.6
+          name: "微调 WeiTiao v1.4.6 (修复跨区闪退 & 纯净去Emoji & 移除谷歌作用域)"
           body: |
-            ### 微调 (WeiTiao) v1.4.5
+            ### 微调 (WeiTiao) v1.4.6
 
-            - **官方全面适配三星 One UI 9 与 Android 17 (API 37)**：
-              - **目标 SDK 全面升级至 Android 17 (`targetSdk 37`, `compileSdk 37`)**：完全匹配 Android 17 / One UI 9 运行环境与安全策略；
-              - **CSC 判区拦截增强**：补齐 One UI 9 / 8.5 商店判区新增属性拦截（`ro.csc.countryiso_code`、`ro.boot.sales_code`、`persist.sys.omc_sales_code`、`ril.official_csccode`），跨区解锁 100% 稳固；
-              - **前台游戏监测全版本兼容**：USB PD 旁路供电前台检测新增 `topResumedActivity=` / `mResumedActivity=` 多路解析，并在 sysfs 控制层扩展兼容 One UI 9 / Galaxy S25 / S26 充电节点；
-              - **动态指纹伪装**：机型伪装指纹由原本固定的 Android 14 签名升级为自适应系统主版本与 Build ID（自适应 Android 17 / One UI 9），防止被现代应用识别出版本不匹配；
-              - **触觉与视觉 Tokens 升级**：触觉反馈与曲率规范无缝契合 One UI 9 官方设计语言。
-            - **极致轻量化**：R8 深度裁剪后正式版安装包仅 **1.6 MB**，O(1) 哈希属性查表，零冗余后台唤醒。
+            - **彻底修复点击商店跨区闪退及 One UI 9 不生效问题**：
+              - **根因修复**：排查发现点击区域切换保存配置时，`deviceTargetPackages` 序列化向 LSPosed remote preferences 发送了 `kotlin.collections.EmptySet`，导致 LSPosed 守护进程 Binder IPC 反序列化抛出 `BadParcelableException: ClassNotFoundException reading a Serializable object (name = kotlin.collections.EmptySet)` 闪退；
+              - **彻底消除隐患**：全面改用 JSON 字符串传输包名过滤列表，并加入全局 `runCatching` 兜底保护，零跨进程序列化异常风险，配置 100% 成功落盘并即时推送到 Hook 进程。
+            - **移除非必要作用域（移除 Google Play 商店）**：
+              - 官方推荐作用域中彻底剔除 `com.android.vending`（Google Play），聚焦纯粹的三星官方应用（Galaxy Store、主题商店、三星账号判区服务）与微信，不再误拦截或污染 Google 服务。
+            - **全应用去除所有 Emoji 标识，纯净节能**：
+              - 移除预设国旗 Emoji（香港、美国、欧洲、台湾、韩国、大陆），移除状态卡与通知中的 Emoji 图标，全面改用纯粹且精致的 One UI 原生排版字体，大幅节省字体渲染缓存与系统资源。
+            - **One UI 9 属性拦截补强**：
+              - 补充拦截 `persist.audio.sales_code` 与 `persist.sys.prev_omcnwcode`，彻底杜绝 One UI 9 商店读取真实出厂 CSC 漏网。
           files: |
-            releases/WeiTiao-v1.4.5.apk
+            releases/WeiTiao-v1.4.6.apk

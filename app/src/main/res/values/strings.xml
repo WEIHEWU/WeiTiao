@@ -58,7 +58,7 @@
     <string name="dashboard_spoof_enabled">伪装已启用</string>
     <string name="dashboard_spoof_disabled">伪装已停用</string>
     <string name="spoof_subtitle">应用商店跨区解锁與应用级硬件机型标识</string>
-    <string name="native_baseline_format">📱 当前设备出厂原生基准：CSC %1$s · MCC %2$s (%3$s)</string>
+    <string name="native_baseline_format">当前设备出厂原生基准：CSC %1$s · MCC %2$s (%3$s)</string>
     <string name="action_restore_factory">恢复出厂原生</string>
     <string name="restore_factory_success">已关闭区域伪装并恢复出厂原生配置（%1$s）</string>
     <string name="presets_title">应用商店区域切换</string>

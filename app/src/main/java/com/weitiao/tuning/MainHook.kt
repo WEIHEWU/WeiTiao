@@ -646,7 +646,6 @@ class MainHook : XposedModule() {
             "com.sec.android.app.samsungapps",
             "com.samsung.android.themestore",
             "com.samsung.android.themecenter",
-            "com.android.vending",
             "com.osp.app.signin",
             "com.samsung.android.samsungaccount",
             "com.samsung.android.authfw",

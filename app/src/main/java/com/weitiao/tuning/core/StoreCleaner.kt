@@ -36,7 +36,6 @@ object StoreCleaner {
             append("setprop gsm.operator.alpha $cleanAlpha; ")
             append("setprop gsm.sim.operator.alpha $cleanAlpha; ")
             append("pkill -9 -f $GALAXY_STORE; am force-stop $GALAXY_STORE; ")
-            append("pkill -9 -f com.android.vending; am force-stop com.android.vending; ")
         }
         val (code, _) = RootShell.exec(cmd)
         return code == 0
@@ -62,7 +61,6 @@ object StoreCleaner {
             append("\$RP -d gsm.sim.operator.alpha 2>/dev/null; ")
             append("fi; ")
             append("pm clear $GALAXY_STORE; am force-stop $GALAXY_STORE; ")
-            append("pkill -9 -f com.android.vending; am force-stop com.android.vending; ")
         }
         val (code, _) = RootShell.exec(cmd)
         return code == 0

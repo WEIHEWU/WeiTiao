@@ -36,6 +36,9 @@ object CscConstants {
     const val PROP_BOOT_SALES_CODE = "ro.boot.sales_code"
     const val PROP_PERSIST_SYS_OMC_SALES_CODE = "persist.sys.omc_sales_code"
     const val PROP_RIL_OFFICIAL_CSCCODE = "ril.official_csccode"
+    const val PROP_PERSIST_AUDIO_SALES_CODE = "persist.audio.sales_code"
+    const val PROP_PERSIST_SYS_PREV_OMCNWCODE = "persist.sys.prev_omcnwcode"
+    const val PROP_PERSIST_SYS_PREV_OMCNWCODE2 = "persist.sys.prev_omcnwcode2"
 
     const val PROP_GSM_SIM_NUMERIC = "gsm.sim.operator.numeric"
     const val PROP_GSM_OPERATOR_NUMERIC = "gsm.operator.numeric"
@@ -55,6 +58,9 @@ object CscConstants {
         PROP_BOOT_SALES_CODE to PropKind.SALES_CODE,
         PROP_PERSIST_SYS_OMC_SALES_CODE to PropKind.SALES_CODE,
         PROP_RIL_OFFICIAL_CSCCODE to PropKind.SALES_CODE,
+        PROP_PERSIST_AUDIO_SALES_CODE to PropKind.SALES_CODE,
+        PROP_PERSIST_SYS_PREV_OMCNWCODE to PropKind.SALES_CODE,
+        PROP_PERSIST_SYS_PREV_OMCNWCODE2 to PropKind.SALES_CODE,
 
         PROP_COUNTRY_CODE to PropKind.COUNTRY_CODE,
         PROP_COUNTRYISO_CODE to PropKind.COUNTRY_CODE,

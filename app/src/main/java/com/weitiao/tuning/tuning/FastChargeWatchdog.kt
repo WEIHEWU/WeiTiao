@@ -159,7 +159,7 @@ object FastChargeFallback {
             Log.i(TAG, "兜底路径已下发温控策略 success=${result.success}")
         } else {
             FastChargeController.restoreTemperatureNodes()
-            FastChargeNotifier.postLive(context, "🌙 息屏安全充 · 电量:$level%")
+            FastChargeNotifier.postLive(context, "息屏安全充 · 电量:$level%")
         }
 
         // 若此刻处于允许启动前台服务的时机（例如开机广播），顺带拉起常驻服务

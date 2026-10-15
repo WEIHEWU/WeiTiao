@@ -1,10 +1,10 @@
 # 微调 (WeiTiao)
 
-[English](README.en.md) · **[📥 点击直接下载安装包 (WeiTiao-v1.4.5.apk · 1.6 MB)](https://github.com/WEIHEWU/WeiTiao/raw/main/releases/WeiTiao-v1.4.5.apk)** · [Releases 页面](https://github.com/WEIHEWU/WeiTiao/releases)
+[English](README.en.md) · **[点击直接下载安装包 (WeiTiao-v1.4.6.apk · 1.6 MB)](https://github.com/WEIHEWU/WeiTiao/raw/main/releases/WeiTiao-v1.4.6.apk)** · [Releases 页面](https://github.com/WEIHEWU/WeiTiao/releases)
 
 一个基于 `libxposed API 102`、`Root` 与 **`miuix` (`0.8.8`)** 界面的三星 One UI 增强模块，集成 **应用商店跨区解锁（CSC/SIM 伪装）**、**硬件机型伪装**、**微信运动步数与消息防撤回**、**亮屏快充** 以及 **USB PD 应用旁路供电**。
 
-当前版本：`1.4.5`（`versionCode 25`）。
+当前版本：`1.4.6`（`versionCode 26`）。
 
 > 全面测试并官方适配三星 One UI 8.5 / One UI 9（Android 17 / API 37），兼容搭载 One UI 的 Galaxy 全系机型。
 
@@ -14,7 +14,7 @@
   - 基于 `top.yukonga.miuix.kmp:miuix:0.8.8` 全面构建，支持可折叠大标题导航栏、物理弹性越界回弹 (`overScrollVertical`)、G2 连续曲率圆角 (`smoothRounding`) 与 `folmeSpring` 物理弹簧弹窗动画。
 - **应用商店跨区解锁（CSC + SIM 联合伪装）**：
   - 内置 6 大精选预设（中国香港、美国公开版、欧洲通用版、中国台湾、韩国官方版、中国大陆）及全球 80 个国家/运营商预设检索库；
-  - 仅对应用商店（Galaxy Store / 主题商店 / Play 商店 / 三星账号判区组件）返回目标 CSC 与 SIM 运营商信息，**绝不注入系统框架 (`android`) 或电话服务 (`com.android.phone`)，确保物理 SIM 卡与系统基带 100% 原生稳定**；
+  - 仅对应用商店（Galaxy Store / 主题商店 / 三星账号判区组件）返回目标 CSC 与 SIM 运营商信息，**绝不注入系统框架 (`android`) 或电话服务 (`com.android.phone`)，确保物理 SIM 卡与系统基带 100% 原生稳定**；
   - 支持一键清理商店缓存并立即切换区域，支持一键恢复出厂原生状态。
 - **硬件机型伪装**：
   - 内置 126 款主流多品牌旗舰机型，支持自定义型号名称与指定目标应用生效。
@@ -35,7 +35,6 @@
 
 - `com.sec.android.app.samsungapps`（三星应用商店 Galaxy Store）
 - `com.samsung.android.themestore` / `com.samsung.android.themecenter`（三星主题商店）
-- `com.android.vending`（Google Play 商店）
 - `com.osp.app.signin` / `com.samsung.android.samsungaccount` / `com.samsung.android.authfw`（三星账号判区服务）
 - `com.tencent.mm`（微信）
 

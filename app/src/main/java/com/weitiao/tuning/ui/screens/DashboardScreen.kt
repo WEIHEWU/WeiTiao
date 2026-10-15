@@ -121,7 +121,6 @@ private const val PANEL_STEPS = 1
 private const val PANEL_POWER = 2
 
 private data class CompactPreset(
-    val flag: String,
     val labelZh: String,
     val labelEn: String,
     val nameRes: Int,
@@ -134,12 +133,12 @@ private data class CompactPreset(
 )
 
 private val QUICK_REGION_PRESETS = listOf(
-    CompactPreset("🇭🇰", "香港", "HK", R.string.preset_hk_name, "TGY", "454", "HK", "45406", "SmarTone", "06"),
-    CompactPreset("🇺🇸", "美国", "US", R.string.preset_us_name, "XAA", "310", "US", "310260", "T-Mobile", "260"),
-    CompactPreset("🇪🇺", "欧洲", "EU", R.string.preset_eu_name, "EUX", "262", "DE", "26201", "T-Mobile", "01"),
-    CompactPreset("🇹🇼", "台湾", "TW", R.string.preset_tw_name, "BRI", "466", "TW", "46688", "Telecom", "88"),
-    CompactPreset("🇰🇷", "韩国", "KR", R.string.preset_kr_name, "KOO", "450", "KR", "45005", "SKT", "05"),
-    CompactPreset("🇨🇳", "大陆", "CN", R.string.preset_cn_name, "CHC", "460", "CN", "46000", "CHINA MOBILE", "00"),
+    CompactPreset("香港", "HK", R.string.preset_hk_name, "TGY", "454", "HK", "45406", "SmarTone", "06"),
+    CompactPreset("美国", "US", R.string.preset_us_name, "XAA", "310", "US", "310260", "T-Mobile", "260"),
+    CompactPreset("欧洲", "EU", R.string.preset_eu_name, "EUX", "262", "DE", "26201", "T-Mobile", "01"),
+    CompactPreset("台湾", "TW", R.string.preset_tw_name, "BRI", "466", "TW", "46688", "Telecom", "88"),
+    CompactPreset("韩国", "KR", R.string.preset_kr_name, "KOO", "450", "KR", "45005", "SKT", "05"),
+    CompactPreset("大陆", "CN", R.string.preset_cn_name, "CHC", "460", "CN", "46000", "CHINA MOBILE", "00"),
 )
 
 private data class StepTierPreset(
@@ -429,9 +428,9 @@ fun DashboardScreen(
                 if (isZh) "Root 硬件直控" else "Root Mode"
             }
             val powerTag = if (isPlugged) {
-                if (isZh) "⚡ 充电中 $batteryLevel%" else "⚡ Charging $batteryLevel%"
+                if (isZh) "充电中 $batteryLevel%" else "Charging $batteryLevel%"
             } else {
-                if (isZh) "🔋 电量 $batteryLevel%" else "🔋 Battery $batteryLevel%"
+                if (isZh) "电量 $batteryLevel%" else "Battery $batteryLevel%"
             }
             MiuixHeroStatusCard(
                 statusTitle = when {
@@ -619,7 +618,7 @@ fun DashboardScreen(
                                             verticalArrangement = Arrangement.spacedBy(1.dp),
                                         ) {
                                             Text(
-                                                text = "${preset.flag} ${if (isZh) preset.labelZh else preset.labelEn}",
+                                                text = if (isZh) preset.labelZh else preset.labelEn,
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.Medium,
                                                 color = fgColor,
@@ -1009,7 +1008,7 @@ fun DashboardScreen(
     val presetName = stringResource(preset.nameRes)
     WindowDialog(
         show = showPresetConfirmDialog != null,
-        title = "${preset.flag} ${stringResource(R.string.preset_confirm_title, presetName)}",
+        title = stringResource(R.string.preset_confirm_title, presetName),
         onDismissRequest = { showPresetConfirmDialog = null },
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
