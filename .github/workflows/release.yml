@@ -23,19 +23,18 @@ jobs:
       - name: Create GitHub Release and Upload APK
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.4.6
-          name: "微调 WeiTiao v1.4.6 (修复跨区闪退 & 纯净去Emoji & 移除谷歌作用域)"
+          tag_name: v1.4.7
+          name: "微调 WeiTiao v1.4.7 (修复硬件直控温度显示0 & 纠偏出厂原生逻辑)"
           body: |
-            ### 微调 (WeiTiao) v1.4.6
+            ### 微调 (WeiTiao) v1.4.7
 
-            - **彻底修复点击商店跨区闪退及 One UI 9 不生效问题**：
-              - **根因修复**：排查发现点击区域切换保存配置时，`deviceTargetPackages` 序列化向 LSPosed remote preferences 发送了 `kotlin.collections.EmptySet`，导致 LSPosed 守护进程 Binder IPC 反序列化抛出 `BadParcelableException: ClassNotFoundException reading a Serializable object (name = kotlin.collections.EmptySet)` 闪退；
-              - **彻底消除隐患**：全面改用 JSON 字符串传输包名过滤列表，并加入全局 `runCatching` 兜底保护，零跨进程序列化异常风险，配置 100% 成功落盘并即时推送到 Hook 进程。
-            - **移除非必要作用域（移除 Google Play 商店）**：
-              - 官方推荐作用域中彻底剔除 `com.android.vending`（Google Play），聚焦纯粹的三星官方应用（Galaxy Store、主题商店、三星账号判区服务）与微信，不再误拦截或污染 Google 服务。
-            - **全应用去除所有 Emoji 标识，纯净节能**：
-              - 移除预设国旗 Emoji（香港、美国、欧洲、台湾、韩国、大陆），移除状态卡与通知中的 Emoji 图标，全面改用纯粹且精致的 One UI 原生排版字体，大幅节省字体渲染缓存与系统资源。
-            - **One UI 9 属性拦截补强**：
-              - 补充拦截 `persist.audio.sales_code` 与 `persist.sys.prev_omcnwcode`，彻底杜绝 One UI 9 商店读取真实出厂 CSC 漏网。
+            - **彻底修复顶部 Hero 状态大卡温度显示 0.0°C**：
+              - **根因修复**：开启亮屏快充时控制器将三星充电温控节点执行了 `chmod 0000` 屏蔽，系统 Android 框架 `BatteryService` 无法从 sysfs 读取数据而广播 `EXTRA_TEMPERATURE = 0`，导致主页 Hero 卡渲染为 `0.0°C`；
+              - **硬件直读与异步轮询**：`FastChargeController` 增强硬件直读通道，优先读取未屏蔽的真实硬件温度节点（`batt_temp_raw`、`sec-cf-thermistor`、`sec-lp-thermistor` 等）；主页在收到 0 度广播或亮屏快充运行期间，异步直接读取硬件真机温度，彻底根除 0.0°C。
+            - **纠偏并废除“恢复出厂原生/出厂基准”错误逻辑**：
+              - 用户指出：设备的真实原生状态是由物理销售地区与插入的物理 SIM 卡运营商决定的，并非由刷机包固件的 `sales_code` 或基带版本决定；
+              - 逻辑纠偏：全面废除“出厂原生基准”和“恢复出厂原生”这一虚假概念；将其精简为“关闭跨区伪装”功能，关闭后完全不注入任何 CSC 与运营商参数，使三星商店完全根据物理 SIM 卡与网络自然识别。
+            - **充电发热科学验证**：
+              - 经真机耗电诊断（`batterystats`），微调 App 全天 CPU 消耗仅为 2.61 秒（占用率约 0.024%），发热系亮屏快充解除限流后 5.84A（约 24W）直冲锂电池带来的物理正常焦耳热（相比三星亮屏限流 1.5A 约增大 15 倍发热），属于正常物理特性。
           files: |
-            releases/WeiTiao-v1.4.6.apk
+            releases/WeiTiao-v1.4.7.apk

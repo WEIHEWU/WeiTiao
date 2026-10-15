@@ -1,10 +1,10 @@
 # WeiTiao
 
-[中文说明](README.md) · **[Direct Download APK (WeiTiao-v1.4.6.apk · 1.6 MB)](https://github.com/WEIHEWU/WeiTiao/raw/main/releases/WeiTiao-v1.4.6.apk)** · [Releases](https://github.com/WEIHEWU/WeiTiao/releases)
+[中文说明](README.md) · **[Direct Download APK (WeiTiao-v1.4.7.apk · 1.6 MB)](https://github.com/WEIHEWU/WeiTiao/raw/main/releases/WeiTiao-v1.4.7.apk)** · [Releases](https://github.com/WEIHEWU/WeiTiao/releases)
 
 An LSPosed (`libxposed API 102`) & Root enhancement module for Samsung One UI built with **`miuix` (`0.8.8`)**, combining **App Store Region Unlock (CSC/SIM spoofing)**, **Hardware Model Spoofing**, **WeChat Steps & Anti-Recall**, **Screen-On Fast Charging**, and **USB PD Bypass Power**.
 
-Current version: `1.4.6` (`versionCode 26`).
+Current version: `1.4.7` (`versionCode 27`).
 
 > Fully tested and officially adapted for Samsung One UI 8.5 / One UI 9 (Android 17 / API 37), compatible with all Galaxy devices running One UI.
 
@@ -15,7 +15,7 @@ Current version: `1.4.6` (`versionCode 26`).
 - **Store Region Unlock (CSC + SIM Spoofing)**:
   - 6 curated presets (Hong Kong, US Unlocked, Europe Open, Taiwan, South Korea, Mainland China) plus a searchable database of 80 global country/carrier presets;
   - Spoofs CSC and SIM operator info **only for store apps** (Galaxy Store, Theme Store, Samsung Account region services) — **never hooks `android` system framework or `com.android.phone`, keeping physical SIM and baseband 100% native and stable**;
-  - One-tap store cache reset and one-tap restore to factory native state.
+  - One-tap store cache reset and one-tap disable to restore native physical SIM detection.
 - **Hardware Model Spoofing**:
   - 126 built-in flagship device profiles across multiple brands, with custom model support and per-app targeting.
 - **WeChat Enhancements (LSPosed Hook)**:

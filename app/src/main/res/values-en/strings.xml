@@ -50,7 +50,6 @@
     <string name="preset_kr_tag">KR Store · First-wave Modules</string>
     <string name="preset_cn_name">Mainland China</string>
     <string name="preset_cn_tag">CN Default · Local Services</string>
-    <string name="factory_baseline_format">Factory: %1$s · MCC %2$s</string>
     <string name="search_all_csc_desc">Search all 80 curated regional &amp; carrier presets by country or MCC</string>
 
     <!-- SpoofScreen -->
@@ -58,9 +57,9 @@
     <string name="dashboard_spoof_enabled">Spoofing enabled</string>
     <string name="dashboard_spoof_disabled">Spoofing disabled</string>
     <string name="spoof_subtitle">App Store region unlock &amp; per-app hardware model identity</string>
-    <string name="native_baseline_format">Native Device Baseline: CSC %1$s · MCC %2$s (%3$s)</string>
-    <string name="action_restore_factory">Restore Native</string>
-    <string name="restore_factory_success">Spoofing disabled and restored to native default (%1$s)</string>
+    <string name="action_disable_spoofing">Disable Region Spoofing</string>
+    <string name="disable_spoofing_desc">Restore native state, store follows physical SIM &amp; network naturally</string>
+    <string name="disable_spoofing_success">Region spoofing disabled, restored to native SIM</string>
     <string name="presets_title">Store Region Switcher</string>
     <string name="presets_subtitle">Applies only to store apps without affecting physical SIM or baseband</string>
     <string name="search_all_csc_btn">Search all 80 Country &amp; Carrier Presets</string>
@@ -72,7 +71,7 @@
     <string name="module_enabled">Enabled</string>
     <string name="module_disabled">All region and device spoofing paused</string>
     <string name="target_region">Active Region</string>
-    <string name="current_active_format">Active: %1$s · Factory: %2$s</string>
+    <string name="current_active_format">Active: %1$s</string>
     <string name="sales_code_label">Sales Code (CSC)</string>
     <string name="country_code_label">Country Code</string>
     <string name="sim_spoof_title">SIM Carrier Spoofing</string>

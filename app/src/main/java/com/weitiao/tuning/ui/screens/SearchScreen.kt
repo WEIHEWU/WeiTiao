@@ -84,8 +84,9 @@ fun SearchScreen(
     pendingConfirmEntry?.let { lastConfirmEntry = it }
 
     val currentRegionText = remember(currentCsc, catalog, nativeInfo) {
+        val isZh = context.resources.configuration.locales[0].language.startsWith("zh")
         if (!currentCsc.enabled) {
-            "${nativeInfo.salesCode} (MCC ${nativeInfo.simMcc})"
+            if (isZh) "未开启伪装 (原生识别)" else "Native (Unmodified)"
         } else {
             val matched = catalog.find {
                 (currentCsc.simNumeric.isNotBlank() && it.numeric == currentCsc.simNumeric) ||
@@ -96,7 +97,7 @@ fun SearchScreen(
             } else if (currentCsc.simNumeric.isNotBlank()) {
                 "${currentCsc.countryCode} ${currentCsc.simNumeric}"
             } else {
-                currentCsc.salesCode.ifBlank { "${nativeInfo.salesCode} (MCC ${nativeInfo.simMcc})" }
+                currentCsc.salesCode.ifBlank { if (isZh) "未开启伪装" else "Native" }
             }
         }
     }

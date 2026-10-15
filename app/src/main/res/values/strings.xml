@@ -50,7 +50,6 @@
     <string name="preset_kr_tag">韩国本土商店 · 首发组件</string>
     <string name="preset_cn_name">中国大陆</string>
     <string name="preset_cn_tag">国行默认 · 本地化服务</string>
-    <string name="factory_baseline_format">出厂基准: %1$s · MCC %2$s</string>
     <string name="search_all_csc_desc">按国家、运营商或 MCC 检索全部 80 个地区预设</string>
 
     <!-- 伪装主页 SpoofScreen -->
@@ -58,9 +57,9 @@
     <string name="dashboard_spoof_enabled">伪装已启用</string>
     <string name="dashboard_spoof_disabled">伪装已停用</string>
     <string name="spoof_subtitle">应用商店跨区解锁與应用级硬件机型标识</string>
-    <string name="native_baseline_format">当前设备出厂原生基准：CSC %1$s · MCC %2$s (%3$s)</string>
-    <string name="action_restore_factory">恢复出厂原生</string>
-    <string name="restore_factory_success">已关闭区域伪装并恢复出厂原生配置（%1$s）</string>
+    <string name="action_disable_spoofing">关闭跨区伪装</string>
+    <string name="disable_spoofing_desc">还原原生状态，商店根据物理 SIM 与网络自然识别</string>
+    <string name="disable_spoofing_success">已关闭跨区伪装，恢复物理 SIM 原生识别</string>
     <string name="presets_title">应用商店区域切换</string>
     <string name="presets_subtitle">选择预设或搜索全球代码，仅对应用商店生效，不影响物理 SIM 卡与信号</string>
     <string name="search_all_csc_btn">搜索全部 80 个国家/地区预设</string>
@@ -72,7 +71,7 @@
     <string name="module_enabled">已启用</string>
     <string name="module_disabled">已暂停所有地区与机型伪装</string>
     <string name="target_region">当前生效区域</string>
-    <string name="current_active_format">当前生效: %1$s · 真实出厂: %2$s</string>
+    <string name="current_active_format">当前生效: %1$s</string>
     <string name="sales_code_label">销售代码 (CSC)</string>
     <string name="country_code_label">国家代码</string>
     <string name="sim_spoof_title">SIM 卡运营商信息伪装</string>

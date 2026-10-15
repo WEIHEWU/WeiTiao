@@ -121,6 +121,9 @@ object FastChargeController {
                 "echo V=\$(cat /sys/class/power_supply/battery/voltage_now 2>/dev/null); " +
                 "echo T=\$(cat /sys/class/power_supply/battery/batt_temp_raw 2>/dev/null); " +
                 "echo T2=\$(cat /sys/class/sec/sec-cf-thermistor/temperature 2>/dev/null); " +
+                "echo T3=\$(cat /sys/class/sec/sec-thermistor/temperature 2>/dev/null); " +
+                "echo T4=\$(cat /sys/class/sec/sec-lp-thermistor/temperature 2>/dev/null); " +
+                "echo T5=\$(cat /sys/class/power_supply/battery/temp 2>/dev/null); " +
                 "echo __DONE__",
             // su 首次调用有启动开销（冷启动/刚解锁时可达 1s 以上），2s 太紧，
             // 超时会直接拿不到读数，表现为通知栏电流信息缺失。
@@ -142,6 +145,9 @@ object FastChargeController {
 
             tempTenths = normalizeTemp(taggedInt(stdout, "T"))
             if (tempTenths == 0) tempTenths = normalizeTemp(taggedInt(stdout, "T2"))
+            if (tempTenths == 0) tempTenths = normalizeTemp(taggedInt(stdout, "T3"))
+            if (tempTenths == 0) tempTenths = normalizeTemp(taggedInt(stdout, "T4"))
+            if (tempTenths == 0) tempTenths = normalizeTemp(taggedInt(stdout, "T5"))
         }
 
         // 兜底方案：使用系统 BatteryManager API

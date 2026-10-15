@@ -34,10 +34,10 @@ import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Power
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Smartphone
@@ -76,7 +76,6 @@ import com.weitiao.tuning.R
 import com.weitiao.tuning.core.CscConfig
 import com.weitiao.tuning.core.CscPrefs
 import com.weitiao.tuning.core.HookLiveness
-import com.weitiao.tuning.core.NativeDevice
 import com.weitiao.tuning.core.RegionApplyState
 import com.weitiao.tuning.core.RootShell
 import com.weitiao.tuning.core.StoreCleaner
@@ -94,9 +93,12 @@ import com.weitiao.tuning.ui.components.OneUiNoticeBanner
 import com.weitiao.tuning.ui.components.OneUiSegmentedControl
 import com.weitiao.tuning.ui.components.rememberOneUiHaptics
 import com.weitiao.tuning.ui.theme.OneUiTokens
+import com.weitiao.tuning.tuning.FastChargeController
 import java.text.NumberFormat
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
@@ -177,7 +179,6 @@ fun DashboardScreen(
     val isZh = remember { Locale.getDefault().language.startsWith("zh") }
     val numFmt = remember { NumberFormat.getIntegerInstance(Locale.US) }
 
-    val nativeInfo = remember { NativeDevice.detect(context) }
     var csc by remember { mutableStateOf(CscPrefs.load(context)) }
     var tuning by remember { mutableStateOf(TuningPrefs.load(context)) }
 
@@ -207,20 +208,30 @@ fun DashboardScreen(
     var hasRoot by remember { mutableStateOf(false) }
     var regionCleanupPending by remember { mutableStateOf(RegionApplyState.isPending(context)) }
 
-    var rawSalesCode by remember { mutableStateOf(nativeInfo.salesCode) }
-    var rawSimOperator by remember { mutableStateOf(nativeInfo.simMcc) }
-
     // 实时电池温度与充电状态监听
     var batteryTemp by remember { mutableFloatStateOf(34.5f) }
     var batteryLevel by remember { mutableIntStateOf(80) }
     var isPlugged by remember { mutableStateOf(false) }
 
+    fun refreshHardwareMetrics() {
+        scope.launch(Dispatchers.IO) {
+            val metrics = FastChargeController.readBatteryMetrics(context)
+            if (metrics.temperatureTenths > 0) {
+                batteryTemp = metrics.temperatureTenths / 10f
+            }
+        }
+    }
+
     DisposableEffect(context) {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context?, intent: Intent?) {
                 intent ?: return
-                val tempTenths = intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 345)
-                batteryTemp = tempTenths / 10f
+                val tempTenths = intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0)
+                if (tempTenths > 0) {
+                    batteryTemp = tempTenths / 10f
+                } else {
+                    refreshHardwareMetrics()
+                }
                 val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, 80)
                 val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1)
                 batteryLevel = (level * 100) / scale
@@ -230,7 +241,12 @@ fun DashboardScreen(
         }
         val sticky = context.registerReceiver(receiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
         if (sticky != null) {
-            batteryTemp = sticky.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 345) / 10f
+            val initTemp = sticky.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0)
+            if (initTemp > 0) {
+                batteryTemp = initTemp / 10f
+            } else {
+                refreshHardwareMetrics()
+            }
             val level = sticky.getIntExtra(BatteryManager.EXTRA_LEVEL, 80)
             val scale = sticky.getIntExtra(BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1)
             batteryLevel = (level * 100) / scale
@@ -267,6 +283,24 @@ fun DashboardScreen(
         mutableStateOf(TuningPrefs.isBatteryOptimizationRestricted(context))
     }
 
+    LaunchedEffect(resumeTick, isPlugged, tuning.brightScreenFastCharge) {
+        withContext(Dispatchers.IO) {
+            val metrics = FastChargeController.readBatteryMetrics(context)
+            if (metrics.temperatureTenths > 0) {
+                batteryTemp = metrics.temperatureTenths / 10f
+            }
+        }
+        if (isPlugged || tuning.brightScreenFastCharge) {
+            while (isActive) {
+                delay(4000)
+                val metrics = withContext(Dispatchers.IO) { FastChargeController.readBatteryMetrics(context) }
+                if (metrics.temperatureTenths > 0) {
+                    batteryTemp = metrics.temperatureTenths / 10f
+                }
+            }
+        }
+    }
+
     fun refreshModuleState() {
         if (App.getXposedService() == null && App.getRemotePrefs() == null) {
             moduleState = ModuleState.NOT_CONNECTED
@@ -281,9 +315,6 @@ fun DashboardScreen(
         tuning = TuningPrefs.load(context)
         selectedPassApps = TuningPrefs.selectedApps(context)
         regionCleanupPending = RegionApplyState.isPending(context)
-        val info = NativeDevice.detect(context)
-        rawSalesCode = info.salesCode
-        rawSimOperator = info.simMcc
         refreshModuleState()
     }
 
@@ -576,11 +607,11 @@ fun DashboardScreen(
                     OneUiIslandCard(
                         title = if (isZh) "区域与机型参数" else "Region & Model Parameters",
                         subtitle = if (csc.enabled && csc.salesCode.isNotBlank()) {
-                            if (isZh) "当前伪装: ${csc.salesCode} · ${csc.countryCode} (MCC ${csc.simMcc}) | 出厂: $rawSalesCode"
-                            else "Spoofed: ${csc.salesCode} · ${csc.countryCode} (MCC ${csc.simMcc}) | Factory: $rawSalesCode"
+                            if (isZh) "当前伪装: ${csc.salesCode} · ${csc.countryCode} (MCC ${csc.simMcc})"
+                            else "Spoofed: ${csc.salesCode} · ${csc.countryCode} (MCC ${csc.simMcc})"
                         } else {
-                            if (isZh) "当前出厂原生区域: $rawSalesCode (MCC $rawSimOperator)"
-                            else "Native factory region: $rawSalesCode (MCC $rawSimOperator)"
+                            if (isZh) "未开启伪装 · 商店遵循物理 SIM 卡与网络自然识别"
+                            else "Spoofing disabled · Follows physical SIM & network"
                         },
                     ) {
                         Column(
@@ -643,37 +674,39 @@ fun DashboardScreen(
                             subtitle = stringResource(R.string.search_all_csc_desc),
                             icon = Icons.Default.Search,
                             iconTint = IosGlassTokens.IosPurple,
-                            trailingValue = csc.salesCode.ifBlank { rawSalesCode },
+                            trailingValue = csc.salesCode.ifBlank { if (isZh) "未配置" else "Not set" },
                             showChevron = true,
                             onClick = onOpenSearch,
                         )
 
-                        OneUiItemRow(
-                            title = stringResource(R.string.action_restore_factory),
-                            subtitle = stringResource(R.string.factory_baseline_format, rawSalesCode, rawSimOperator),
-                            icon = Icons.Default.Restore,
-                            iconTint = IosGlassTokens.IosAmber,
-                            showChevron = true,
-                            onClick = {
-                                haptics.confirm()
-                                StoreCleaner.restoreNativeTelephonyProps()
-                                updateCsc(context.getString(R.string.restore_factory_success, rawSalesCode)) {
-                                    it.copy(
-                                        enabled = false,
-                                        salesCode = nativeInfo.salesCode,
-                                        countryCode = nativeInfo.countryCode,
-                                        simMcc = nativeInfo.simMcc,
-                                        simMnc = "",
-                                        simNumeric = "",
-                                        simOperatorName = "",
-                                        simCountryIso = "",
-                                        marketUnlockRaw = "",
-                                        spoofSimInfo = false,
-                                        spoofDevice = false,
-                                    )
-                                }
-                            },
-                        )
+                        if (csc.enabled) {
+                            OneUiItemRow(
+                                title = stringResource(R.string.action_disable_spoofing),
+                                subtitle = stringResource(R.string.disable_spoofing_desc),
+                                icon = Icons.Default.Close,
+                                iconTint = IosGlassTokens.IosRed,
+                                showChevron = false,
+                                onClick = {
+                                    haptics.confirm()
+                                    StoreCleaner.restoreNativeTelephonyProps()
+                                    updateCsc(context.getString(R.string.disable_spoofing_success)) {
+                                        it.copy(
+                                            enabled = false,
+                                            salesCode = "",
+                                            countryCode = "",
+                                            simMcc = "",
+                                            simMnc = "",
+                                            simNumeric = "",
+                                            simOperatorName = "",
+                                            simCountryIso = "",
+                                            marketUnlockRaw = "",
+                                            spoofSimInfo = false,
+                                            spoofDevice = false,
+                                        )
+                                    }
+                                },
+                            )
+                        }
 
                         HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
 
