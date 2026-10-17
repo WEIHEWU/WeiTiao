@@ -30,6 +30,47 @@ class DeviceModelsTest {
         assertEquals("HNE-AL00", pura70Pro.model)
         val pixel9Pro = requireNotNull(DeviceModels.findByName("Pixel 9 Pro"))
         assertEquals("caiman", pixel9Pro.device)
+
+        val oneplus16 = requireNotNull(DeviceModels.findByName("OnePlus 16"))
+        assertEquals("PJZ130", oneplus16.model)
+        assertEquals("OnePlus", oneplus16.brand)
+
+        val iphoneDuo = requireNotNull(DeviceModels.findByName("iPhone Duo"))
+        assertEquals("A3600", iphoneDuo.device)
+        assertEquals("Apple", iphoneDuo.brand)
+
+        val xiaomi17u = requireNotNull(DeviceModels.findByName("Xiaomi 17 Ultra"))
+        assertEquals("26020PN00C", xiaomi17u.model)
+        assertEquals("tianji", xiaomi17u.device)
+    }
+
+    @Test
+    fun legacyAndBudgetModelsAreStrictlyPurgedFromCatalog() {
+        val allNames = DeviceModels.ALL.map { it.name.lowercase() }
+        val purgedLegacyOrMidrange = listOf(
+            "galaxy s21",
+            "galaxy s22",
+            "galaxy s23",
+            "galaxy note20",
+            "galaxy s24 fe",
+            "xiaomi 6",
+            "xiaomi 12",
+            "xiaomi 13",
+            "redmi turbo",
+            "redmi note",
+            "pixel 7",
+            "pixel 8a",
+            "pixel 9a",
+            "iphone 14",
+            "iphone 13",
+            "iphone 12",
+            "meizu 18",
+            "meizu 20 pro",
+        )
+        purgedLegacyOrMidrange.forEach { keyword ->
+            assertTrue("Expected no device matching $keyword in ALL", allNames.none { it.contains(keyword) })
+        }
+        assertTrue("Expected no Sony Xperia 1 V in ALL", allNames.none { it == "sony xperia 1 v" })
     }
 
     @Test

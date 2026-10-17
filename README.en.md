@@ -1,10 +1,10 @@
 # WeiTiao
 
-[中文说明](README.md) · **[Direct Download APK (WeiTiao-v1.4.8.apk · 1.6 MB)](https://github.com/WEIHEWU/WeiTiao/raw/main/releases/WeiTiao-v1.4.8.apk)** · [Releases](https://github.com/WEIHEWU/WeiTiao/releases)
+[中文说明](README.md) · **[Direct Download APK (WeiTiao-v1.4.9.apk · 1.6 MB)](https://github.com/WEIHEWU/WeiTiao/raw/main/releases/WeiTiao-v1.4.9.apk)** · [Releases](https://github.com/WEIHEWU/WeiTiao/releases)
 
 An LSPosed (`libxposed API 102`) & Root enhancement module for Samsung One UI built with **`miuix` (`0.8.8`)**, combining **App Store Region Unlock (CSC/SIM spoofing)**, **Hardware Model Spoofing**, **WeChat Steps & Anti-Recall**, **Screen-On Fast Charging**, and **USB PD Bypass Power**.
 
-Current version: `1.4.8` (`versionCode 28`).
+Current version: `1.4.9` (`versionCode 29`).
 
 > Fully tested and officially adapted for Samsung One UI 8.5 / One UI 9 (Android 17 / API 37), compatible with all Galaxy devices running One UI.
 
@@ -17,7 +17,7 @@ Current version: `1.4.8` (`versionCode 28`).
   - Spoofs CSC and SIM operator info **only for store apps** (Galaxy Store, Theme Store, Samsung Account region services) — **never hooks `android` system framework or `com.android.phone`, keeping physical SIM and baseband 100% native and stable**;
   - One-tap store cache reset and one-tap disable to restore native physical SIM detection.
 - **Hardware Model Spoofing**:
-  - 126 built-in flagship device profiles across multiple brands, with custom model support and per-app targeting.
+  - 143 built-in pure flagship device profiles released within the last 3 years across top brands (including iPhone Duo, OnePlus 16, Xiaomi 17 series), with custom model support and per-app targeting.
 - **WeChat Enhancements (LSPosed Hook)**:
   - **Step Modifier**: Monotonic anchor-offset step engine supporting auto-increment and fixed multiplier modes, daily step cap, and cutoff hour without negative jumps;
   - **Anti-Recall**: Blocks message recall and preserves text, photos, voice notes, and videos;

@@ -711,7 +711,7 @@ fun DashboardScreen(
                         HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
 
                         OneUiItemRow(
-                            title = if (isZh) "选择伪装机型 (126款)" else "Target Device Model (126)",
+                            title = if (isZh) "选择伪装机型 (${com.weitiao.tuning.core.DeviceModels.ALL.size}款)" else "Target Device Model (${com.weitiao.tuning.core.DeviceModels.ALL.size})",
                             subtitle = if (isZh) "修改 Build.MODEL / DEVICE / PRODUCT" else "Spoof Build.MODEL / DEVICE / PRODUCT",
                             icon = Icons.Default.Smartphone,
                             iconTint = IosGlassTokens.IosBlue,

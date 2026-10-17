@@ -1,10 +1,10 @@
 # 微调 (WeiTiao)
 
-[English](README.en.md) · **[点击直接下载安装包 (WeiTiao-v1.4.8.apk · 1.6 MB)](https://github.com/WEIHEWU/WeiTiao/raw/main/releases/WeiTiao-v1.4.8.apk)** · [Releases 页面](https://github.com/WEIHEWU/WeiTiao/releases)
+[English](README.en.md) · **[点击直接下载安装包 (WeiTiao-v1.4.9.apk · 1.6 MB)](https://github.com/WEIHEWU/WeiTiao/raw/main/releases/WeiTiao-v1.4.9.apk)** · [Releases 页面](https://github.com/WEIHEWU/WeiTiao/releases)
 
 一个基于 `libxposed API 102`、`Root` 与 **`miuix` (`0.8.8`)** 界面的三星 One UI 增强模块，集成 **应用商店跨区解锁（CSC/SIM 伪装）**、**硬件机型伪装**、**微信运动步数与消息防撤回**、**亮屏快充** 以及 **USB PD 应用旁路供电**。
 
-当前版本：`1.4.8`（`versionCode 28`）。
+当前版本：`1.4.9`（`versionCode 29`）。
 
 > 全面测试并官方适配三星 One UI 8.5 / One UI 9（Android 17 / API 37），兼容搭载 One UI 的 Galaxy 全系机型。
 
@@ -17,7 +17,7 @@
   - 仅对应用商店（Galaxy Store / 主题商店 / 三星账号判区组件）返回目标 CSC 与 SIM 运营商信息，**绝不注入系统框架 (`android`) 或电话服务 (`com.android.phone`)，确保物理 SIM 卡与系统基带 100% 原生稳定**；
   - 支持一键清理商店缓存并立即切换区域，支持随时一键关闭跨区伪装并恢复物理 SIM 原生识别。
 - **硬件机型伪装**：
-  - 内置 126 款主流多品牌旗舰机型，支持自定义型号名称与指定目标应用生效。
+  - 内置 143 款主流多品牌三年内顶级纯血旗舰机型（含 iPhone Duo、OnePlus 16、Xiaomi 17 等），支持自定义型号名称与指定目标应用生效。
 - **微信增强（LSPosed Hook）**：
   - **微信运动步数修改**：基于单调递增绝对锚点偏移模型，支持自动递增与固定倍率模式、每日封顶上限、每日停止增长时间，跨天与重启平滑衔接，杜绝负跳变；
   - **微信消息防撤回**：拦截对方撤回指令，保留文字、图片、语音及视频文件；

@@ -23,17 +23,24 @@ jobs:
       - name: Create GitHub Release and Upload APK
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.4.8
-          name: "微调 WeiTiao v1.4.8 (Modern API 规范化对齐 & 作用域清单净化)"
+          tag_name: v1.4.9
+          name: "微调 WeiTiao v1.4.9 (全球主流机型库深度翻新 & 三年纯旗舰精简)"
           body: |
-            ### 微调 (WeiTiao) v1.4.8
+            ### 微调 (WeiTiao) v1.4.9
 
-            - **LSPosed Modern API 102 规范深度对齐（方案 A）**：
-              - `<application>` 标签补充 `android:description="@string/xposed_description"`，支持现代 LSPosed 管理器原生展示模块功能介绍；
-              - `module.prop` 规范化补充 `description` 属性；
-              - 补充标准 `assets/xposed_scope` 作用域配置文件，实现双通道推荐作用域宣告。
-            - **作用域清单全面净化与统一**：
-              - 彻底清除 `arrays.xml` 中残留的历史作用域包名（`com.android.vending`），使 `scope.list`、`assets/xposed_scope` 与 `res/values/arrays.xml` 达到 100% 绝对一致（聚焦 7 大核心三星商店判区及微信服务）；
-              - 保留动态作用域能力，确保 126 款机型伪装仍可自由勾选第三方应用与游戏生效。
+            - **全球主流机型库深度翻新与净化（严格执行三年时效与纯旗舰标准）**：
+              - **全新录入 2026 前沿机皇与热门旗舰**：
+                - Apple：首款双屏折叠旗舰 `iPhone Duo`、`iPhone 18 Pro / Pro Max`、`iPhone 17 Pro / Pro Max / Air`；
+                - 一加 OnePlus：2026 年 10 月 12 日最新发布的 `OnePlus 16`（185Hz 东方屏机皇）、`OnePlus 15 / 15 Pro`、`OnePlus Open 2`、`OnePlus Ace 5 / 5 Pro`；
+                - 小米 Xiaomi：最新 `Xiaomi 17 / 17 Pro / 17 Pro Max / 17 Ultra`、`Xiaomi 15 / 14` 系列旗舰、`MIX Fold 5 / 4`、`MIX Flip 2 / 1`、`Redmi K80 / K70` 旗舰系列；
+                - 三星 Samsung：`Galaxy S26 / S25 / S24` 全系顶级旗舰、`Galaxy Z Fold8 / Fold7 / Fold6`、`Z Flip8 / Flip7 / Flip6`、`Galaxy W26 / W25` 心系天下折叠屏及 `Tab S10 Ultra` 旗舰平板；
+                - vivo & iQOO：`vivo X300 / X200 / X100` 影像灭霸系列、`X Fold4 Pro / X Fold3 Pro`、`iQOO 15 / 13 / 12` 与 `Neo11 Pro / Neo10 Pro`；
+                - 华为 HUAWEI & 荣耀 Honor：`HUAWEI Mate XT 非凡大师`（三折叠）、`Mate 80 / 70 / 60` 系列、`Pura 80 / 70` 系列、`Pocket 2`、`Honor Magic8 / 7 / 6 RSR 保时捷设计` 与 `Magic V4 / V3`；
+                - Google：`Pixel 11 Pro / Pro XL`、`Pixel 10 Pro Fold / Pro / Pro XL`、`Pixel 9 / 8 Pro`；
+                - 电竞与特色旗舰：`红魔 RedMagic 11 Pro+ / 10 Pro+ / 9S Pro+`、`ROG 游戏手机 10 Pro / 9 Pro / 8 Pro`、`魅族 MEIZU 21 / 21 PRO`、`索尼 Xperia 1 VII / 1 VI`。
+              - **严格清退超三年老旧与非旗舰机型**：
+                - 彻底剔除发布已超过 3 年（2023 年 10 月前）的机型（如 Galaxy S21/S22/S23、Note20、小米 6/12/13、iPhone 14/13 等）；
+                - 彻底清除所有中低端与入门机型（Redmi Note/Turbo、Civi、Galaxy A/FE、vivo Y、OPPO Reno 标准版、Pixel a 等），保持纯血旗舰体验；
+              - **UI 动态联动**：主界面伪装机型选项动态展示当前库容量。
           files: |
-            releases/WeiTiao-v1.4.8.apk
+            releases/WeiTiao-v1.4.9.apk
