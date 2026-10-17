@@ -76,6 +76,7 @@ import com.weitiao.tuning.R
 import com.weitiao.tuning.core.CscConfig
 import com.weitiao.tuning.core.CscPrefs
 import com.weitiao.tuning.core.HookLiveness
+import com.weitiao.tuning.core.LsposedScopeHelper
 import com.weitiao.tuning.core.RegionApplyState
 import com.weitiao.tuning.core.RootShell
 import com.weitiao.tuning.core.StoreCleaner
@@ -1129,6 +1130,20 @@ fun DashboardScreen(
                 )
             }
             showDeviceTargetPicker = false
+
+            scope.launch(Dispatchers.IO) {
+                val synced = if (updated.isNotEmpty()) {
+                    LsposedScopeHelper.syncScopesWithRoot(context, updated)
+                } else false
+                val launched = LsposedScopeHelper.launchLsposedManager(context)
+                val msg = when {
+                    synced && launched -> if (isZh) "已通过 Root 自动同步作用域，已调出 LSPosed 供确认" else "Synced scope via Root, opened LSPosed for confirmation"
+                    launched -> if (isZh) "已保存目标应用，已调出 LSPosed 请确认勾选作用域" else "Saved target apps, opened LSPosed to verify scope"
+                    synced -> if (isZh) "已通过 Root 自动同步作用域至 LSPosed" else "Synced scope to LSPosed via Root"
+                    else -> if (isZh) "已保存目标应用，请在 LSPosed 中勾选对应作用域" else "Saved target apps (Please check scope in LSPosed)"
+                }
+                snackbar.showSnackbar(msg)
+            }
         },
     )
 

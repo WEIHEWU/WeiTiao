@@ -116,6 +116,14 @@ fun DeviceTargetPicker(
                 modifier = Modifier.fillMaxWidth(),
             )
 
+            Text(
+                text = stringResource(R.string.device_target_scope_hint),
+                fontSize = 12.sp,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                lineHeight = 16.sp,
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+            )
+
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()

@@ -177,7 +177,8 @@
     <string name="cancel">取消</string>
     <string name="confirm">确认</string>
     <string name="choose_device_target_apps">选择机型伪装目标应用</string>
-    <string name="confirm_and_request_scope">保存目标应用 (%1$d)</string>
+    <string name="device_target_scope_hint">勾选生效应用。保存后将自动通过 Root 写入 LSPosed 作用域并调出确认。</string>
+    <string name="confirm_and_request_scope">保存并同步作用域 (%1$d)</string>
     <string name="save_app_selection">保存应用列表 (%1$d)</string>
     <string name="choose_pass_through_apps">选择旁路供电触发应用</string>
     <string name="use_custom_model_format">使用自定义型号: \"%1$s\"</string>

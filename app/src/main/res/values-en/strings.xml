@@ -177,7 +177,8 @@
     <string name="cancel">Cancel</string>
     <string name="confirm">Confirm</string>
     <string name="choose_device_target_apps">Select Device Spoofing Apps</string>
-    <string name="confirm_and_request_scope">Save Target Apps (%1$d)</string>
+    <string name="device_target_scope_hint">Selected apps will be auto-synced to LSPosed scope via Root and opened for verification.</string>
+    <string name="confirm_and_request_scope">Save &amp; Sync Scope (%1$d)</string>
     <string name="save_app_selection">Save App List (%1$d)</string>
     <string name="choose_pass_through_apps">Select Bypass Power Apps</string>
     <string name="use_custom_model_format">Use custom model: \"%1$s\"</string>
