@@ -1,10 +1,10 @@
 # WeiTiao
 
-[中文说明](README.md) · **[Direct Download APK (WeiTiao-v1.4.9.apk · 1.6 MB)](https://github.com/WEIHEWU/WeiTiao/raw/main/releases/WeiTiao-v1.4.9.apk)** · [Releases](https://github.com/WEIHEWU/WeiTiao/releases)
+[中文说明](README.md) · **[Direct Download APK (WeiTiao-v1.5.0.apk · 1.6 MB)](https://github.com/WEIHEWU/WeiTiao/raw/main/releases/WeiTiao-v1.5.0.apk)** · [Releases](https://github.com/WEIHEWU/WeiTiao/releases)
 
-An LSPosed (`libxposed API 102`) & Root enhancement module for Samsung One UI built with **`miuix` (`0.8.8`)**, combining **App Store Region Unlock (CSC/SIM spoofing)**, **Hardware Model Spoofing**, **WeChat Steps & Anti-Recall**, **Screen-On Fast Charging**, and **USB PD Bypass Power**.
+An LSPosed (`libxposed API 102`) & Root enhancement module for Samsung One UI built with **`miuix` (`0.8.8`)**, combining **Native COW System Property Spoofing Engine**, **App Store Region Unlock (CSC/SIM spoofing)**, **Hardware Model Spoofing (3-Year Pure Flagships)**, **WeChat Steps & Anti-Recall**, **Screen-On Fast Charging**, and **USB PD Bypass Power**.
 
-Current version: `1.4.9` (`versionCode 29`).
+Current version: `1.5.0` (`versionCode 30`).
 
 > Fully tested and officially adapted for Samsung One UI 8.5 / One UI 9 (Android 17 / API 37), compatible with all Galaxy devices running One UI.
 
@@ -12,12 +12,19 @@ Current version: `1.4.9` (`versionCode 29`).
 
 - **Native Miuix UI & Physics**:
   - Built with `top.yukonga.miuix.kmp:miuix:0.8.8`, featuring collapsible large-title navigation bars, physical overscroll bounce (`overScrollVertical`), G2 continuous smooth corners (`smoothRounding`), and `folmeSpring` physics animations.
+- **Native COW System Property Engine (NativePropCow)**:
+  - Solves the longstanding issue where Apple/iPhone and non-Samsung spoofing fails in reinforced/anti-tamper apps (e.g., Tencent Legu / Jiagu, Coolapk, QQ);
+  - Parses `/proc/self/maps` and re-maps property regions via `mmap(MAP_PRIVATE | MAP_FIXED)` into private Copy-On-Write pages, directly rewriting `prop_info` memory and atomic sequence numbers;
+  - Native libc (`__system_property_get`) and Java (`Build.*`) return 100% identical values with zero discrepancies, executing in ~1.5ms.
+- **Auto-Sync LSPosed Scopes on Save**:
+  - Automatically queries and updates LSPosed SQLite database via Root when saving target apps for device spoofing; gracefully navigates to LSPosed UI if Root is unavailable.
 - **Store Region Unlock (CSC + SIM Spoofing)**:
   - 6 curated presets (Hong Kong, US Unlocked, Europe Open, Taiwan, South Korea, Mainland China) plus a searchable database of 80 global country/carrier presets;
   - Spoofs CSC and SIM operator info **only for store apps** (Galaxy Store, Theme Store, Samsung Account region services) — **never hooks `android` system framework or `com.android.phone`, keeping physical SIM and baseband 100% native and stable**;
   - One-tap store cache reset and one-tap disable to restore native physical SIM detection.
-- **Hardware Model Spoofing**:
-  - 143 built-in pure flagship device profiles released within the last 3 years across top brands (including iPhone Duo, OnePlus 16, Xiaomi 17 series), with custom model support and per-app targeting.
+- **Hardware Model Spoofing (3-Year Pure Flagship Database)**:
+  - Strictly filtered to devices released within 3 years (2023.10 - 2026.10) with pure flagship status (Pro, Ultra, Fold, Flip, Gaming flagships);
+  - Includes Apple (iPhone Duo, iPhone 18/17/16 Pro Max), OnePlus 16, Xiaomi 17, Galaxy S26/S25/S24, Pixel 10 Pro Fold, HUAWEI Mate XT, etc., with real-time capacity badge.
 - **WeChat Enhancements (LSPosed Hook)**:
   - **Step Modifier**: Monotonic anchor-offset step engine supporting auto-increment and fixed multiplier modes, daily step cap, and cutoff hour without negative jumps;
   - **Anti-Recall**: Blocks message recall and preserves text, photos, voice notes, and videos;

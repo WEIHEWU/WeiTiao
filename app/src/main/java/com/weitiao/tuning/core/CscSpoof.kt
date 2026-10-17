@@ -74,7 +74,7 @@ object CscSpoof {
             "ro.product.name", "ro.product.odm.name", "ro.product.vendor.name",
             "ro.product.product.name", "ro.product.system.name", "ro.product.system_ext.name" -> profile.productName
 
-            "ro.product.marketname" -> profile.name
+            "ro.product.marketname", "ro.vendor.oplus.market.name", "ro.product.display" -> profile.name
 
             "ro.product.brand", "ro.product.odm.brand", "ro.product.vendor.brand",
             "ro.product.product.brand", "ro.product.system.brand", "ro.product.system_ext.brand" -> profile.brand

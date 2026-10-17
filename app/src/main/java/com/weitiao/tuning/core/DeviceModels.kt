@@ -200,20 +200,18 @@ object DeviceModels {
     )
 
     private val GOOGLE_DEVICES: List<DeviceProfile> = listOf(
-        // 2026 旗舰
-        DeviceProfile("Pixel 11 Pro XL", "Pixel 11 Pro XL", "grizzlyxl", "grizzlyxl", "Google", "Google", "Google"),
-        DeviceProfile("Pixel 11 Pro", "Pixel 11 Pro", "grizzly", "grizzly", "Google", "Google", "Google"),
-        // 2025 旗舰
+        // 2025 旗舰系列
         DeviceProfile("Pixel 10 Pro Fold", "Pixel 10 Pro Fold", "rango", "rango", "Google", "Google", "Google"),
         DeviceProfile("Pixel 10 Pro XL", "Pixel 10 Pro XL", "frankel", "frankel", "Google", "Google", "Google"),
         DeviceProfile("Pixel 10 Pro", "Pixel 10 Pro", "blazer", "blazer", "Google", "Google", "Google"),
         DeviceProfile("Pixel 10", "Pixel 10", "mustang", "mustang", "Google", "Google", "Google"),
-        // 2024 旗舰
+        // 2024 旗舰系列
         DeviceProfile("Pixel 9 Pro Fold", "Pixel 9 Pro Fold", "comet", "comet", "Google", "Google", "Google"),
         DeviceProfile("Pixel 9 Pro XL", "Pixel 9 Pro XL", "komodo", "komodo", "Google", "Google", "Google"),
         DeviceProfile("Pixel 9 Pro", "Pixel 9 Pro", "caiman", "caiman", "Google", "Google", "Google"),
         DeviceProfile("Pixel 9", "Pixel 9", "tokay", "tokay", "Google", "Google", "Google"),
-        // 2023.10 旗舰
+        // 2023 旗舰系列（三年内）
+        DeviceProfile("Pixel Fold", "Pixel Fold", "felix", "felix", "Google", "Google", "Google"),
         DeviceProfile("Pixel 8 Pro", "Pixel 8 Pro", "husky", "husky", "Google", "Google", "Google"),
     )
 

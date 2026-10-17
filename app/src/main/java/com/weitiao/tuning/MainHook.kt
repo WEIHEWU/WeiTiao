@@ -10,6 +10,7 @@ import com.weitiao.tuning.core.CscSim
 import com.weitiao.tuning.core.CscSpoof
 import com.weitiao.tuning.core.DeviceModels
 import com.weitiao.tuning.core.DeviceProfile
+import com.weitiao.tuning.core.NativePropCow
 import com.weitiao.tuning.core.TuningConfig
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
@@ -86,9 +87,16 @@ class MainHook : XposedModule() {
         hookSemFloatingFeature(param.classLoader)
         hookSettingsProvider(param.classLoader, param.packageName)
 
-        // 尝试应用 Build 类静态常量伪装（受总开关与机型伪装开关双重控制）
+        // 尝试应用 Build 类静态常量与 Native COW 内存属性伪装（受总开关与机型伪装开关双重控制）
         if (isDeviceSpoofTarget) {
             applyBuildFields(config, param.packageName)
+            runCatching {
+                val fastProps = ConfigHolder.currentResolved(prefs).fastDeviceProps
+                val patchedCount = NativePropCow.applyCowSpoof(fastProps)
+                log(Log.INFO, TAG, "WeiTiao: ${param.packageName} 已应用 Native COW 内存补丁，改写 $patchedCount 处底层系统属性")
+            }.onFailure { err ->
+                log(Log.ERROR, TAG, "WeiTiao: NativePropCow error in ${param.packageName}: $err\n${Log.getStackTraceString(err)}")
+            }
         }
 
         log(
@@ -582,6 +590,8 @@ class MainHook : XposedModule() {
                 for (k in nameKeys) devMap[k] = profile.productName
 
                 devMap["ro.product.marketname"] = profile.name
+                devMap["ro.vendor.oplus.market.name"] = profile.name
+                devMap["ro.product.display"] = profile.name
 
                 val brandKeys = listOf("ro.product.brand", "ro.product.odm.brand", "ro.product.vendor.brand", "ro.product.product.brand", "ro.product.system.brand", "ro.product.system_ext.brand")
                 for (k in brandKeys) devMap[k] = profile.brand
