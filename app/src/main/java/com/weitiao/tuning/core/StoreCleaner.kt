@@ -18,6 +18,23 @@ object StoreCleaner {
     }
 
     /**
+     * 通过 Root 批量强行停止目标应用进程，使 Build.* 静态字段与 Native Prop COW 内存伪装在下次打开应用时立即生效。
+     * @return 成功发送停止指令的应用数量
+     */
+    fun forceStopPackages(packages: Collection<String>): Int {
+        if (packages.isEmpty() || !RootShell.hasRoot()) return 0
+        val safePkgs = packages.asSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && it != "com.weitiao.tuning" && it != "android" && it.all { ch -> ch.isLetterOrDigit() || ch == '.' || ch == '_' } }
+            .distinct()
+            .toList()
+        if (safePkgs.isEmpty()) return 0
+        val cmd = safePkgs.joinToString("; ") { "am force-stop $it 2>/dev/null" }
+        val (code, _) = RootShell.exec(cmd)
+        return if (code == 0) safePkgs.size else 0
+    }
+
+    /**
      * 完全 100% 对齐 S8Tweak nt3.java 原版市场解锁注入：
      * 仅临时注入 gsm.* 属性并强杀商店，原版绝对没有 persist.omc.* 写入。
      */

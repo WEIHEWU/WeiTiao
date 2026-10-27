@@ -58,8 +58,10 @@ private data class TargetAppItem(
 fun DeviceTargetPicker(
     show: Boolean = true,
     initialSelection: Set<String>,
+    initialPerAppModels: Map<String, String> = emptyMap(),
+    globalDefaultModel: String = "",
     onDismiss: () -> Unit,
-    onSave: (Set<String>) -> Unit,
+    onSave: (Set<String>, Map<String, String>) -> Unit,
 ) {
     val context = LocalContext.current
     var query by remember { mutableStateOf("") }
@@ -80,14 +82,20 @@ fun DeviceTargetPicker(
             .sortedBy { it.label.lowercase() }
     }
 
-    val filteredApps = remember(query, allApps) {
-        if (query.isBlank()) allApps
+    var selected by remember { mutableStateOf(initialSelection.toSet()) }
+    var perAppModels by remember { mutableStateOf(initialPerAppModels.toMap()) }
+    var pickingModelForPkg by remember { mutableStateOf<String?>(null) }
+
+    val filteredApps = remember(query, allApps, selected, perAppModels) {
+        val base = if (query.isBlank()) allApps
         else allApps.filter {
             it.label.contains(query, ignoreCase = true) || it.packageName.contains(query, ignoreCase = true)
         }
+        base.sortedWith(
+            compareByDescending<TargetAppItem> { it.packageName in selected || it.packageName in perAppModels }
+                .thenBy { it.label.lowercase() },
+        )
     }
-
-    var selected by remember { mutableStateOf(initialSelection.toSet()) }
 
     WindowBottomSheet(
         show = show,
@@ -133,14 +141,18 @@ fun DeviceTargetPicker(
             ) {
                 items(filteredApps, key = { it.packageName }) { app ->
                     val isChecked = app.packageName in selected
+                    val customModel = perAppModels[app.packageName]
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
                             .clickable {
-                                selected = selected.toMutableSet().apply {
-                                    if (!add(app.packageName)) remove(app.packageName)
-                                }.toSet()
+                                val next = selected.toMutableSet()
+                                if (!next.add(app.packageName)) {
+                                    next.remove(app.packageName)
+                                    perAppModels = perAppModels - app.packageName
+                                }
+                                selected = next.toSet()
                             }
                             .padding(horizontal = 8.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -161,7 +173,7 @@ fun DeviceTargetPicker(
                             )
                         }
 
-                        Column(Modifier.weight(1f)) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Text(
                                 text = app.label,
                                 fontSize = 14.sp,
@@ -173,14 +185,72 @@ fun DeviceTargetPicker(
                                 fontSize = 11.sp,
                                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                             )
+                            if (isChecked) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    val badgeText = if (!customModel.isNullOrBlank()) {
+                                        stringResource(R.string.picker_per_app_model_custom, customModel)
+                                    } else {
+                                        stringResource(
+                                            R.string.picker_per_app_model_default,
+                                            globalDefaultModel.ifBlank { stringResource(R.string.native_device) },
+                                        )
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(
+                                                if (!customModel.isNullOrBlank()) {
+                                                    MiuixTheme.colorScheme.primary.copy(alpha = 0.14f)
+                                                } else {
+                                                    MiuixTheme.colorScheme.secondaryContainer
+                                                },
+                                            )
+                                            .clickable { pickingModelForPkg = app.packageName }
+                                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                                    ) {
+                                        Text(
+                                            text = badgeText,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = if (!customModel.isNullOrBlank()) {
+                                                MiuixTheme.colorScheme.primary
+                                            } else {
+                                                MiuixTheme.colorScheme.onSurfaceVariantSummary
+                                            },
+                                        )
+                                    }
+                                    if (!customModel.isNullOrBlank()) {
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(MiuixTheme.colorScheme.secondaryContainer)
+                                                .clickable { perAppModels = perAppModels - app.packageName }
+                                                .padding(horizontal = 6.dp, vertical = 3.dp),
+                                        ) {
+                                            Text(
+                                                text = "×",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
 
                         Checkbox(
                             state = ToggleableState(isChecked),
                             onClick = {
-                                selected = selected.toMutableSet().apply {
-                                    if (!add(app.packageName)) remove(app.packageName)
-                                }.toSet()
+                                val next = selected.toMutableSet()
+                                if (!next.add(app.packageName)) {
+                                    next.remove(app.packageName)
+                                    perAppModels = perAppModels - app.packageName
+                                }
+                                selected = next.toSet()
                             },
                         )
                     }
@@ -200,11 +270,27 @@ fun DeviceTargetPicker(
                 )
                 TextButton(
                     text = stringResource(R.string.confirm_and_request_scope, selected.size),
-                    onClick = { onSave(selected) },
+                    onClick = {
+                        val cleanedModels = perAppModels.filterKeys { it in selected }
+                        onSave(selected, cleanedModels)
+                    },
                     colors = ButtonDefaults.textButtonColorsPrimary(),
                     modifier = Modifier.weight(1f),
                 )
             }
         }
+    }
+
+    val targetPkg = pickingModelForPkg
+    if (targetPkg != null) {
+        DeviceModelPicker(
+            show = true,
+            initialSelection = perAppModels[targetPkg] ?: globalDefaultModel,
+            onDismiss = { pickingModelForPkg = null },
+            onSelect = { selectedName ->
+                perAppModels = perAppModels + (targetPkg to selectedName)
+                pickingModelForPkg = null
+            },
+        )
     }
 }

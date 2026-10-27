@@ -84,14 +84,14 @@ class MainHook : XposedModule() {
         }
 
         hookSemCscFeature(param.classLoader)
-        hookSemFloatingFeature(param.classLoader)
+        hookSemFloatingFeature(param.classLoader, param.packageName)
         hookSettingsProvider(param.classLoader, param.packageName)
 
-        // 尝试应用 Build 类静态常量与 Native COW 内存属性伪装（受总开关与机型伪装开关双重控制）
+        // 尝试应用 Build 类静态常量与 Native COW 内存属性伪装（与商店跨区开关独立，支持分应用独立机型）
         if (isDeviceSpoofTarget) {
             applyBuildFields(config, param.packageName)
             runCatching {
-                val fastProps = ConfigHolder.currentResolved(prefs).fastDeviceProps
+                val fastProps = ConfigHolder.currentResolved(prefs).devicePropsFor(param.packageName)
                 val patchedCount = NativePropCow.applyCowSpoof(fastProps)
                 log(Log.INFO, TAG, "WeiTiao: ${param.packageName} 已应用 Native COW 内存补丁，改写 $patchedCount 处底层系统属性")
             }.onFailure { err ->
@@ -233,7 +233,6 @@ class MainHook : XposedModule() {
     private fun matchPropValue(key: String, packageName: String): String? {
         val resolved = ConfigHolder.currentResolved(prefs)
         val cfg = resolved.config
-        if (!cfg.enabled) return null
 
         // SIM 运营商相关属性（gsm.sim.* / gsm.operator.*）仅对应用商店生效，普通应用与系统绝对保持原生真实物理卡状态
         if (packageName in STORE_PACKAGES) {
@@ -242,12 +241,12 @@ class MainHook : XposedModule() {
             return null
         }
 
-        // 常规 CSC 属性预计算匹配 (O(1))
+        // 常规 CSC 与自定义属性预计算匹配 (O(1))
         resolved.fastCscProps[key]?.let { return it }
 
-        // 机型属性预计算匹配 (O(1))
+        // 机型属性预计算匹配 (O(1)，支持分应用独立机型)
         if (isDeviceTarget(cfg, packageName)) {
-            resolved.fastDeviceProps[key]?.let { return it }
+            resolved.devicePropsFor(packageName)[key]?.let { return it }
         }
         return null
     }
@@ -282,7 +281,7 @@ class MainHook : XposedModule() {
 
     private fun applyBuildFields(config: CscConfig, packageName: String) {
         if (!isDeviceTarget(config, packageName)) return
-        val profile = CscSpoof.deviceProfileFor(config) ?: return
+        val profile = CscSpoof.deviceProfileFor(config, packageName) ?: return
         val osRelease = Build.VERSION.RELEASE.ifBlank { "17" }
         val buildId = Build.ID.ifBlank { "UP1A.231005.007" }
         val fingerprint = "${profile.brand}/${profile.productName}/${profile.device}:$osRelease/$buildId/${profile.model}:user/release-keys"
@@ -309,9 +308,7 @@ class MainHook : XposedModule() {
     }
 
     private fun isDeviceTarget(config: CscConfig, packageName: String): Boolean =
-        config.enabled &&
-            config.spoofDevice &&
-            (!config.deviceTargetFilterEnabled || packageName in config.deviceTargetPackages)
+        CscSpoof.isDeviceSpoofTarget(config, packageName)
 
     /**
      * Android 新版本阻止普通反射写 static final；先尝试普通反射，再以 Unsafe 写入。
@@ -375,41 +372,44 @@ class MainHook : XposedModule() {
 
     // ---- SemFloatingFeature（三星机型形态与品牌特性读取） ----
 
-    private fun hookSemFloatingFeature(cl: ClassLoader) {
+    private fun hookSemFloatingFeature(cl: ClassLoader, packageName: String) {
         runCatching {
             val clazz = Class.forName("com.samsung.android.feature.SemFloatingFeature", false, cl)
-            safeHook(clazz, "getString", String::class.java) { chain -> floatingFeatureIntercept(chain) }
-            safeHook(clazz, "getString", String::class.java, String::class.java) { chain -> floatingFeatureIntercept(chain) }
-            safeHook(clazz, "getBoolean", String::class.java) { chain -> floatingFeatureBooleanIntercept(chain) }
+            safeHook(clazz, "getString", String::class.java) { chain -> floatingFeatureIntercept(chain, packageName) }
+            safeHook(clazz, "getString", String::class.java, String::class.java) { chain -> floatingFeatureIntercept(chain, packageName) }
+            safeHook(clazz, "getBoolean", String::class.java) { chain -> floatingFeatureBooleanIntercept(chain, packageName) }
             safeHook(clazz, "getBoolean", String::class.java, Boolean::class.javaPrimitiveType!!) { chain ->
-                floatingFeatureBooleanIntercept(chain)
+                floatingFeatureBooleanIntercept(chain, packageName)
             }
-            safeHook(clazz, "getInt", String::class.java) { chain -> floatingFeatureIntIntercept(chain) }
+            safeHook(clazz, "getInt", String::class.java) { chain -> floatingFeatureIntIntercept(chain, packageName) }
             safeHook(clazz, "getInt", String::class.java, Int::class.javaPrimitiveType!!) { chain ->
-                floatingFeatureIntIntercept(chain)
+                floatingFeatureIntIntercept(chain, packageName)
             }
         }.onFailure {
             // SemFloatingFeature 不存在则忽略
         }
     }
 
-    private fun floatingFeatureIntercept(chain: XposedInterface.Chain): Any? {
+    private fun floatingFeatureIntercept(chain: XposedInterface.Chain, packageName: String): Any? {
         val key = chain.getArg(0) as? String ?: return chain.proceed()
         val resolved = ConfigHolder.currentResolved(prefs)
-        return resolved.fastFloatingFeatures[key] ?: chain.proceed()
+        if (!isDeviceTarget(resolved.config, packageName)) return chain.proceed()
+        return resolved.floatingFeaturesFor(packageName)[key] ?: chain.proceed()
     }
 
-    private fun floatingFeatureBooleanIntercept(chain: XposedInterface.Chain): Any? {
+    private fun floatingFeatureBooleanIntercept(chain: XposedInterface.Chain, packageName: String): Any? {
         val key = chain.getArg(0) as? String ?: return chain.proceed()
         val resolved = ConfigHolder.currentResolved(prefs)
-        val value = resolved.fastFloatingFeatures[key] ?: return chain.proceed()
+        if (!isDeviceTarget(resolved.config, packageName)) return chain.proceed()
+        val value = resolved.floatingFeaturesFor(packageName)[key] ?: return chain.proceed()
         return value.equals("TRUE", ignoreCase = true)
     }
 
-    private fun floatingFeatureIntIntercept(chain: XposedInterface.Chain): Any? {
+    private fun floatingFeatureIntIntercept(chain: XposedInterface.Chain, packageName: String): Any? {
         val key = chain.getArg(0) as? String ?: return chain.proceed()
         val resolved = ConfigHolder.currentResolved(prefs)
-        val value = resolved.fastFloatingFeatures[key] ?: return chain.proceed()
+        if (!isDeviceTarget(resolved.config, packageName)) return chain.proceed()
+        val value = resolved.floatingFeaturesFor(packageName)[key] ?: return chain.proceed()
         return value.toIntOrNull() ?: chain.proceed()
     }
 
@@ -423,7 +423,7 @@ class MainHook : XposedModule() {
                 if (name == "device_name" || name == "device_provisioned_name") {
                     val resolved = ConfigHolder.currentResolved(prefs)
                     if (isDeviceTarget(resolved.config, packageName)) {
-                        resolved.deviceProfile?.name?.let { return@safeHook it }
+                        resolved.deviceProfileFor(packageName)?.name?.let { return@safeHook it }
                     }
                 }
                 chain.proceed()
@@ -434,7 +434,7 @@ class MainHook : XposedModule() {
                 if (name == "device_name") {
                     val resolved = ConfigHolder.currentResolved(prefs)
                     if (isDeviceTarget(resolved.config, packageName)) {
-                        resolved.deviceProfile?.name?.let { return@safeHook it }
+                        resolved.deviceProfileFor(packageName)?.name?.let { return@safeHook it }
                     }
                 }
                 chain.proceed()
@@ -462,6 +462,12 @@ class MainHook : XposedModule() {
         }
     }
 
+    private class DeviceResolved(
+        val profile: DeviceProfile,
+        val devMap: Map<String, String>,
+        val floatMap: Map<String, String>,
+    )
+
     private class ResolvedConfig(
         val config: CscConfig,
         val fastCscProps: Map<String, String>,
@@ -470,7 +476,17 @@ class MainHook : XposedModule() {
         val fastCscFeatures: Map<String, String>,
         val fastFloatingFeatures: Map<String, String>,
         val deviceProfile: DeviceProfile?,
-    )
+        val perAppDeviceMaps: Map<String, DeviceResolved> = emptyMap(),
+    ) {
+        fun devicePropsFor(packageName: String): Map<String, String> =
+            perAppDeviceMaps[packageName]?.devMap ?: fastDeviceProps
+
+        fun floatingFeaturesFor(packageName: String): Map<String, String> =
+            perAppDeviceMaps[packageName]?.floatMap ?: fastFloatingFeatures
+
+        fun deviceProfileFor(packageName: String): DeviceProfile? =
+            perAppDeviceMaps[packageName]?.profile ?: deviceProfile
+    }
 
     private object ConfigHolder {
         private const val RELOAD_INTERVAL_MS = 2000L
@@ -505,47 +521,88 @@ class MainHook : XposedModule() {
             return currentResolved
         }
 
-        private fun buildResolved(config: CscConfig): ResolvedConfig {
-            if (!config.enabled) {
-                return ResolvedConfig(
-                    config = config,
-                    fastCscProps = emptyMap(),
-                    fastSimProps = emptyMap(),
-                    fastDeviceProps = emptyMap(),
-                    fastCscFeatures = emptyMap(),
-                    fastFloatingFeatures = emptyMap(),
-                    deviceProfile = null,
-                )
+        private fun buildDeviceResolved(profile: DeviceProfile): DeviceResolved {
+            val devMap = HashMap<String, String>(32)
+            val floatMap = HashMap<String, String>(8)
+            val fingerprint = "${profile.brand}/${profile.productName}/${profile.device}:14/UP1A.231005.007/${profile.model}:user/release-keys"
+            val isFold = profile.name.contains("Fold", ignoreCase = true) || profile.device.startsWith("q") || profile.model.contains("F9")
+            val isFlip = profile.name.contains("Flip", ignoreCase = true) || profile.device.startsWith("b") || profile.model.contains("F7")
+            val isTablet = profile.name.contains("Tab", ignoreCase = true) || profile.device.startsWith("gts") || profile.model.contains("X")
+            val characteristics = when {
+                isFold -> "fold,nosdcard"
+                isFlip -> "flip,nosdcard"
+                isTablet -> "tablet,nosdcard"
+                else -> "nosdcard"
             }
 
-            // 1. 常规 CSC 属性表预构建 (O(1) 查表)
+            val modelKeys = listOf("ro.product.model", "ro.product.vendor.model", "ro.product.odm.model", "ro.product.product.model", "ro.product.system.model", "ro.product.system_ext.model")
+            for (k in modelKeys) devMap[k] = profile.model
+
+            val devKeys = listOf("ro.product.device", "ro.build.product", "ro.product.odm.device", "ro.product.vendor.device", "ro.product.product.device", "ro.product.system.device", "ro.product.system_ext.device", "ro.product.board", "ro.hardware", "ro.board.platform")
+            for (k in devKeys) devMap[k] = profile.device
+
+            val nameKeys = listOf("ro.product.name", "ro.product.odm.name", "ro.product.vendor.name", "ro.product.product.name", "ro.product.system.name", "ro.product.system_ext.name")
+            for (k in nameKeys) devMap[k] = profile.productName
+
+            devMap["ro.product.marketname"] = profile.name
+            devMap["ro.vendor.oplus.market.name"] = profile.name
+            devMap["ro.product.display"] = profile.name
+
+            val brandKeys = listOf("ro.product.brand", "ro.product.odm.brand", "ro.product.vendor.brand", "ro.product.product.brand", "ro.product.system.brand", "ro.product.system_ext.brand")
+            for (k in brandKeys) devMap[k] = profile.brand
+
+            val mfrKeys = listOf("ro.product.manufacturer", "ro.product.odm.manufacturer", "ro.product.vendor.manufacturer", "ro.product.product.manufacturer", "ro.product.system.manufacturer", "ro.product.system_ext.manufacturer")
+            for (k in mfrKeys) devMap[k] = profile.manufacturer
+
+            devMap["ro.build.flavor"] = "${profile.productName}-user"
+
+            val fpKeys = listOf("ro.build.fingerprint", "ro.bootimage.build.fingerprint", "ro.vendor.build.fingerprint", "ro.odm.build.fingerprint", "ro.system.build.fingerprint", "ro.system_ext.build.fingerprint")
+            for (k in fpKeys) devMap[k] = fingerprint
+
+            devMap["ro.soc.model"] = profile.device
+            devMap["ro.vendor.qti.soc_name"] = profile.device
+            devMap["ro.build.characteristics"] = characteristics
+
+            if (isFold) floatMap["SEC_FLOATING_FEATURE_FRAMEWORK_SUPPORT_FOLDABLE_TYPE_FOLD"] = "TRUE"
+            if (isFlip) floatMap["SEC_FLOATING_FEATURE_FRAMEWORK_SUPPORT_FOLDABLE_TYPE_FLIP"] = "TRUE"
+            if (isFold || isFlip) floatMap["SEC_FLOATING_FEATURE_FRAMEWORK_CONFIG_FOLD_MODEL"] = "TRUE"
+            floatMap["SEC_FLOATING_FEATURE_SETTINGS_CONFIG_BRAND_NAME"] = profile.name
+            floatMap["SEC_FLOATING_FEATURE_COMMON_CONFIG_BRAND_NAME"] = profile.name
+
+            return DeviceResolved(profile = profile, devMap = devMap, floatMap = floatMap)
+        }
+
+        private fun buildResolved(config: CscConfig): ResolvedConfig {
+            // 1. 常规 CSC 属性表预构建 (O(1) 查表，仅当商店跨区开启时填充销售码/国家码，自定义属性始终生效)
             val cscMap = HashMap<String, String>(32)
-            if (config.spoofSalesCode && config.salesCode.isNotBlank()) {
-                val sc = config.salesCode
-                cscMap[CscConstants.PROP_SALES_CODE] = sc
-                cscMap[CscConstants.PROP_PERSIST_OMC_SALES_CODE] = sc
-                cscMap[CscConstants.PROP_RO_OMC_SALES_CODE] = sc
-                cscMap[CscConstants.PROP_OMCNW_CODE] = sc
-                cscMap[CscConstants.PROP_OFFICIAL_CSC] = sc
-                cscMap[CscConstants.PROP_CSC_CODE] = sc
-                if (config.spoofRilSalesCode) {
-                    cscMap[CscConstants.PROP_RIL_SALES_CODE] = sc
+            if (config.enabled) {
+                if (config.spoofSalesCode && config.salesCode.isNotBlank()) {
+                    val sc = config.salesCode
+                    cscMap[CscConstants.PROP_SALES_CODE] = sc
+                    cscMap[CscConstants.PROP_PERSIST_OMC_SALES_CODE] = sc
+                    cscMap[CscConstants.PROP_RO_OMC_SALES_CODE] = sc
+                    cscMap[CscConstants.PROP_OMCNW_CODE] = sc
+                    cscMap[CscConstants.PROP_OFFICIAL_CSC] = sc
+                    cscMap[CscConstants.PROP_CSC_CODE] = sc
+                    if (config.spoofRilSalesCode) {
+                        cscMap[CscConstants.PROP_RIL_SALES_CODE] = sc
+                    }
+                }
+                if (config.spoofCountryCode) {
+                    val country = config.countryCode.takeIf { it.isNotBlank() } ?: CscConstants.countryCodeOf(config.salesCode)
+                    if (!country.isNullOrBlank()) {
+                        cscMap[CscConstants.PROP_COUNTRY_CODE] = country
+                        cscMap[CscConstants.PROP_PERSIST_OMC_COUNTRY_CODE] = country
+                        cscMap[CscConstants.PROP_RO_OMC_COUNTRY_CODE] = country
+                    }
                 }
             }
-            if (config.spoofCountryCode) {
-                val country = config.countryCode.takeIf { it.isNotBlank() } ?: CscConstants.countryCodeOf(config.salesCode)
-                if (!country.isNullOrBlank()) {
-                    cscMap[CscConstants.PROP_COUNTRY_CODE] = country
-                    cscMap[CscConstants.PROP_PERSIST_OMC_COUNTRY_CODE] = country
-                    cscMap[CscConstants.PROP_RO_OMC_COUNTRY_CODE] = country
-                }
-            }
-            // 用户自定义系统属性
+            // 用户自定义系统属性（与跨区开关独立）
             cscMap.putAll(config.customProps)
 
-            // 2. SIM 属性表预构建（仅应用商店生效）
+            // 2. SIM 属性表预构建（仅商店跨区开启且目标为应用商店时生效）
             val simMap = HashMap<String, String>(8)
-            if (config.spoofSimInfo) {
+            if (config.enabled && config.spoofSimInfo) {
                 val numeric = CscSim.resolveNumeric(config)
                 if (numeric.isNotBlank()) {
                     simMap[CscConstants.PROP_GSM_SIM_NUMERIC] = numeric
@@ -563,57 +620,25 @@ class MainHook : XposedModule() {
                 }
             }
 
-            // 3. 机型伪装与浮动特性预构建
-            val profile = if (config.spoofDevice) DeviceModels.findByName(config.deviceName) else null
-            val devMap = HashMap<String, String>(32)
-            val floatMap = HashMap<String, String>(8)
+            // 3. 机型伪装与浮动特性预构建（与商店跨区开关独立，支持全局机型 + 分应用独立机型）
+            val globalResolved = if (config.spoofDevice && config.deviceName.isNotBlank()) {
+                DeviceModels.findByName(config.deviceName)?.let { buildDeviceResolved(it) }
+            } else null
 
-            if (profile != null) {
-                val fingerprint = "${profile.brand}/${profile.productName}/${profile.device}:14/UP1A.231005.007/${profile.model}:user/release-keys"
-                val isFold = profile.name.contains("Fold", ignoreCase = true) || profile.device.startsWith("q") || profile.model.contains("F9")
-                val isFlip = profile.name.contains("Flip", ignoreCase = true) || profile.device.startsWith("b") || profile.model.contains("F7")
-                val isTablet = profile.name.contains("Tab", ignoreCase = true) || profile.device.startsWith("gts") || profile.model.contains("X")
-                val characteristics = when {
-                    isFold -> "fold,nosdcard"
-                    isFlip -> "flip,nosdcard"
-                    isTablet -> "tablet,nosdcard"
-                    else -> "nosdcard"
+            val perAppResolved = if (config.spoofDevice && config.perAppDeviceModels.isNotEmpty()) {
+                val modelCache = HashMap<String, DeviceResolved>()
+                val appMap = HashMap<String, DeviceResolved>(config.perAppDeviceModels.size)
+                for ((pkg, modelName) in config.perAppDeviceModels) {
+                    if (modelName.isBlank()) continue
+                    val dr = modelCache[modelName] ?: DeviceModels.findByName(modelName)?.let {
+                        buildDeviceResolved(it).also { built -> modelCache[modelName] = built }
+                    }
+                    if (dr != null) {
+                        appMap[pkg] = dr
+                    }
                 }
-
-                val modelKeys = listOf("ro.product.model", "ro.product.vendor.model", "ro.product.odm.model", "ro.product.product.model", "ro.product.system.model", "ro.product.system_ext.model")
-                for (k in modelKeys) devMap[k] = profile.model
-
-                val devKeys = listOf("ro.product.device", "ro.build.product", "ro.product.odm.device", "ro.product.vendor.device", "ro.product.product.device", "ro.product.system.device", "ro.product.system_ext.device", "ro.product.board", "ro.hardware", "ro.board.platform")
-                for (k in devKeys) devMap[k] = profile.device
-
-                val nameKeys = listOf("ro.product.name", "ro.product.odm.name", "ro.product.vendor.name", "ro.product.product.name", "ro.product.system.name", "ro.product.system_ext.name")
-                for (k in nameKeys) devMap[k] = profile.productName
-
-                devMap["ro.product.marketname"] = profile.name
-                devMap["ro.vendor.oplus.market.name"] = profile.name
-                devMap["ro.product.display"] = profile.name
-
-                val brandKeys = listOf("ro.product.brand", "ro.product.odm.brand", "ro.product.vendor.brand", "ro.product.product.brand", "ro.product.system.brand", "ro.product.system_ext.brand")
-                for (k in brandKeys) devMap[k] = profile.brand
-
-                val mfrKeys = listOf("ro.product.manufacturer", "ro.product.odm.manufacturer", "ro.product.vendor.manufacturer", "ro.product.product.manufacturer", "ro.product.system.manufacturer", "ro.product.system_ext.manufacturer")
-                for (k in mfrKeys) devMap[k] = profile.manufacturer
-
-                devMap["ro.build.flavor"] = "${profile.productName}-user"
-
-                val fpKeys = listOf("ro.build.fingerprint", "ro.bootimage.build.fingerprint", "ro.vendor.build.fingerprint", "ro.odm.build.fingerprint", "ro.system.build.fingerprint", "ro.system_ext.build.fingerprint")
-                for (k in fpKeys) devMap[k] = fingerprint
-
-                devMap["ro.soc.model"] = profile.device
-                devMap["ro.vendor.qti.soc_name"] = profile.device
-                devMap["ro.build.characteristics"] = characteristics
-
-                if (isFold) floatMap["SEC_FLOATING_FEATURE_FRAMEWORK_SUPPORT_FOLDABLE_TYPE_FOLD"] = "TRUE"
-                if (isFlip) floatMap["SEC_FLOATING_FEATURE_FRAMEWORK_SUPPORT_FOLDABLE_TYPE_FLIP"] = "TRUE"
-                if (isFold || isFlip) floatMap["SEC_FLOATING_FEATURE_FRAMEWORK_CONFIG_FOLD_MODEL"] = "TRUE"
-                floatMap["SEC_FLOATING_FEATURE_SETTINGS_CONFIG_BRAND_NAME"] = profile.name
-                floatMap["SEC_FLOATING_FEATURE_COMMON_CONFIG_BRAND_NAME"] = profile.name
-            }
+                appMap
+            } else emptyMap()
 
             val cscFeatureMap = if (config.spoofSemCscFeature) config.customCscFeatures else emptyMap()
 
@@ -621,10 +646,11 @@ class MainHook : XposedModule() {
                 config = config,
                 fastCscProps = cscMap,
                 fastSimProps = simMap,
-                fastDeviceProps = devMap,
+                fastDeviceProps = globalResolved?.devMap ?: emptyMap(),
                 fastCscFeatures = cscFeatureMap,
-                fastFloatingFeatures = floatMap,
-                deviceProfile = profile,
+                fastFloatingFeatures = globalResolved?.floatMap ?: emptyMap(),
+                deviceProfile = globalResolved?.profile,
+                perAppDeviceMaps = perAppResolved,
             )
         }
     }

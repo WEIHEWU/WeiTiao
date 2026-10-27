@@ -207,13 +207,18 @@ class BrightScreenFastChargeService : Service() {
         val powerManager = getSystemService(PowerManager::class.java)
         isScreenOn = powerManager?.isInteractive ?: true
 
-        // 高温熔断保护：电池自身温度达到 44.0℃ 暂停屏蔽，降至 40.5℃ 恢复
+        // 高温熔断保护：电池自身温度达到用户设定阈值（默认 44.0℃）暂停屏蔽，降温 3.5℃ 后恢复
+        val cutoffCelsius = currentConfig().thermalCutoffCelsius.coerceIn(38, 48)
+        val overheatTenths = cutoffCelsius * 10
+        val coolDownTenths = overheatTenths - 35
         val effectiveTemp = if (latestMetrics.temperatureTenths > 0) latestMetrics.temperatureTenths else currentTempTenths
-        if (effectiveTemp >= OVERHEAT_THRESHOLD_TENTHS && !isOverheated) {
+        if (effectiveTemp >= overheatTenths && !isOverheated) {
             isOverheated = true
-            Log.w(TAG, "电池温度 ${effectiveTemp / 10.0}℃ 触发安全熔断，交还官方温控")
-        } else if (effectiveTemp <= COOL_DOWN_THRESHOLD_TENTHS && isOverheated) {
+            isThermalCutoffActive = true
+            Log.w(TAG, "电池温度 ${effectiveTemp / 10.0}℃ 触发安全熔断（阈值 ${cutoffCelsius}℃），交还官方温控")
+        } else if (effectiveTemp <= coolDownTenths && isOverheated) {
             isOverheated = false
+            isThermalCutoffActive = false
         }
     }
 
@@ -223,6 +228,7 @@ class BrightScreenFastChargeService : Service() {
                 try {
                     val metrics = FastChargeController.readBatteryMetrics(this)
                     latestMetrics = metrics
+                    lastKnownMetrics = metrics
                     if (metrics.temperatureTenths > 0) {
                         currentTempTenths = metrics.temperatureTenths
                     }
@@ -423,6 +429,14 @@ class BrightScreenFastChargeService : Service() {
         const val ACTION_START = "com.weitiao.tuning.action.START_FAST_CHARGE"
         const val ACTION_RESTORE_AND_STOP = "com.weitiao.tuning.action.RESTORE_FAST_CHARGE"
 
+        @Volatile
+        var lastKnownMetrics: FastChargeController.BatteryMetrics = FastChargeController.BatteryMetrics(0, 0, 0.0, 0)
+            private set
+
+        @Volatile
+        var isThermalCutoffActive: Boolean = false
+            private set
+
         private const val TAG = "TuningFastCharge"
 
         /** 承载前台服务的静默通知 ID（不要与实时通知 ID 冲突） */
@@ -435,8 +449,5 @@ class BrightScreenFastChargeService : Service() {
         private const val TICKER_IDLE_MS = 30_000L
         private const val MIN_TICK_INTERVAL_MS = 3_000L
         private const val VERIFY_INTERVAL_MS = 30_000L // 每 30s 复核一次节点权限，防止被系统重置
-
-        private const val OVERHEAT_THRESHOLD_TENTHS = 440 // 44.0℃ 熔断降流保护
-        private const val COOL_DOWN_THRESHOLD_TENTHS = 405 // 降至 40.5℃ 恢复快充
     }
 }

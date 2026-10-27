@@ -46,6 +46,8 @@ data class CscConfig(
     val deviceTargetPackages: Set<String> = emptySet(),
     /** 是否启用应用内目标过滤；关闭时沿用全部 LSPosed 作用域。 */
     val deviceTargetFilterEnabled: Boolean = false,
+    /** 分应用独立机型伪装映射：packageName -> deviceName（未配置的应用回退到全局 deviceName） */
+    val perAppDeviceModels: Map<String, String> = emptyMap(),
     /** 自定义属性覆盖：key -> value */
     val customProps: Map<String, String> = emptyMap(),
     /** 自定义 CscFeature 覆盖：key -> value */
@@ -72,6 +74,7 @@ data class CscConfig(
         private const val KEY_DEVICE_NAME = "device_name"
         private const val KEY_DEVICE_TARGET_PACKAGES = "device_target_packages"
         private const val KEY_DEVICE_TARGET_FILTER = "device_target_filter_enabled"
+        private const val KEY_PER_APP_DEVICE_MODELS = "per_app_device_models"
         private const val KEY_CUSTOM_PROPS = "custom_props"
         private const val KEY_CUSTOM_FEATURES = "custom_csc_features"
 
@@ -125,6 +128,7 @@ data class CscConfig(
                 }
             }.getOrDefault(emptySet()),
             deviceTargetFilterEnabled = prefs.getBoolean(KEY_DEVICE_TARGET_FILTER, false),
+            perAppDeviceModels = jsonToMap(prefs.getString(KEY_PER_APP_DEVICE_MODELS, null)),
             customProps = jsonToMap(prefs.getString(KEY_CUSTOM_PROPS, null)),
             customCscFeatures = jsonToMap(prefs.getString(KEY_CUSTOM_FEATURES, null)),
         )
@@ -154,6 +158,7 @@ data class CscConfig(
             }.toString()
             prefs.putString(KEY_DEVICE_TARGET_PACKAGES, targetPkgsJson)
             prefs.putBoolean(KEY_DEVICE_TARGET_FILTER, config.deviceTargetFilterEnabled)
+            prefs.putString(KEY_PER_APP_DEVICE_MODELS, mapToJson(config.perAppDeviceModels))
             prefs.putString(KEY_CUSTOM_PROPS, mapToJson(config.customProps))
             prefs.putString(KEY_CUSTOM_FEATURES, mapToJson(config.customCscFeatures))
         }

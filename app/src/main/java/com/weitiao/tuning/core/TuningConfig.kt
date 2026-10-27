@@ -18,6 +18,7 @@ data class TuningConfig(
     val stepEndHour: Int = 23,
     val antiRecall: Boolean = false,
     val brightScreenFastCharge: Boolean = false,
+    val thermalCutoffCelsius: Int = 44,
     val passThrough: Boolean = false,
     val passThroughLimit: Int = 20,
 ) {
@@ -29,6 +30,7 @@ data class TuningConfig(
         const val KEY_STEP_END_HOUR = "tuning_wechat_step_end_hour"
         const val KEY_ANTI_RECALL = "tuning_wechat_anti_recall"
         const val KEY_FAST_CHARGE = "tuning_bright_screen_fast_charge"
+        const val KEY_THERMAL_CUTOFF = "tuning_thermal_cutoff_celsius"
         const val KEY_PASS_THROUGH = "tuning_pass_through"
         const val KEY_PASS_THROUGH_LIMIT = "tuning_pass_through_limit"
 
@@ -40,6 +42,7 @@ data class TuningConfig(
             stepEndHour = prefs.getInt(KEY_STEP_END_HOUR, 23).coerceIn(0, 24),
             antiRecall = prefs.getBoolean(KEY_ANTI_RECALL, false),
             brightScreenFastCharge = prefs.getBoolean(KEY_FAST_CHARGE, false),
+            thermalCutoffCelsius = prefs.getInt(KEY_THERMAL_CUTOFF, 44).coerceIn(38, 48),
             passThrough = prefs.getBoolean(KEY_PASS_THROUGH, false),
             passThroughLimit = prefs.getInt(KEY_PASS_THROUGH_LIMIT, 20).coerceIn(0, 100),
         )
@@ -52,6 +55,7 @@ data class TuningConfig(
             editor.putInt(KEY_STEP_END_HOUR, config.stepEndHour.coerceIn(0, 24))
             editor.putBoolean(KEY_ANTI_RECALL, config.antiRecall)
             editor.putBoolean(KEY_FAST_CHARGE, config.brightScreenFastCharge)
+            editor.putInt(KEY_THERMAL_CUTOFF, config.thermalCutoffCelsius.coerceIn(38, 48))
             editor.putBoolean(KEY_PASS_THROUGH, config.passThrough)
             editor.putInt(KEY_PASS_THROUGH_LIMIT, config.passThroughLimit.coerceIn(0, 100))
         }

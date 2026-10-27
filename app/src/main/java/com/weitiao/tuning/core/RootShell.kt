@@ -2,15 +2,21 @@ package com.weitiao.tuning.core
 
 import android.util.Log
 import java.io.BufferedReader
+import java.io.BufferedWriter
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
 /**
  * Root shell 执行工具（su 通道）。
+ *
+ * 优先复用长连接交互式 `su` 会话（避免旁路供电与亮屏快充守护每 3.5~5s fork 新进程带来的 CPU 抖动和 Magisk 弹窗日志），
+ * 若长连接异常或超时则自动重建并回退到单次 `su` 进程兜底。
  * 支持异步读取 stdout/stderr、超时保护与 UTF-8 字符流处理，防止管道死锁。
  */
 object RootShell {
@@ -23,13 +29,93 @@ object RootShell {
         Thread(runnable, "RootShell-IO").apply { isDaemon = true }
     }
 
+    private val sessionLock = Any()
+    private var sessionProcess: Process? = null
+    private var sessionWriter: BufferedWriter? = null
+    private var sessionReader: BufferedReader? = null
+
     /**
-     * 执行 su 命令
+     * 执行 su 命令（优先走持久化 su 会话，异常自动回退单次 su 进程）
      * @param command 待执行的 shell 指令
      * @param timeoutSeconds 超时时间（秒）
      * @return Pair(exitCode, stdout)，失败返回 Pair(-1, errorMsg)
      */
     fun exec(command: String, timeoutSeconds: Long = DEFAULT_TIMEOUT_SECONDS): Pair<Int, String> {
+        execPersistent(command, timeoutSeconds)?.let { return it }
+        return execOneShot(command, timeoutSeconds)
+    }
+
+    private fun execPersistent(command: String, timeoutSeconds: Long): Pair<Int, String>? {
+        synchronized(sessionLock) {
+            return try {
+                val proc = sessionProcess?.takeIf { it.isAlive } ?: openSessionLocked() ?: return null
+                val writer = sessionWriter ?: return null
+                val reader = sessionReader ?: return null
+                val marker = "__WT_EOF_${System.nanoTime()}__"
+
+                writer.write("{\n")
+                writer.write(command)
+                writer.write("\n} 2>&1\n")
+                writer.write("__wt_rc=\$?\n")
+                writer.write("echo \"\"\n")
+                writer.write("echo \"$marker:\$__wt_rc\"\n")
+                writer.flush()
+
+                val future = ioExecutor.submit(Callable {
+                    val out = StringBuilder()
+                    var exitCode = -1
+                    while (true) {
+                        val line = reader.readLine() ?: throw IllegalStateException("EOF from persistent su session")
+                        if (line.startsWith("$marker:")) {
+                            exitCode = line.substringAfter("$marker:").trim().toIntOrNull() ?: -1
+                            break
+                        }
+                        if (out.isNotEmpty()) out.append('\n')
+                        out.append(line)
+                    }
+                    exitCode to out.toString()
+                })
+
+                try {
+                    future.get(timeoutSeconds, TimeUnit.SECONDS)
+                } catch (e: TimeoutException) {
+                    future.cancel(true)
+                    closeSessionLocked()
+                    Log.w(TAG, "Persistent su timed out after ${timeoutSeconds}s, falling back: $command")
+                    null
+                }
+            } catch (t: Throwable) {
+                closeSessionLocked()
+                null
+            }
+        }
+    }
+
+    private fun openSessionLocked(): Process? {
+        return try {
+            closeSessionLocked()
+            val proc = ProcessBuilder("su").redirectErrorStream(true).start()
+            sessionProcess = proc
+            sessionWriter = BufferedWriter(OutputStreamWriter(proc.outputStream, StandardCharsets.UTF_8))
+            sessionReader = BufferedReader(InputStreamReader(proc.inputStream, StandardCharsets.UTF_8))
+            proc
+        } catch (t: Throwable) {
+            closeSessionLocked()
+            null
+        }
+    }
+
+    private fun closeSessionLocked() {
+        runCatching { sessionWriter?.close() }
+        runCatching { sessionReader?.close() }
+        runCatching { sessionProcess?.destroyForcibly() }
+        sessionWriter = null
+        sessionReader = null
+        sessionProcess = null
+    }
+
+    /** 单次 `su` 进程执行兜底 */
+    private fun execOneShot(command: String, timeoutSeconds: Long): Pair<Int, String> {
         var process: Process? = null
         var stdoutFuture: Future<String>? = null
         var stderrFuture: Future<String>? = null

@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 260" width="880" height="260">
+  <defs>
+    <linearGradient id="archBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0F172A"/>
+      <stop offset="100%" stop-color="#1E293B"/>
+    </linearGradient>
+  </defs>
+  <rect width="880" height="260" rx="20" fill="url(#archBg)"/>
+
+  <!-- 4 Architecture Pillars -->
+  <g transform="translate(24, 24)">
+    <rect width="196" height="212" rx="16" fill="#1E293B" stroke="#3B82F6" stroke-width="1.5"/>
+    <text x="18" y="34" font-family="sans-serif" font-size="14" font-weight="700" fill="#60A5FA">1. Native COW 属性引擎</text>
+    <text x="18" y="60" font-family="sans-serif" font-size="11.5" fill="#E2E8F0">• mmap(MAP_PRIVATE) 写时复制</text>
+    <text x="18" y="82" font-family="sans-serif" font-size="11.5" fill="#E2E8F0">• 原子重写 prop_info 与 serial</text>
+    <text x="18" y="104" font-family="sans-serif" font-size="11.5" fill="#E2E8F0">• libc 与 Java Build.* 100% 一致</text>
+    <text x="18" y="126" font-family="sans-serif" font-size="11.5" fill="#E2E8F0">• 分应用独立机型覆盖 (Per-App)</text>
+    <text x="18" y="148" font-family="sans-serif" font-size="11.5" fill="#93C5FD">• 攻克加固应用 iPhone 伪装</text>
+    <rect x="18" y="168" width="160" height="26" rx="8" fill="#1D4ED8"/>
+    <text x="98" y="185" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="600" fill="#FFFFFF">~1.5ms 零感知注入</text>
+  </g>
+
+  <g transform="translate(236, 24)">
+    <rect width="196" height="212" rx="16" fill="#1E293B" stroke="#10B981" stroke-width="1.5"/>
+    <text x="18" y="34" font-family="sans-serif" font-size="14" font-weight="700" fill="#34D399">2. 商店跨区 &amp; One UI 特性</text>
+    <text x="18" y="60" font-family="sans-serif" font-size="11.5" fill="#E2E8F0">• 80 国运营商预设 + 6 大快捷区</text>
+    <text x="18" y="82" font-family="sans-serif" font-size="11.5" fill="#E2E8F0">• 跨区与机型伪装完全独立解耦</text>
+    <text x="18" y="104" font-family="sans-serif" font-size="11.5" fill="#E2E8F0">• 绝不注入 android / phone 进程</text>
+    <text x="18" y="126" font-family="sans-serif" font-size="11.5" fill="#E2E8F0">• 内置通话录音/网速/快门音预设</text>
+    <text x="18" y="148" font-family="sans-serif" font-size="11.5" fill="#6EE7B7">• 物理 SIM 与基带 100% 原生</text>
+    <rect x="18" y="168" width="160" height="26" rx="8" fill="#059669"/>
+    <text x="98" y="185" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="600" fill="#FFFFFF">零掉卡 · 零断流风险</text>
+  </g>
+
+  <g transform="translate(448, 24)">
+    <rect width="196" height="212" rx="16" fill="#1E293B" stroke="#8B5CF6" stroke-width="1.5"/>
+    <text x="18" y="34" font-family="sans-serif" font-size="14" font-weight="700" fill="#A78BFA">3. 微信计步 &amp; 防撤回</text>
+    <text x="18" y="60" font-family="sans-serif" font-size="11.5" fill="#E2E8F0">• 单调锚点步数引擎 (杜绝回退)</text>
+    <text x="18" y="82" font-family="sans-serif" font-size="11.5" fill="#E2E8F0">• 固定倍率 / 自动递增双模式</text>
+    <text x="18" y="104" font-family="sans-serif" font-size="11.5" fill="#E2E8F0">• 拦截文字/图片/语音/视频撤回</text>
+    <text x="18" y="126" font-family="sans-serif" font-size="11.5" fill="#E2E8F0">• 按微信版本自动缓存 DEX 签名</text>
+    <text x="18" y="148" font-family="sans-serif" font-size="11.5" fill="#C4B5FD">• 二次冷启动 0ms 免扫描</text>
+    <rect x="18" y="168" width="160" height="26" rx="8" fill="#6D28D9"/>
+    <text x="98" y="185" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="600" fill="#FFFFFF">丝滑无感 · 防撤回</text>
+  </g>
+
+  <g transform="translate(660, 24)">
+    <rect width="196" height="212" rx="16" fill="#1E293B" stroke="#F59E0B" stroke-width="1.5"/>
+    <text x="18" y="34" font-family="sans-serif" font-size="14" font-weight="700" fill="#FBBF24">4. 亮屏快充 &amp; 旁路供电</text>
+    <text x="18" y="60" font-family="sans-serif" font-size="11.5" fill="#E2E8F0">• 持久交互式 su 会话池复核</text>
+    <text x="18" y="82" font-family="sans-serif" font-size="11.5" fill="#E2E8F0">• 实时功率 (W / mA / V) 监测</text>
+    <text x="18" y="104" font-family="sans-serif" font-size="11.5" fill="#E2E8F0">• 38°C-48°C 自定义温控熔断线</text>
+    <text x="18" y="126" font-family="sans-serif" font-size="11.5" fill="#E2E8F0">• 游戏前台自动触发 USB PD 旁路</text>
+    <text x="18" y="148" font-family="sans-serif" font-size="11.5" fill="#FDE68A">• 拔线/超温自动恢复 0755</text>
+    <rect x="18" y="168" width="160" height="26" rx="8" fill="#D97706"/>
+    <text x="98" y="185" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="600" fill="#FFFFFF">纯 Root 硬件直控</text>
+  </g>
+</svg>

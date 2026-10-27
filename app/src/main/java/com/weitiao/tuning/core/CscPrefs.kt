@@ -66,7 +66,7 @@ object CscPrefs {
             "spoof_sem_csc_feature", "spoof_sim_info", "sim_mcc", "sim_mnc",
             "sim_country_iso", "sim_numeric", "sim_operator_name", "soul_market_unlocker",
             "spoof_device", "device_name",
-            "device_target_packages", "device_target_filter_enabled",
+            "device_target_packages", "device_target_filter_enabled", "per_app_device_models",
             "custom_props", "custom_csc_features",
         )
         App.getXposedService()?.getRemotePreferences(CscConstants.PREFS_NAME)?.edit()?.let { editor ->

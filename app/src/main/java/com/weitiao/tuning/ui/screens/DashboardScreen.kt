@@ -192,6 +192,9 @@ fun DashboardScreen(
     var passThroughSlider by remember(tuning.passThroughLimit) {
         mutableFloatStateOf(tuning.passThroughLimit.toFloat())
     }
+    var thermalCutoffSlider by remember(tuning.thermalCutoffCelsius) {
+        mutableFloatStateOf(tuning.thermalCutoffCelsius.toFloat())
+    }
     var selectedPassApps by remember { mutableStateOf(TuningPrefs.selectedApps(context)) }
 
     var showDeviceModelPicker by remember { mutableStateOf(false) }
@@ -213,13 +216,23 @@ fun DashboardScreen(
     var batteryTemp by remember { mutableFloatStateOf(34.5f) }
     var batteryLevel by remember { mutableIntStateOf(80) }
     var isPlugged by remember { mutableStateOf(false) }
+    var batteryCurrentMa by remember { mutableIntStateOf(0) }
+    var batteryVoltageMv by remember { mutableIntStateOf(0) }
+    var batteryWatts by remember { mutableFloatStateOf(0f) }
+
+    fun applyHardwareMetrics(metrics: FastChargeController.BatteryMetrics) {
+        if (metrics.temperatureTenths > 0) {
+            batteryTemp = metrics.temperatureTenths / 10f
+        }
+        batteryCurrentMa = metrics.currentMa
+        batteryVoltageMv = metrics.voltageMv
+        batteryWatts = metrics.powerWatts.toFloat()
+    }
 
     fun refreshHardwareMetrics() {
         scope.launch(Dispatchers.IO) {
             val metrics = FastChargeController.readBatteryMetrics(context)
-            if (metrics.temperatureTenths > 0) {
-                batteryTemp = metrics.temperatureTenths / 10f
-            }
+            applyHardwareMetrics(metrics)
         }
     }
 
@@ -285,19 +298,13 @@ fun DashboardScreen(
     }
 
     LaunchedEffect(resumeTick, isPlugged, tuning.brightScreenFastCharge) {
-        withContext(Dispatchers.IO) {
-            val metrics = FastChargeController.readBatteryMetrics(context)
-            if (metrics.temperatureTenths > 0) {
-                batteryTemp = metrics.temperatureTenths / 10f
-            }
-        }
+        val initial = withContext(Dispatchers.IO) { FastChargeController.readBatteryMetrics(context) }
+        applyHardwareMetrics(initial)
         if (isPlugged || tuning.brightScreenFastCharge) {
             while (isActive) {
                 delay(4000)
                 val metrics = withContext(Dispatchers.IO) { FastChargeController.readBatteryMetrics(context) }
-                if (metrics.temperatureTenths > 0) {
-                    batteryTemp = metrics.temperatureTenths / 10f
-                }
+                applyHardwareMetrics(metrics)
             }
         }
     }
@@ -390,6 +397,18 @@ fun DashboardScreen(
     val enabledText = if (isZh) "已启用" else "On"
     val disabledText = if (isZh) "未启用" else "Off"
 
+    fun checkLspPrerequisite(featureOn: Boolean) {
+        if (featureOn && moduleState == ModuleState.NOT_CONNECTED) {
+            scope.launch { snackbar.showSnackbar(context.getString(R.string.prereq_lsposed_warning)) }
+        }
+    }
+
+    fun checkRootPrerequisite(featureOn: Boolean) {
+        if (featureOn && !hasRoot) {
+            scope.launch { snackbar.showSnackbar(context.getString(R.string.prereq_root_warning)) }
+        }
+    }
+
     MiuixPageScaffold(
         title = stringResource(R.string.topbar_title),
         snackbarHostState = snackbar,
@@ -460,7 +479,8 @@ fun DashboardScreen(
                 if (isZh) "Root 硬件直控" else "Root Mode"
             }
             val powerTag = if (isPlugged) {
-                if (isZh) "充电中 $batteryLevel%" else "Charging $batteryLevel%"
+                val wattsPart = if (batteryWatts >= 0.5f) "⚡ ${String.format(Locale.US, "%.1f", batteryWatts)}W · " else ""
+                if (isZh) "${wattsPart}充电中 $batteryLevel%" else "${wattsPart}Charging $batteryLevel%"
             } else {
                 if (isZh) "电量 $batteryLevel%" else "Battery $batteryLevel%"
             }
@@ -503,7 +523,9 @@ fun DashboardScreen(
                         onClick = {
                             activePanel = PANEL_SPOOF
                             if (csc.salesCode.isNotBlank()) {
-                                updateCsc { it.copy(enabled = !it.enabled) }
+                                val next = !csc.enabled
+                                updateCsc { it.copy(enabled = next) }
+                                checkLspPrerequisite(next)
                             } else {
                                 onOpenSearch()
                             }
@@ -518,7 +540,9 @@ fun DashboardScreen(
                         onClick = {
                             activePanel = PANEL_SPOOF
                             if (csc.deviceName.isNotBlank()) {
-                                updateCsc { it.copy(spoofDevice = !it.spoofDevice) }
+                                val next = !csc.spoofDevice
+                                updateCsc { it.copy(spoofDevice = next) }
+                                checkLspPrerequisite(next)
                             } else {
                                 showDeviceModelPicker = true
                             }
@@ -536,7 +560,9 @@ fun DashboardScreen(
                         modifier = Modifier.weight(1f),
                         onClick = {
                             activePanel = PANEL_STEPS
-                            updateTuning { it.copy(stepEnabled = !it.stepEnabled) }
+                            val next = !tuning.stepEnabled
+                            updateTuning { it.copy(stepEnabled = next) }
+                            checkLspPrerequisite(next)
                         },
                     )
                 }
@@ -552,7 +578,10 @@ fun DashboardScreen(
                         active = tuning.antiRecall,
                         modifier = Modifier.weight(1f),
                         onClick = {
-                            updateTuning { it.copy(antiRecall = !it.antiRecall) }
+                            activePanel = PANEL_STEPS
+                            val next = !tuning.antiRecall
+                            updateTuning { it.copy(antiRecall = next) }
+                            checkLspPrerequisite(next)
                         },
                     )
                     MiuixQuickTile(
@@ -566,6 +595,7 @@ fun DashboardScreen(
                             val next = !tuning.brightScreenFastCharge
                             updateTuning { it.copy(brightScreenFastCharge = next) }
                             if (next) requestNotificationPermissionIfNeeded()
+                            checkRootPrerequisite(next)
                         },
                     )
                     MiuixQuickTile(
@@ -583,6 +613,7 @@ fun DashboardScreen(
                             val next = !tuning.passThrough
                             updateTuning { it.copy(passThrough = next) }
                             if (next) requestNotificationPermissionIfNeeded()
+                            checkRootPrerequisite(next)
                         },
                     )
                 }
@@ -596,7 +627,7 @@ fun DashboardScreen(
                 label = { panel ->
                     when (panel) {
                         PANEL_SPOOF -> if (isZh) "区域与机型" else "Region & Model"
-                        PANEL_STEPS -> if (isZh) "微信计步计算" else "Step Calculator"
+                        PANEL_STEPS -> context.getString(R.string.wechat_panel_title)
                         else -> if (isZh) "供电与维护" else "Power & Tools"
                     }
                 },
@@ -605,15 +636,22 @@ fun DashboardScreen(
             // 根据当前选中的分段展示对应单张参数卡（一屏到底，清爽不堆叠）
             when (activePanel) {
                 PANEL_SPOOF -> {
+                    val regionStatus = if (csc.enabled && csc.salesCode.isNotBlank()) {
+                        if (isZh) "区域: ${csc.salesCode} (${csc.countryCode})"
+                        else "Region: ${csc.salesCode} (${csc.countryCode})"
+                    } else {
+                        if (isZh) "区域: 原生直通" else "Region: Native"
+                    }
+                    val modelStatus = if (csc.spoofDevice && csc.deviceName.isNotBlank()) {
+                        val customCount = csc.perAppDeviceModels.size
+                        val suffix = if (customCount > 0) (if (isZh) " (+$customCount 独立)" else " (+$customCount custom)") else ""
+                        if (isZh) "机型: ${csc.deviceName}$suffix" else "Model: ${csc.deviceName}$suffix"
+                    } else {
+                        if (isZh) "机型: 原生 (${Build.MODEL})" else "Model: Native (${Build.MODEL})"
+                    }
                     OneUiIslandCard(
                         title = if (isZh) "区域与机型参数" else "Region & Model Parameters",
-                        subtitle = if (csc.enabled && csc.salesCode.isNotBlank()) {
-                            if (isZh) "当前伪装: ${csc.salesCode} · ${csc.countryCode} (MCC ${csc.simMcc})"
-                            else "Spoofed: ${csc.salesCode} · ${csc.countryCode} (MCC ${csc.simMcc})"
-                        } else {
-                            if (isZh) "未开启伪装 · 商店遵循物理 SIM 卡与网络自然识别"
-                            else "Spoofing disabled · Follows physical SIM & network"
-                        },
+                        subtitle = "$regionStatus · $modelStatus",
                     ) {
                         Column(
                             modifier = Modifier.fillMaxWidth(),
@@ -702,7 +740,6 @@ fun DashboardScreen(
                                             simCountryIso = "",
                                             marketUnlockRaw = "",
                                             spoofSimInfo = false,
-                                            spoofDevice = false,
                                         )
                                     }
                                 },
@@ -721,10 +758,14 @@ fun DashboardScreen(
                             onClick = { showDeviceModelPicker = true },
                         )
 
+                        val customModelCount = csc.perAppDeviceModels.count { it.key in csc.deviceTargetPackages }
                         OneUiItemRow(
                             title = if (isZh) "机型伪装生效应用" else "Model Spoof Target Apps",
                             subtitle = if (csc.deviceTargetFilterEnabled && csc.deviceTargetPackages.isNotEmpty()) {
-                                stringResource(R.string.apps_count_applied, csc.deviceTargetPackages.size)
+                                val base = stringResource(R.string.apps_count_applied, csc.deviceTargetPackages.size)
+                                if (customModelCount > 0) {
+                                    if (isZh) "$base · 含 $customModelCount 个独立机型" else "$base · $customModelCount per-app models"
+                                } else base
                             } else {
                                 stringResource(R.string.all_scopes_applied)
                             },
@@ -738,6 +779,31 @@ fun DashboardScreen(
                             showChevron = true,
                             onClick = { showDeviceTargetPicker = true },
                         )
+
+                        if (csc.spoofDevice && csc.deviceTargetPackages.isNotEmpty()) {
+                            OneUiItemRow(
+                                title = stringResource(R.string.action_restart_device_targets),
+                                subtitle = stringResource(R.string.action_restart_device_targets_desc),
+                                icon = Icons.Default.Refresh,
+                                iconTint = IosGlassTokens.IosGreen,
+                                showChevron = false,
+                                onClick = {
+                                    haptics.confirm()
+                                    val targets = csc.deviceTargetPackages
+                                    scope.launch {
+                                        val count = withContext(Dispatchers.IO) {
+                                            StoreCleaner.forceStopPackages(targets)
+                                        }
+                                        val msg = if (count > 0) {
+                                            context.getString(R.string.toast_device_targets_restarted, count)
+                                        } else {
+                                            context.getString(R.string.prereq_root_warning)
+                                        }
+                                        snackbar.showSnackbar(msg)
+                                    }
+                                },
+                            )
+                        }
                     }
                 }
 
@@ -756,6 +822,16 @@ fun DashboardScreen(
                             stringResource(R.string.wechat_steps_off_hint)
                         },
                     ) {
+                        OneUiNoticeBanner(
+                            text = if (tuning.antiRecall) {
+                                stringResource(R.string.anti_recall_active_banner)
+                            } else {
+                                stringResource(R.string.anti_recall_off_banner)
+                            },
+                            icon = Icons.Default.Shield,
+                            contentColor = if (tuning.antiRecall) IosGlassTokens.IosGreen else MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+
                         // 模式切换：固定倍率 vs 自动递增
                         OneUiSegmentedControl(
                             items = listOf(false, true),
@@ -918,11 +994,61 @@ fun DashboardScreen(
                 }
 
                 PANEL_POWER -> {
+                    val cutoffVal = thermalCutoffSlider.toInt()
                     OneUiIslandCard(
                         title = if (isZh) "供电参数与快捷维护" else "Power & Quick Maintenance",
-                        subtitle = if (isZh) "亮屏快充超过 44.0°C 自动恢复原厂温控 · 旁路供电绕过电池直供主板"
-                        else "Fast charge 44.0°C safety cutoff · Bypass power feeds board directly",
+                        subtitle = if (isZh) "亮屏快充超过 ${cutoffVal}.0°C 自动恢复原厂温控 · 旁路供电绕过电池直供主板"
+                        else "Fast charge ${cutoffVal}.0°C safety cutoff · Bypass power feeds board directly",
                     ) {
+                        if (isPlugged && batteryVoltageMv > 0) {
+                            OneUiNoticeBanner(
+                                text = stringResource(
+                                    R.string.power_live_metrics_fmt,
+                                    batteryWatts,
+                                    batteryCurrentMa,
+                                    batteryVoltageMv / 1000f,
+                                ),
+                                icon = Icons.Default.Bolt,
+                                contentColor = IosGlassTokens.IosGreen,
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = stringResource(R.string.thermal_cutoff_label, cutoffVal),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MiuixTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                text = "${cutoffVal}°C",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = IosGlassTokens.IosAmber,
+                            )
+                        }
+
+                        Slider(
+                            value = thermalCutoffSlider,
+                            onValueChange = { thermalCutoffSlider = it },
+                            onValueChangeFinished = {
+                                val c = thermalCutoffSlider.toInt().coerceIn(38, 48)
+                                updateTuning { it.copy(thermalCutoffCelsius = c) }
+                            },
+                            valueRange = 38f..48f,
+                            steps = 9,
+                            showKeyPoints = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 4.dp),
+                        )
+
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -1114,6 +1240,17 @@ fun DashboardScreen(
         onSelect = { selected ->
             updateCsc(selected) { it.copy(spoofDevice = true, deviceName = selected) }
             showDeviceModelPicker = false
+            val targets = csc.deviceTargetPackages
+            if (targets.isNotEmpty()) {
+                scope.launch {
+                    val count = withContext(Dispatchers.IO) {
+                        StoreCleaner.forceStopPackages(targets.filter { it != "com.tencent.mm" })
+                    }
+                    if (count > 0) {
+                        snackbar.showSnackbar(context.getString(R.string.toast_device_targets_restarted, count))
+                    }
+                }
+            }
         },
     )
 
@@ -1121,12 +1258,16 @@ fun DashboardScreen(
     DeviceTargetPicker(
         show = showDeviceTargetPicker,
         initialSelection = csc.deviceTargetPackages,
+        initialPerAppModels = csc.perAppDeviceModels,
+        globalDefaultModel = csc.deviceName,
         onDismiss = { showDeviceTargetPicker = false },
-        onSave = { updated ->
+        onSave = { updated, updatedPerApp ->
+            val prevTargets = csc.deviceTargetPackages
             updateCsc {
                 it.copy(
                     deviceTargetFilterEnabled = updated.isNotEmpty(),
                     deviceTargetPackages = updated,
+                    perAppDeviceModels = updatedPerApp,
                 )
             }
             showDeviceTargetPicker = false
@@ -1135,12 +1276,20 @@ fun DashboardScreen(
                 val synced = if (updated.isNotEmpty()) {
                     LsposedScopeHelper.syncScopesWithRoot(context, updated)
                 } else false
-                val launched = LsposedScopeHelper.launchLsposedManager(context)
+                if (!synced) {
+                    val newlyAdded = updated - prevTargets
+                    newlyAdded.forEach { pkg ->
+                        LsposedScopeHelper.requestScopeViaService(pkg)
+                    }
+                    StoreCleaner.forceStopPackages(updated.filter { it != "com.tencent.mm" })
+                }
+                val launched = if (!synced && updated.isNotEmpty()) {
+                    LsposedScopeHelper.launchLsposedManager(context)
+                } else false
                 val msg = when {
-                    synced && launched -> if (isZh) "已通过 Root 自动同步作用域，已调出 LSPosed 供确认" else "Synced scope via Root, opened LSPosed for confirmation"
+                    synced -> if (isZh) "已通过 Root 自动同步作用域并重启目标应用使其生效" else "Synced scope & restarted target apps via Root"
                     launched -> if (isZh) "已保存目标应用，已调出 LSPosed 请确认勾选作用域" else "Saved target apps, opened LSPosed to verify scope"
-                    synced -> if (isZh) "已通过 Root 自动同步作用域至 LSPosed" else "Synced scope to LSPosed via Root"
-                    else -> if (isZh) "已保存目标应用，请在 LSPosed 中勾选对应作用域" else "Saved target apps (Please check scope in LSPosed)"
+                    else -> if (isZh) "已保存目标应用与独立机型配置" else "Saved target apps & per-app model settings"
                 }
                 snackbar.showSnackbar(msg)
             }

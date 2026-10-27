@@ -385,26 +385,77 @@ internal class WechatHooks(
             (path.contains("/voice2/") || path.contains("/voice/") || path.endsWith(".amr")) ||
             (path.contains("/video/") || path.endsWith(".mp4"))
 
+    private fun resolveWechatVersionKey(context: Context): String = runCatching {
+        val info = context.packageManager.getPackageInfo(context.packageName, 0)
+        val verCode = if (android.os.Build.VERSION.SDK_INT >= 28) {
+            info.longVersionCode
+        } else {
+            @Suppress("DEPRECATION")
+            info.versionCode.toLong()
+        }
+        "${verCode}_${info.lastUpdateTime}"
+    }.getOrDefault("")
+
     private fun installMessageStorageHook(context: Context, classLoader: ClassLoader) {
         runCatching {
-            val classes = collectClassNames(context, classLoader, "com.tencent.mm.storage.")
-                .mapNotNull { runCatching { Class.forName(it, false, classLoader) }.getOrNull() }
-            val messageClasses = classes.filter(::isMessageClass)
-            if (messageClasses.isEmpty()) {
-                logger("未找到微信消息实体类，跳过提示消息克隆", null)
-                return
+            val cachePrefs = runCatching {
+                context.getSharedPreferences(DEX_CACHE_PREFS, Context.MODE_PRIVATE)
+            }.getOrNull()
+            val versionKey = resolveWechatVersionKey(context)
+
+            var target: Method? = null
+            if (cachePrefs != null && versionKey.isNotEmpty() &&
+                cachePrefs.getString(KEY_CACHE_VERSION, null) == versionKey
+            ) {
+                val storageClsName = cachePrefs.getString(KEY_STORAGE_CLASS, null)
+                val msgClsName = cachePrefs.getString(KEY_MESSAGE_CLASS, null)
+                val methodName = cachePrefs.getString(KEY_INSERT_METHOD, null)
+                val paramCount = cachePrefs.getInt(KEY_INSERT_PARAM_COUNT, 0)
+                if (!storageClsName.isNullOrBlank() && !msgClsName.isNullOrBlank() && !methodName.isNullOrBlank()) {
+                    target = runCatching {
+                        val storageCls = Class.forName(storageClsName, false, classLoader)
+                        val msgCls = Class.forName(msgClsName, false, classLoader)
+                        if (paramCount == 1) {
+                            storageCls.getDeclaredMethod(methodName, msgCls)
+                        } else {
+                            storageCls.getDeclaredMethod(methodName, msgCls, Boolean::class.javaPrimitiveType!!)
+                        }.apply { isAccessible = true }
+                    }.getOrNull()
+                }
             }
-            val messageClass = messageClasses.first()
-            val candidates = classes.flatMap { it.declaredMethods.asList() }.filter { method ->
-                val p = method.parameterTypes
-                method.returnType == Long::class.javaPrimitiveType && p.isNotEmpty() && p.size <= 2 &&
-                    p[0] == messageClass && (p.size == 1 || p[1] == Boolean::class.javaPrimitiveType)
-            }.distinct()
-            if (candidates.isEmpty()) {
-                logger("未找到微信消息写入方法", null)
-                return
+
+            if (target == null) {
+                val classes = collectClassNames(context, classLoader, "com.tencent.mm.storage.")
+                    .mapNotNull { runCatching { Class.forName(it, false, classLoader) }.getOrNull() }
+                val messageClasses = classes.filter(::isMessageClass)
+                if (messageClasses.isEmpty()) {
+                    logger("未找到微信消息实体类，跳过提示消息克隆", null)
+                    return
+                }
+                val messageClass = messageClasses.first()
+                val candidates = classes.flatMap { it.declaredMethods.asList() }.filter { method ->
+                    val p = method.parameterTypes
+                    method.returnType == Long::class.javaPrimitiveType && p.isNotEmpty() && p.size <= 2 &&
+                        p[0] == messageClass && (p.size == 1 || p[1] == Boolean::class.javaPrimitiveType)
+                }.distinct()
+                if (candidates.isEmpty()) {
+                    logger("未找到微信消息写入方法", null)
+                    return
+                }
+                target = candidates.first().apply { isAccessible = true }
+                if (cachePrefs != null && versionKey.isNotEmpty()) {
+                    runCatching {
+                        cachePrefs.edit()
+                            .putString(KEY_CACHE_VERSION, versionKey)
+                            .putString(KEY_STORAGE_CLASS, target.declaringClass.name)
+                            .putString(KEY_MESSAGE_CLASS, messageClass.name)
+                            .putString(KEY_INSERT_METHOD, target.name)
+                            .putInt(KEY_INSERT_PARAM_COUNT, target.parameterCount)
+                            .apply()
+                    }
+                }
             }
-            val target = candidates.first().apply { isAccessible = true }
+
             install(target) { chain ->
                 val message = chain.getArg(0)
                 val result = chain.proceed()
@@ -417,7 +468,7 @@ internal class WechatHooks(
                 result
             }
             messageInsertMethod = target
-            logger("微信防撤回消息缓存 Hook 已就绪", null)
+            logger("微信防撤回消息缓存 Hook 已就绪 (${target.declaringClass.simpleName}.${target.name})", null)
         }.onFailure { logger("微信消息存储扫描失败", it) }
     }
 
@@ -459,7 +510,31 @@ internal class WechatHooks(
 
     private fun installXmlParserHook(context: Context, classLoader: ClassLoader) {
         runCatching {
-            val known = runCatching {
+            val cachePrefs = runCatching {
+                context.getSharedPreferences(DEX_CACHE_PREFS, Context.MODE_PRIVATE)
+            }.getOrNull()
+            val versionKey = resolveWechatVersionKey(context)
+
+            var cachedParser: Method? = null
+            if (cachePrefs != null && versionKey.isNotEmpty() &&
+                cachePrefs.getString(KEY_CACHE_VERSION, null) == versionKey
+            ) {
+                val parserClsName = cachePrefs.getString(KEY_XML_PARSER_CLASS, null)
+                val parserMethodName = cachePrefs.getString(KEY_XML_PARSER_METHOD, null)
+                if (!parserClsName.isNullOrBlank() && !parserMethodName.isNullOrBlank()) {
+                    cachedParser = runCatching {
+                        val cls = Class.forName(parserClsName, false, classLoader)
+                        cls.getDeclaredMethod(
+                            parserMethodName,
+                            String::class.java,
+                            String::class.java,
+                            String::class.java,
+                        ).apply { isAccessible = true }
+                    }.getOrNull()
+                }
+            }
+
+            val known = cachedParser ?: runCatching {
                 Class.forName("com.tencent.mm.sdk.platformtools.XmlParser", false, classLoader)
             }.getOrNull()?.let { findParserMethod(it, false) }
             val parser = known ?: collectClassNames(context, classLoader, "com.tencent.mm.sdk.platformtools.")
@@ -469,6 +544,15 @@ internal class WechatHooks(
             if (parser == null) {
                 logger("微信 XML 解析器未匹配，数据库防撤回仍正常工作", null)
                 return
+            }
+            if (cachedParser == null && cachePrefs != null && versionKey.isNotEmpty()) {
+                runCatching {
+                    cachePrefs.edit()
+                        .putString(KEY_CACHE_VERSION, versionKey)
+                        .putString(KEY_XML_PARSER_CLASS, parser.declaringClass.name)
+                        .putString(KEY_XML_PARSER_METHOD, parser.name)
+                        .apply()
+                }
             }
             install(parser) { chain ->
                 val result = chain.proceed()
@@ -486,7 +570,7 @@ internal class WechatHooks(
                 }
                 result
             }
-            logger("微信防撤回 XML 提示 Hook 已就绪", null)
+            logger("微信防撤回 XML 提示 Hook 已就绪 (${parser.declaringClass.simpleName}.${parser.name})", null)
         }.onFailure { logger("微信 XML 解析器扫描失败", it) }
     }
 
@@ -591,6 +675,15 @@ internal class WechatHooks(
         const val FIELD_CREATE_TIME = "field_createTime"
         const val FIELD_TYPE = "field_type"
         const val FIELD_CONTENT = "field_content"
+
+        const val DEX_CACHE_PREFS = "weitiao_wechat_dex_cache"
+        const val KEY_CACHE_VERSION = "wechat_version_key"
+        const val KEY_STORAGE_CLASS = "storage_class_name"
+        const val KEY_MESSAGE_CLASS = "message_class_name"
+        const val KEY_INSERT_METHOD = "insert_method_name"
+        const val KEY_INSERT_PARAM_COUNT = "insert_param_count"
+        const val KEY_XML_PARSER_CLASS = "xml_parser_class_name"
+        const val KEY_XML_PARSER_METHOD = "xml_parser_method_name"
     }
 }
 

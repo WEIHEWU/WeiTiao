@@ -1,0 +1,121 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 480" width="880" height="480">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0F172A"/>
+      <stop offset="50%" stop-color="#1E293B"/>
+      <stop offset="100%" stop-color="#0F172A"/>
+    </linearGradient>
+    <linearGradient id="heroGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#2563EB"/>
+      <stop offset="100%" stop-color="#0EA5E9"/>
+    </linearGradient>
+    <linearGradient id="tileActive" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#1D4ED8"/>
+    </linearGradient>
+    <filter id="cardShadow" x="-5%" y="-5%" width="110%" height="115%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <rect width="880" height="480" rx="24" fill="url(#bgGrad)"/>
+
+  <!-- Left Phone Mockup: Dashboard 3x2 Control Center -->
+  <g transform="translate(36, 26)" filter="url(#cardShadow)">
+    <rect width="388" height="428" rx="28" fill="#F8FAFC" stroke="#CBD5E1" stroke-width="1.5"/>
+    <text x="24" y="38" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif" font-size="20" font-weight="700" fill="#0F172A">微调 · WeiTiao</text>
+    <rect x="330" y="20" width="34" height="24" rx="12" fill="#E2E8F0"/>
+    <text x="347" y="36" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="600" fill="#334155">⚙</text>
+
+    <!-- Hero Status Card -->
+    <rect x="20" y="54" width="348" height="72" rx="18" fill="url(#heroGrad)"/>
+    <text x="36" y="80" font-family="sans-serif" font-size="16" font-weight="700" fill="#FFFFFF">运行中 · LSPosed 推荐模式</text>
+    <rect x="298" y="64" width="54" height="20" rx="10" fill="#FFFFFF" fill-opacity="0.22"/>
+    <text x="325" y="78" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="600" fill="#FFFFFF">v1.6.0</text>
+    <text x="36" y="100" font-family="sans-serif" font-size="11.5" fill="#E0F2FE">35.2°C · ⚡ 28.4W · 充电中 82%</text>
+    <text x="36" y="116" font-family="sans-serif" font-size="10.5" fill="#BAE6FD">物理 SIM 与基带 100% 原生免注入</text>
+
+    <!-- 3x2 Quick Tiles -->
+    <!-- Row 1 -->
+    <rect x="20" y="138" width="110" height="58" rx="16" fill="url(#tileActive)"/>
+    <text x="34" y="162" font-family="sans-serif" font-size="13" font-weight="700" fill="#FFFFFF">商店跨区</text>
+    <text x="34" y="182" font-family="sans-serif" font-size="10.5" fill="#DBEAFE">已启用 · TGY</text>
+
+    <rect x="139" y="138" width="110" height="58" rx="16" fill="url(#tileActive)"/>
+    <text x="153" y="162" font-family="sans-serif" font-size="13" font-weight="700" fill="#FFFFFF">机型伪装</text>
+    <text x="153" y="182" font-family="sans-serif" font-size="10.5" fill="#DBEAFE">已启用 (+3独立)</text>
+
+    <rect x="258" y="138" width="110" height="58" rx="16" fill="url(#tileActive)"/>
+    <text x="272" y="162" font-family="sans-serif" font-size="13" font-weight="700" fill="#FFFFFF">微信计步</text>
+    <text x="272" y="182" font-family="sans-serif" font-size="10.5" fill="#DBEAFE">已启用 · 10x</text>
+
+    <!-- Row 2 -->
+    <rect x="20" y="204" width="110" height="58" rx="16" fill="url(#tileActive)"/>
+    <text x="34" y="228" font-family="sans-serif" font-size="13" font-weight="700" fill="#FFFFFF">防撤回</text>
+    <text x="34" y="248" font-family="sans-serif" font-size="10.5" fill="#DBEAFE">已启用 · 秒级缓存</text>
+
+    <rect x="139" y="204" width="110" height="58" rx="16" fill="url(#tileActive)"/>
+    <text x="153" y="228" font-family="sans-serif" font-size="13" font-weight="700" fill="#FFFFFF">亮屏快充</text>
+    <text x="153" y="248" font-family="sans-serif" font-size="10.5" fill="#DBEAFE">已启用 · 44°C</text>
+
+    <rect x="258" y="204" width="110" height="58" rx="16" fill="#E2E8F0"/>
+    <text x="272" y="228" font-family="sans-serif" font-size="13" font-weight="700" fill="#1E293B">旁路供电</text>
+    <text x="272" y="248" font-family="sans-serif" font-size="10.5" fill="#64748B">阈值 · 80%</text>
+
+    <!-- Segmented Control -->
+    <rect x="20" y="274" width="348" height="32" rx="12" fill="#E2E8F0"/>
+    <rect x="24" y="277" width="112" height="26" rx="9" fill="#FFFFFF"/>
+    <text x="80" y="294" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="700" fill="#0F172A">区域与机型</text>
+    <text x="194" y="294" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="500" fill="#64748B">微信步数与防撤回</text>
+    <text x="310" y="294" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="500" fill="#64748B">供电与维护</text>
+
+    <!-- Active Parameter Card -->
+    <rect x="20" y="316" width="348" height="96" rx="16" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
+    <text x="34" y="338" font-family="sans-serif" font-size="12.5" font-weight="700" fill="#0F172A">区域与机型完全独立解耦</text>
+    <text x="34" y="356" font-family="sans-serif" font-size="11" fill="#475569">区域: TGY (HK) · 机型: iPhone 17 Pro Max (+3 独立)</text>
+    <rect x="34" y="368" width="152" height="30" rx="10" fill="#EFF6FF"/>
+    <text x="110" y="387" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="600" fill="#2563EB">分应用独立机型配置</text>
+    <rect x="198" y="368" width="156" height="30" rx="10" fill="#ECFDF5"/>
+    <text x="276" y="387" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="600" fill="#059669">一键强停重启目标应用</text>
+  </g>
+
+  <!-- Right Panel: Power & Self-Test Highlights -->
+  <g transform="translate(456, 26)" filter="url(#cardShadow)">
+    <rect width="388" height="428" rx="28" fill="#F8FAFC" stroke="#CBD5E1" stroke-width="1.5"/>
+    <text x="24" y="38" font-family="sans-serif" font-size="18" font-weight="700" fill="#0F172A">高级设置与实时探针</text>
+
+    <!-- Self-Test Probe Card -->
+    <rect x="20" y="54" width="348" height="114" rx="16" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
+    <text x="34" y="76" font-family="sans-serif" font-size="13" font-weight="700" fill="#0F172A">环境与伪装自检探针 (Self-Test Probe)</text>
+    <text x="34" y="96" font-family="sans-serif" font-size="11" fill="#334155">• 当前机型 (Build.MODEL): SM-S9380 → iPhone18,2</text>
+    <text x="34" y="114" font-family="sans-serif" font-size="11" fill="#334155">• 商店区域 (sales_code): CHC → TGY (MCC 454)</text>
+    <text x="34" y="132" font-family="sans-serif" font-size="11" fill="#059669">• Root 持久会话池: 已就绪 (延迟 &lt; 2ms) · LSPosed 4 进程活跃</text>
+    <text x="34" y="150" font-family="sans-serif" font-size="11" fill="#2563EB">• NativePropCow: libc 与 Java Build.* 100% 一致</text>
+
+    <!-- One UI CscFeature Presets -->
+    <rect x="20" y="180" width="348" height="122" rx="16" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
+    <text x="34" y="202" font-family="sans-serif" font-size="13" font-weight="700" fill="#0F172A">三星 One UI 隐藏特性一键开关</text>
+    <text x="34" y="224" font-family="sans-serif" font-size="11.5" fill="#1E293B">原生通话自动录音 (VoiceCall_ConfigRecording)</text>
+    <rect x="318" y="211" width="34" height="18" rx="9" fill="#10B981"/>
+    <circle cx="343" cy="220" r="7" fill="#FFFFFF"/>
+
+    <text x="34" y="248" font-family="sans-serif" font-size="11.5" fill="#1E293B">相机快门声音开关菜单 (ShutterSoundMenu)</text>
+    <rect x="318" y="235" width="34" height="18" rx="9" fill="#10B981"/>
+    <circle cx="343" cy="244" r="7" fill="#FFFFFF"/>
+
+    <text x="34" y="272" font-family="sans-serif" font-size="11.5" fill="#1E293B">状态栏实时网速显示 (RealTimeNetworkSpeed)</text>
+    <rect x="318" y="259" width="34" height="18" rx="9" fill="#10B981"/>
+    <circle cx="343" cy="268" r="7" fill="#FFFFFF"/>
+
+    <text x="34" y="294" font-family="sans-serif" font-size="11.5" fill="#1E293B">下拉通知栏流量统计 (DataUsageViewOnQuickPanel)</text>
+    <rect x="318" y="281" width="34" height="18" rx="9" fill="#10B981"/>
+    <circle cx="343" cy="290" r="7" fill="#FFFFFF"/>
+
+    <!-- Live Power & Thermal Cutoff -->
+    <rect x="20" y="314" width="348" height="98" rx="16" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
+    <text x="34" y="336" font-family="sans-serif" font-size="13" font-weight="700" fill="#0F172A">实时充电功率监控 &amp; 自定义温控熔断</text>
+    <rect x="34" y="346" width="320" height="26" rx="8" fill="#ECFDF5"/>
+    <text x="46" y="363" font-family="sans-serif" font-size="11" font-weight="600" fill="#059669">⚡ 实时充电: 28.4 W  (3120 mA · 9.10 V)</text>
+    <text x="34" y="394" font-family="sans-serif" font-size="11" fill="#475569">亮屏快充温控熔断线 (38°C - 48°C 可调): 当前 44°C</text>
+  </g>
+</svg>

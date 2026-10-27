@@ -183,5 +183,59 @@
     <string name="choose_pass_through_apps">选择旁路供电触发应用</string>
     <string name="use_custom_model_format">使用自定义型号: \"%1$s\"</string>
     <string name="custom_model_desc">直接应用此自定义型号并自动适配属性</string>
+
+    <!-- 新增增强提示与功能文案 -->
+    <string name="toast_need_lsposed_warning">提示：LSPosed 尚未激活，配置已预存，请在 LSPosed 管理器中启用本模块后生效</string>
+    <string name="toast_need_root_warning">提示：未检测到 Root 权限，快充与旁路供电需要授予 su 权限才能写入内核节点</string>
+    <string name="toast_device_targets_restarted">已切换机型并自动重启 %1$d 个目标应用，重新打开即刻生效</string>
+    <string name="action_restart_target_apps">一键重启伪装目标应用 (%1$d)</string>
+    <string name="power_live_metrics_format">实时功率 %1$.1fW · %2$dmA · %3$.2fV</string>
+    <string name="power_thermal_cutoff_title">高温安全熔断阈值</string>
+    <string name="power_thermal_cutoff_desc">达到 %1$d°C 自动交还官方温控，降温 3.5°C 后自动恢复快充</string>
+    <string name="power_thermal_cutoff_active">已触发高温熔断保护</string>
+    <string name="picker_per_app_model_default">跟随全局 (%1$s)</string>
+    <string name="picker_per_app_model_custom">独立机型: %1$s</string>
+    <string name="picker_per_app_reset_global">恢复跟随全局默认机型</string>
+    <string name="wechat_panel_title">微信增强参数</string>
+    <string name="anti_recall_banner_active">防撤回已开启：实时保护聊天文字、图片、语音与视频，缓存 DEX 极速挂载已启用</string>
+    <string name="anti_recall_banner_inactive">防撤回未开启：点击上方「防撤回」磁贴即可拦截撤回消息并保留媒体文件</string>
+    <string name="settings_probe_title">环境与伪装自检探针</string>
+    <string name="settings_probe_desc">实时读取当前进程视角下的硬件标识、CSC 属性与框架挂载状态</string>
+    <string name="settings_csc_presets_title">三星 One UI 常用 CscFeature 一键开关</string>
+    <string name="settings_csc_presets_desc">无需手写 XML/JSON，一键开启通话录音、相机静音菜单与状态栏实时网速</string>
+    <string name="preset_csc_call_recording">原生通话自动录音</string>
+    <string name="preset_csc_shutter_menu">相机快门声音开关菜单</string>
+    <string name="preset_csc_network_speed">状态栏实时网速显示</string>
+    <string name="preset_csc_DATA_usage">下拉通知栏显示流量统计</string>
+    <string name="kv_add_pair_btn">+ 添加键值项</string>
+    <string name="kv_key_hint">键名 (Key)</string>
+    <string name="kv_val_hint">值 (Value)</string>
+    <string name="kv_value_hint">值 (Value)</string>
+    <string name="kv_add_btn">添加</string>
+    <string name="prereq_lsposed_warning">提示：LSPosed 尚未激活，配置已预存，请在 LSPosed 管理器中启用本模块后生效</string>
+    <string name="prereq_root_warning">提示：未检测到 Root 权限，此操作需要授予 su 权限</string>
+    <string name="action_restart_device_targets">一键重启伪装目标应用</string>
+    <string name="action_restart_device_targets_desc">通过 Root 强制停止所有已选目标应用，重开立即读取新伪装机型</string>
+    <string name="anti_recall_active_banner">防撤回已开启：实时保护聊天文字、图片、语音与视频，缓存 DEX 极速挂载已启用</string>
+    <string name="anti_recall_off_banner">防撤回未开启：点击上方「防撤回」磁贴即可拦截撤回消息并保留媒体文件</string>
+    <string name="power_live_metrics_fmt">⚡ 实时充电功率 %1$.1f W · %2$d mA · %3$.2f V</string>
+    <string name="thermal_cutoff_label">亮屏快充温控安全熔断线 (%1$d°C)</string>
+    <string name="csc_preset_call_recording">原生通话自动录音</string>
+    <string name="csc_preset_call_recording_desc">CscFeature_VoiceCall_ConfigRecording = RecordingAllowed</string>
+    <string name="csc_preset_shutter_sound">相机快门声音开关菜单</string>
+    <string name="csc_preset_shutter_sound_desc">CscFeature_Camera_ShutterSoundMenu = TRUE</string>
+    <string name="csc_preset_network_speed">状态栏实时网速显示</string>
+    <string name="csc_preset_network_speed_desc">CscFeature_Setting_SupportRealTimeNetworkSpeed = TRUE</string>
+    <string name="csc_preset_data_usage">下拉通知栏显示流量统计</string>
+    <string name="csc_preset_data_usage_desc">CscFeature_SystemUI_SupportDataUsageViewOnQuickPanel = TRUE</string>
+    <string name="selftest_card_title">环境与伪装自检探针</string>
+    <string name="selftest_card_subtitle">实时验证当前生效机型、区域代码、Root 持久会话与 LSPosed 挂载状态</string>
+    <string name="selftest_build_model">当前进程机型 (Build.MODEL)</string>
+    <string name="selftest_csc_code">当前区域代码 (ro.csc.sales_code)</string>
+    <string name="selftest_root_status">Root 权限与会话池状态</string>
+    <string name="selftest_lsposed_status">LSPosed 注入心跳状态</string>
+    <string name="selftest_refresh_btn">立即重新检测环境探针</string>
+    <string name="csc_presets_card_title">三星 One UI 隐藏特性一键开关</string>
+    <string name="csc_presets_card_subtitle">无需手写 JSON，一键开启通话录音、快门音菜单、实时网速与流量条</string>
 </resources>
 

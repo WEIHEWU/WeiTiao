@@ -1,6 +1,7 @@
 package com.weitiao.tuning.core
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class MarketUnlockAndPresetTest {
@@ -81,5 +82,58 @@ class MarketUnlockAndPresetTest {
         assertEquals("06", CscSim.resolveMnc(hkConfig))
         assertEquals("TGY", CscSpoof.matchProp("persist.omc.sales_code", hkConfig))
         assertEquals("45406", CscSpoof.matchProp("gsm.sim.operator.numeric", hkConfig))
+    }
+
+    @Test
+    fun testDecoupledDeviceSpoofAndCscFeaturesWhenStoreSpoofDisabled() {
+        val sampleProfile = DeviceModels.ALL.first()
+        val config = CscConfig(
+            enabled = false, // Store spoofing disabled
+            salesCode = "TGY",
+            spoofDevice = true,
+            deviceName = sampleProfile.name,
+            spoofSemCscFeature = true,
+            customCscFeatures = mapOf("CscFeature_VoiceCall_ConfigRecording" to "RecordingAllowed"),
+            customProps = mapOf("ro.custom.test" to "ok"),
+        )
+
+        // Store sales_code should NOT be spoofed when enabled = false
+        assertNull(CscSpoof.matchProp("ro.csc.sales_code", config))
+
+        // Custom props, custom CscFeatures, and device spoofing MUST still work independently
+        assertEquals("ok", CscSpoof.matchProp("ro.custom.test", config))
+        assertEquals("RecordingAllowed", CscSpoof.matchCscFeature("CscFeature_VoiceCall_ConfigRecording", config))
+        assertEquals(sampleProfile.model, CscSpoof.matchDeviceProp("ro.product.model", config))
+        assertEquals(
+            sampleProfile.name,
+            CscSpoof.matchFloatingFeature("SEC_FLOATING_FEATURE_SETTINGS_CONFIG_BRAND_NAME", config),
+        )
+    }
+
+    @Test
+    fun testPerAppIndependentDeviceModelSpoofing() {
+        val globalModel = DeviceModels.ALL.first()
+        val overrideModel = DeviceModels.ALL.last()
+        val config = CscConfig(
+            enabled = false,
+            spoofDevice = true,
+            deviceName = globalModel.name,
+            deviceTargetFilterEnabled = true,
+            deviceTargetPackages = setOf("com.tencent.tmgp.sgame", "com.miHoYo.Yuanshen"),
+            perAppDeviceModels = mapOf("com.miHoYo.Yuanshen" to overrideModel.name),
+        )
+
+        // Package with per-app override gets overrideModel
+        assertEquals(
+            overrideModel.model,
+            CscSpoof.matchDeviceProp("ro.product.model", config, "com.miHoYo.Yuanshen"),
+        )
+        // Package without per-app override falls back to globalModel
+        assertEquals(
+            globalModel.model,
+            CscSpoof.matchDeviceProp("ro.product.model", config, "com.tencent.tmgp.sgame"),
+        )
+        // Non-target package is untouched
+        assertNull(CscSpoof.matchDeviceProp("ro.product.model", config, "com.other.app"))
     }
 }

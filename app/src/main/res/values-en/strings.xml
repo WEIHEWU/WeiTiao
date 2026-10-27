@@ -183,5 +183,59 @@
     <string name="choose_pass_through_apps">Select Bypass Power Apps</string>
     <string name="use_custom_model_format">Use custom model: \"%1$s\"</string>
     <string name="custom_model_desc">Apply this custom model directly with auto-adapted properties</string>
+
+    <!-- Enhanced UX & Feature Strings -->
+    <string name="toast_need_lsposed_warning">Note: LSPosed is not connected yet. Config saved and will take effect once enabled in LSPosed.</string>
+    <string name="toast_need_root_warning">Note: Root access not detected. Fast charge &amp; bypass power require su permission.</string>
+    <string name="toast_device_targets_restarted">Model applied and %1$d target app(s) force-stopped to take effect immediately</string>
+    <string name="action_restart_target_apps">Restart Target Apps (%1$d)</string>
+    <string name="power_live_metrics_format">Live %1$.1fW · %2$dmA · %3$.2fV</string>
+    <string name="power_thermal_cutoff_title">Thermal Safety Cutoff</string>
+    <string name="power_thermal_cutoff_desc">Restores stock thermal control at %1$d°C and resumes after cooling by 3.5°C</string>
+    <string name="power_thermal_cutoff_active">Thermal Cutoff Active</string>
+    <string name="picker_per_app_model_default">Global (%1$s)</string>
+    <string name="picker_per_app_model_custom">Model: %1$s</string>
+    <string name="picker_per_app_reset_global">Reset to Global Default Model</string>
+    <string name="wechat_panel_title">WeChat Tweaks</string>
+    <string name="anti_recall_banner_active">Anti-Recall Active: Protects text, images, voice &amp; video with cached fast DEX hook</string>
+    <string name="anti_recall_banner_inactive">Anti-Recall Off: Tap the Anti-Recall tile above to block message revocation</string>
+    <string name="settings_probe_title">Environment &amp; Spoof Self-Test Probe</string>
+    <string name="settings_probe_desc">Live inspection of hardware identity, CSC properties, and framework status</string>
+    <string name="settings_csc_presets_title">One-Tap Samsung One UI CscFeature Presets</string>
+    <string name="settings_csc_presets_desc">Toggle Call Recording, Camera Shutter Sound Menu, and Real-Time Network Speed without writing JSON</string>
+    <string name="preset_csc_call_recording">Native Call Recording</string>
+    <string name="preset_csc_shutter_menu">Camera Shutter Sound Menu</string>
+    <string name="preset_csc_network_speed">Status Bar Real-Time Network Speed</string>
+    <string name="preset_csc_DATA_usage">Quick Panel Data Usage Bar</string>
+    <string name="kv_add_pair_btn">+ Add Key-Value</string>
+    <string name="kv_key_hint">Key</string>
+    <string name="kv_val_hint">Value</string>
+    <string name="kv_value_hint">Value</string>
+    <string name="kv_add_btn">Add</string>
+    <string name="prereq_lsposed_warning">Note: LSPosed is not connected yet. Config saved and will take effect once enabled in LSPosed.</string>
+    <string name="prereq_root_warning">Note: Root access not detected. This action requires su permission.</string>
+    <string name="action_restart_device_targets">Restart Spoof Target Apps</string>
+    <string name="action_restart_device_targets_desc">Force-stop all target apps via Root so new model spoofing takes effect immediately</string>
+    <string name="anti_recall_active_banner">Anti-Recall Active: Protects text, images, voice &amp; video with cached fast DEX hook</string>
+    <string name="anti_recall_off_banner">Anti-Recall Off: Tap the Anti-Recall tile above to block message revocation</string>
+    <string name="power_live_metrics_fmt">⚡ Live Charging %1$.1f W · %2$d mA · %3$.2f V</string>
+    <string name="thermal_cutoff_label">Fast Charge Thermal Safety Cutoff (%1$d°C)</string>
+    <string name="csc_preset_call_recording">Native Call Recording</string>
+    <string name="csc_preset_call_recording_desc">CscFeature_VoiceCall_ConfigRecording = RecordingAllowed</string>
+    <string name="csc_preset_shutter_sound">Camera Shutter Sound Menu</string>
+    <string name="csc_preset_shutter_sound_desc">CscFeature_Camera_ShutterSoundMenu = TRUE</string>
+    <string name="csc_preset_network_speed">Status Bar Real-Time Network Speed</string>
+    <string name="csc_preset_network_speed_desc">CscFeature_Setting_SupportRealTimeNetworkSpeed = TRUE</string>
+    <string name="csc_preset_data_usage">Quick Panel Data Usage Bar</string>
+    <string name="csc_preset_data_usage_desc">CscFeature_SystemUI_SupportDataUsageViewOnQuickPanel = TRUE</string>
+    <string name="selftest_card_title">Environment &amp; Spoof Self-Test Probe</string>
+    <string name="selftest_card_subtitle">Live verification of effective model, region code, persistent Root shell, and LSPosed hooks</string>
+    <string name="selftest_build_model">Effective Model (Build.MODEL)</string>
+    <string name="selftest_csc_code">Effective Region (ro.csc.sales_code)</string>
+    <string name="selftest_root_status">Root &amp; Persistent Shell Status</string>
+    <string name="selftest_lsposed_status">LSPosed Hook Heartbeat</string>
+    <string name="selftest_refresh_btn">Re-run Environment Probe Now</string>
+    <string name="csc_presets_card_title">One-Tap Samsung One UI CscFeature Presets</string>
+    <string name="csc_presets_card_subtitle">Toggle Call Recording, Camera Shutter Sound Menu, Network Speed, and Data Usage without JSON</string>
 </resources>
 

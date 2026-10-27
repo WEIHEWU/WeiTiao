@@ -1,9 +1,11 @@
-name: Publish Release
+name: Build & Publish Release
 
 on:
   push:
     branches:
       - main
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 concurrency:
@@ -20,24 +22,35 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Create GitHub Release and Upload APK
+      - name: Verify APK & Generate SHA-256 Checksum
+        run: |
+          test -f releases/WeiTiao-v1.5.0.apk
+          cd releases
+          sha256sum WeiTiao-v1.5.0.apk > WeiTiao-v1.5.0.apk.sha256
+          cat WeiTiao-v1.5.0.apk.sha256
+
+      - name: Create GitHub Release and Upload APK + Checksum
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.5.0
-          name: "微调 WeiTiao v1.5.0 (底层 Native COW 内存属性引擎 & iPhone 伪装支持)"
+          name: "微调 WeiTiao v1.5.0 (Native COW 属性引擎 · 分应用独立机型 · 实时快充功率与自检探针)"
           body: |
             ### 微调 (WeiTiao) v1.5.0
 
             - **突破性底层 Native COW 内存属性改写引擎 (NativePropCow)**：
               - 攻破 iPhone/Apple 及跨品牌机型在加固防篡改应用（腾讯乐固/加固、酷安、QQ 等）中失效的难题；
               - 精准读取 `/proc/self/maps`，通过 `mmap(MAP_PRIVATE | MAP_FIXED)` 将 `/dev/__properties__/*` 共享内存映射重置为私有写时复制（COW）物理页；
-              - 通过直接内存指针与原子 `serial` 序列号快速写入伪装值，使 Native libc (`__system_property_get` / `__system_property_read_callback`) 与 Java 层 `Build.*` 返回值达到 100% 绝对一致；
-              - 毫秒级极速注入（~1.5ms），无需依赖系统层修改或守护进程，极度稳定轻量。
-            - **机型伪装生效应用保存时自动联动 LSPosed 作用域 (Root 静默同步)**：
-              - 在应用选择界面点击保存时，若具备 Root 权限自动直连 LSPosed 核心数据库完成模块作用域同步，免去手动去 LSPosed 勾选并重启的繁琐链路；无 Root 时无缝直达 LSPosed 作用域管理界面。
-            - **全球主流机型库深度翻新与净化（严格执行三年时效与纯旗舰标准）**：
-              - 全新收录 2023.10 - 2026.10 期间的纯血机皇与顶级折叠旗舰（iPhone Duo、iPhone 18/17/16 Pro Max、OnePlus 16、Xiaomi 17 全系、Galaxy S26/S25/S24、Pixel 10 Pro Fold、HUAWEI Mate XT 等）；
-              - 彻底清退超过 3 年的老旧机型与入门中端系列，保证纯血旗舰体验；
-              - 主界面伪装机型卡片动态展示当前库容量。
+              - 使 Native libc (`__system_property_get` / `__system_property_read_callback`) 与 Java 层 `Build.*` 返回值达到 100% 绝对一致。
+            - **区域跨区与机型伪装彻底独立解耦 + 分应用独立机型伪装 (Per-App Device Model)**：
+              - 商店跨区 (`enabled`) 与机型伪装 (`spoofDevice`)、自定义 `CscFeature` 完全独立运行，互不干扰；
+              - 支持在「机型伪装生效应用」中为每个勾选应用单独指定不同伪装机型（例如：游戏 A 伪装 ROG 9 Pro 解锁高帧率，游戏 B 伪装 iPhone 17 Pro Max，社交应用伪装折叠屏），保存或切换机型后自动通过 Root 强停重启目标应用立即生效。
+            - **三星 One UI 隐藏特性一键预设 & 环境自检探针**：
+              - 设置页内置「原生通话录音」、「相机快门声音开关」、「状态栏实时网速」、「下拉面板流量统计」一键开关及可视化 Key-Value 快捷编辑器；
+              - 新增「环境与伪装自检探针」，实时展示当前进程 `Build.MODEL`、`ro.csc.sales_code`、持久 `su` 会话池状态与 LSPosed 注入活跃进程。
+            - **持久交互式 Root 会话池 + 实时快充功率 (W/mA/V) 与自定义温控熔断线 (38°C–48°C)**：
+              - `RootShell` 升级为持久交互式 `su` 会话复用（附带单次执行自动兜底），彻底消除周期温控/旁路检测时的进程 fork 开销；
+              - 供电面板与通知栏实时展示充电功率 `W`、电流 `mA`、电压 `V`，并支持 `38°C–48°C` 自定义安全温控熔断阈值；
+              - 微信防撤回新增按微信版本号持久化 DEX 签名缓存，二次启动 0ms 零延迟挂载。
           files: |
             releases/WeiTiao-v1.5.0.apk
+            releases/WeiTiao-v1.5.0.apk.sha256

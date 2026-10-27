@@ -131,6 +131,11 @@ object LsposedScopeHelper {
 
             if (writeExit == 0) {
                 Log.i(TAG, "Successfully synced ${targetPackages.size} packages to LSPosed scope database")
+                // 同步完成后重启目标应用进程（排除微信以防打断聊天，仅对普通伪装目标执行 am force-stop），确保下次启动即刻挂载 Hook
+                val toRestart = targetPackages.filter { it != "com.tencent.mm" }
+                if (toRestart.isNotEmpty()) {
+                    StoreCleaner.forceStopPackages(toRestart)
+                }
                 return true
             } else {
                 Log.w(TAG, "Failed to write back updated LSPosed database: exit $writeExit")
@@ -139,6 +144,35 @@ object LsposedScopeHelper {
         } catch (e: Throwable) {
             Log.e(TAG, "Exception during syncScopesWithRoot", e)
             return false
+        }
+    }
+
+    /**
+     * 通过 libxposed API 102 原生通道请求将单个应用加入模块作用域（无需重启系统，LSPosed 弹出官方确认框）
+     */
+    fun requestScopeViaService(packageName: String, onResult: (Boolean) -> Unit = {}) {
+        val service = com.weitiao.tuning.App.getXposedService() ?: run {
+            onResult(false)
+            return
+        }
+        runCatching {
+            val currentScope = runCatching { service.scope }.getOrDefault(emptyList())
+            if (packageName in currentScope) {
+                onResult(true)
+                return
+            }
+            service.requestScope(listOf(packageName), object : io.github.libxposed.service.XposedService.OnScopeEventListener {
+                override fun onScopeRequestApproved(approved: List<String>) {
+                    onResult(packageName in approved)
+                }
+
+                override fun onScopeRequestFailed(message: String) {
+                    onResult(false)
+                }
+            })
+        }.onFailure {
+            Log.w(TAG, "requestScopeViaService failed for $packageName: ${it.message}")
+            onResult(false)
         }
     }
 
