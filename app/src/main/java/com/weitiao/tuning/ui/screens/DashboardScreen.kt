@@ -790,7 +790,7 @@ fun DashboardScreen(
                             onClick = { showDeviceTargetPicker = true },
                         )
 
-                        if (csc.spoofDevice && csc.deviceTargetPackages.isNotEmpty()) {
+                        if (csc.spoofDevice && (csc.deviceName.isNotBlank() || csc.perAppDeviceModels.isNotEmpty())) {
                             OneUiItemRow(
                                 title = stringResource(R.string.action_restart_device_targets),
                                 subtitle = stringResource(R.string.action_restart_device_targets_desc),
@@ -799,10 +799,11 @@ fun DashboardScreen(
                                 showChevron = false,
                                 onClick = {
                                     haptics.confirm()
-                                    val targets = csc.deviceTargetPackages
+                                    val explicitTargets = csc.deviceTargetPackages
                                     scope.launch {
                                         val count = withContext(Dispatchers.IO) {
-                                            StoreCleaner.forceStopPackages(targets)
+                                            val toRestart = LsposedScopeHelper.resolveRestartableTargetPackages(explicitTargets)
+                                            StoreCleaner.forceStopPackages(toRestart)
                                         }
                                         val msg = if (count > 0) {
                                             context.getString(R.string.toast_device_targets_restarted, count)
@@ -1248,21 +1249,29 @@ fun DashboardScreen(
         initialSelection = csc.deviceName,
         onDismiss = { showDeviceModelPicker = false },
         onSelect = { selected ->
-            updateCsc(selected) { it.copy(spoofDevice = true, deviceName = selected) }
+            // 选择全局机型时清空旧的分应用独立机型覆盖，防止历史分应用残留导致新选全局机型不生效
+            updateCsc(selected) {
+                it.copy(
+                    spoofDevice = true,
+                    deviceName = selected,
+                    perAppDeviceModels = emptyMap(),
+                )
+            }
             showDeviceModelPicker = false
-            val targets = csc.deviceTargetPackages
-            if (targets.isNotEmpty()) {
-                scope.launch {
-                    val count = withContext(Dispatchers.IO) {
-                        val synced = LsposedScopeHelper.syncScopesWithRoot(context, targets)
+            val explicitTargets = csc.deviceTargetPackages
+            scope.launch {
+                val count = withContext(Dispatchers.IO) {
+                    if (explicitTargets.isNotEmpty()) {
+                        val synced = LsposedScopeHelper.syncScopesWithRoot(context, explicitTargets)
                         if (!synced) {
-                            LsposedScopeHelper.requestScopesViaService(targets)
+                            LsposedScopeHelper.requestScopesViaService(explicitTargets)
                         }
-                        StoreCleaner.forceStopPackages(targets.filter { it != "com.tencent.mm" })
                     }
-                    if (count > 0) {
-                        snackbar.showSnackbar(context.getString(R.string.toast_device_targets_restarted, count))
-                    }
+                    val toRestart = LsposedScopeHelper.resolveRestartableTargetPackages(explicitTargets)
+                    StoreCleaner.forceStopPackages(toRestart)
+                }
+                if (count > 0) {
+                    snackbar.showSnackbar(context.getString(R.string.toast_device_targets_restarted, count))
                 }
             }
         },

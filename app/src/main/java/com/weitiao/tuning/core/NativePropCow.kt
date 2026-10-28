@@ -95,12 +95,56 @@ object NativePropCow {
     }
 
     /**
+     * 预热 Bionic libc 属性上下文映射：
+     * Android Bionic 采用按需懒加载（Lazy mmap）策略——只有当进程首次调用 __system_property_find 查询某个
+     * SELinux 属性上下文（如 exported_default_prop、vendor_default_prop、odm_default_prop、build_vendor_prop）时，
+     * libc 才会将该上下文对应的 /dev/__properties__/u:object_r:* 文件 mmap 进进程地址空间。
+     * 因此在扫描 /proc/self/maps 前先通过未 Hook 或底层 SystemProperties 触发一次全量键查询，
+     * 确保所有目标属性所属的 SELinux prop_area 均已完成 mmap 映射！
+     */
+    private fun prewarmBionicContexts(keys: Collection<String>) {
+        runCatching {
+            val spClass = Class.forName("android.os.SystemProperties")
+            val getMethod = spClass.getMethod("get", String::class.java, String::class.java)
+            val probeKeys = listOf(
+                "ro.product.model",
+                "ro.product.vendor.model",
+                "ro.product.odm.model",
+                "ro.product.product.model",
+                "ro.product.system.model",
+                "ro.product.system_ext.model",
+                "ro.product.bootimage.model",
+                "ro.product.marketname",
+                "ro.vendor.oplus.market.name",
+                "ro.oplus.market.name",
+                "ro.vivo.market.name",
+                "ro.config.marketing_name",
+                "ro.soc.model",
+                "ro.hardware",
+                "ro.boot.em.model",
+                "persist.sys.device_name",
+                "bluetooth.device.default_name",
+            )
+            for (k in probeKeys) {
+                runCatching { getMethod.invoke(null, k, "") }
+                // 追加 ._pw 后缀确保即使 SystemProperties.get 已被 Java 层 Hook 拦截，也会透传至 native_find 触发 Bionic mmap
+                runCatching { getMethod.invoke(null, "$k._pw", "") }
+            }
+            for (k in keys) {
+                runCatching { getMethod.invoke(null, "$k._pw", "") }
+            }
+        }
+    }
+
+    /**
      * 针对当前进程应用 COW 内存伪装补丁（含原位覆写 + 缺失属性 Radix Trie 注入）
-     * @param targetProps 需要改写的键值对表（如 ro.product.model -> iPhone Duo 等）
+     * @param targetProps 需要改写的键值对表（如 ro.product.model -> iPhone 18 Duo 等）
      * @return 成功改写与注入的内存属性条目总数
      */
     fun applyCowSpoof(targetProps: Map<String, String>): Int {
         if (targetProps.isEmpty()) return 0
+
+        prewarmBionicContexts(targetProps.keys)
 
         val allMappings = findAllPropMappings()
         val discovered = allMappings.filter { isRelevantPropArea(it.path) }
@@ -199,7 +243,7 @@ object NativePropCow {
 
     /**
      * 为宿主 ROM 缺失的属性选择最佳注入目标区。
-     * 同时覆盖前缀匹配分区（build_prop / vendor / odm）与兜底分区（default_prop），
+     * 同时覆盖前缀匹配分区（build_prop / vendor / odm）与兜底分区（exported_default_prop / default_prop / vendor_default_prop），
      * 确保无论 SELinux property_info 如何路由均能 100% 被 __system_property_find 检索到。
      */
     internal fun selectTargetAreasForInsertion(
@@ -207,48 +251,53 @@ object NativePropCow {
         areas: List<PropMapArea>,
         fallbackArea: PropMapArea?,
     ): List<PropMapArea> {
-        val selected = LinkedHashSet<PropMapArea>(3)
+        val selected = LinkedHashSet<PropMapArea>(8)
         val lowerKey = key.lowercase()
 
         val wantsVendor = lowerKey.contains("vendor") || lowerKey.contains("qti") ||
-            lowerKey.startsWith("ro.hardware") || lowerKey.startsWith("ro.board")
+            lowerKey.startsWith("ro.hardware") || lowerKey.startsWith("ro.board") ||
+            lowerKey.startsWith("ro.Soc") || lowerKey.startsWith("ro.soc")
         val wantsOdm = lowerKey.contains("odm")
-        val wantsBootimage = lowerKey.contains("bootimage")
+        val wantsBootimage = lowerKey.contains("bootimage") || lowerKey.startsWith("ro.boot.")
         val wantsProduct = lowerKey.contains(".product.")
         val wantsSystemExt = lowerKey.contains("system_ext")
 
         for (area in areas) {
             val p = area.path.lowercase()
             when {
-                wantsVendor && (p.contains("build_vendor_prop") || p.contains("vendor_default_prop") || p.contains("vendor_build_prop")) ->
+                wantsVendor && (p.contains("vendor") || p.contains("soc_prop")) ->
                     selected.add(area)
-                wantsOdm && (p.contains("build_odm_prop") || p.contains("odm_default_prop") || p.contains("odm_build_prop")) ->
+                wantsOdm && p.contains("odm") ->
                     selected.add(area)
-                wantsBootimage && p.contains("bootimage") ->
+                wantsBootimage && (p.contains("bootimage") || p.contains("bootloader") || p.contains("boottime")) ->
                     selected.add(area)
-                wantsProduct && p.contains("product_build_prop") ->
+                wantsProduct && (p.contains("product_build_prop") || p.contains("build_product_prop") || p.contains("product_prop")) ->
                     selected.add(area)
                 wantsSystemExt && p.contains("system_ext") ->
                     selected.add(area)
             }
         }
 
-        // 始终加入 build_prop 与 default_prop 双保险
+        // 始终加入所有 build*prop 与 *default_prop*（含 exported_default_prop / vendor_default_prop / odm_default_prop / default_prop）
+        // 以及 system_prop / config_prop / bluetooth_prop，确保未知跨品牌属性（如 ro.product.marketname, ro.vivo.market.name 等）100% 命中
         for (area in areas) {
             val p = area.path.lowercase()
-            if (p.endsWith("/u:object_r:build_prop:s0") || p.endsWith(":build_prop:s0") || p.endsWith("/build_prop")) {
-                selected.add(area)
-            } else if (p.endsWith("/u:object_r:default_prop:s0") || p.endsWith(":default_prop:s0") || p.endsWith("/default_prop")) {
+            if (p.contains("build") && p.contains("prop") ||
+                p.contains("default_prop") ||
+                p.contains("system_prop") ||
+                p.contains("config_prop") ||
+                p.contains("soc_prop") ||
+                p.contains("bluetooth_prop")
+            ) {
                 selected.add(area)
             }
         }
 
-        if (selected.isEmpty()) {
-            if (fallbackArea != null) {
-                selected.add(fallbackArea)
-            } else if (areas.isNotEmpty()) {
-                selected.add(areas.first())
-            }
+        if (fallbackArea != null) {
+            selected.add(fallbackArea)
+        }
+        if (selected.isEmpty() && areas.isNotEmpty()) {
+            selected.addAll(areas)
         }
         return selected.toList()
     }
@@ -606,22 +655,26 @@ object NativePropCow {
         val hits = ArrayList<Pair<Long, PreparedProp>>(8)
         val seenAddrs = HashSet<Long>(8)
 
+        val matchedNames = HashSet<String>(8)
+
         // 1. Bionic Radix Trie 精确查找
         for (prop in props) {
             val addr = findPropInTrie(mem, area, prop.keyBytes)
             if (addr != 0L && seenAddrs.add(addr)) {
                 hits.add(addr to prop)
+                matchedNames.add(prop.name)
             }
         }
-        if (hits.isNotEmpty()) return hits
+        val remainingProps = props.filter { it.name !in matchedNames }
+        if (remainingProps.isEmpty()) return hits
 
-        // 2. 线性扫描兜底（注意：bytes_used 是相对于 DATA_OFFSET(128) 的偏移，因此有效扫描上限为 128 + bytes_used）
+        // 2. 线性扫描兜底（针对未在标准 Trie 命中的剩余属性；bytes_used 是相对于 DATA_OFFSET(128) 的偏移）
         val rawBytesUsed = runCatching { mem.getIntLE(area.start).toLong() and 0xFFFFFFFFL }.getOrDefault(0L)
         val totalUsedBytes = DATA_OFFSET + rawBytesUsed
         val scanLength = if (totalUsedBytes in (DATA_OFFSET + 20)..area.length) totalUsedBytes else area.length
         val start = area.start
 
-        for (prop in props) {
+        for (prop in remainingProps) {
             val targetBytes = prop.nameWithNull
             val targetLen = targetBytes.size
             val firstByte = targetBytes[0]

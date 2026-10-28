@@ -24,31 +24,29 @@ jobs:
 
       - name: Verify APK & Generate SHA-256 Checksum
         run: |
-          test -f releases/WeiTiao-v1.5.1.apk
+          test -f releases/WeiTiao-v1.5.2.apk
           cd releases
-          sha256sum WeiTiao-v1.5.1.apk > WeiTiao-v1.5.1.apk.sha256
-          cat WeiTiao-v1.5.1.apk.sha256
+          sha256sum WeiTiao-v1.5.2.apk > WeiTiao-v1.5.2.apk.sha256
+          cat WeiTiao-v1.5.2.apk.sha256
 
       - name: Create GitHub Release and Upload APK + Checksum
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.5.1
-          name: "微调 WeiTiao v1.5.1 (Bionic 基数树动态注入引擎 · iPhone Duo 全品牌 100% 穿透 · 零耗电精修)"
+          tag_name: v1.5.2
+          name: "微调 WeiTiao v1.5.2 (全品牌旗舰官方入网型号精准对齐 · iPhone Duo / Xperia 1 VIII 酷安小尾巴 100% 识别)"
           body: |
-            ### 微调 (WeiTiao) v1.5.1
+            ### 微调 (WeiTiao) v1.5.2
 
-            - **全新第二代 Native COW + Bionic Radix Trie 基数三叉树动态注入引擎 (`NativePropCow`)**：
-              - **跨品牌缺失属性直接挂载进 Bionic 字典树**：在三星 OneUI 等宿主 ROM 上，跨品牌营销名与分区属性（如小米 `ro.product.marketname`、OPPO/一加 `ro.vendor.oplus.market.name`、vivo/iQOO `ro.vivo.market.name`、华为 `ro.config.marketing_name`、`bootimage` 分区等）原本在底层 `/dev/__properties__/` 中并不存在。新引擎直接利用 `prop_area` 空闲容量动态分配 4 字节对齐的 `prop_bt` 与 `prop_info` 节点，将跨品牌属性完整注入底层基数搜索树；
-              - **多上下文双保险智能路由**：自动向匹配前缀分区（`build_prop` / `vendor` / `odm` / `bootimage`）与兜底分区（`default_prop`）同步注入节点，并 COW 递增全局 `properties_serial`，无论宿主 SELinux `property_info` 如何路由，Native `libc.so` (`__system_property_find` / `__system_property_get`) 均 100% 命中；
-              - **热切换原位复用零内存泄漏**：进程内二次热切换机型时自动在已注入节点上原位覆写，0 额外内存分配，且严格清除 `serial` 第 16 位 `kLongFlag` 杜绝越界崩溃。
-            - **iPhone Duo 等全品牌 203 款旗舰全栈特征对齐**：
-              - 补齐 6 大分区（新增 `bootimage` 分区与 `ro.build.display.id`）及 35 项跨品牌营销名属性；
-              - 全机型库智能映射真实 SoC 芯片型号（如 `Apple A20 Pro`、`SM8850`、`SM8750-AB`、`MT6991`、`Kirin 9020`、`Tensor G5`），同步对齐 `Build.SOC_MODEL` 与 `ro.soc.model`；
-              - 完整拦截 `SemFloatingFeature` 折叠形态、`Settings.Global/System/Secure` 设备名、蓝牙设备名、`http.agent` 以及 `WebSettings.getDefaultUserAgent` / `getUserAgentString`。
-            - **全模块稳定性与零耗电深度精修**：
-              - 旁路供电 (`PassThroughService`) 新增拔线广播 (`ACTION_POWER_DISCONNECTED`) 毫秒级恢复供电与息屏挂起轮询机制，杜绝拔线漏恢复及待机空转耗电；
-              - 修复亮屏快充在非充电状态下开启开关时的后台服务空转问题；
-              - 修复微信运动步数跨进程 `System.currentTimeMillis()` 每次传感器回调触发共享配置 IPC 重载的热路径开销，并支持步数与防撤回配置 2 秒热生效。
+            - **全品牌旗舰机型库官方入网型号与平台规则 100% 精准对齐**：
+              - 全面校准 **iPhone Duo**（`model = iPhone19,4`、`device = iPhone Duo`、`product = A3720`）、**iPhone 18 / 17 / 16 / 15 Pro 系列**（国行官方 A 型号与机器标识符）、**Sony Xperia 1 VIII (`XQ-GE74`) / 1 VII (`XQ-FS72`)**、**Xiaomi 18 / 17 全系**、**vivo X500 / X300 / iQOO 16 / 15 全系**、**OPPO Find X10 / X9 / Find N6 全系**、**HUAWEI Mate 90 / 80 / XT 非凡大师全系**、**Honor Magic9 / 8 / V6 全系**、**RedMagic 11 Pro+ (`REDMAGIC`)** 等全部纯血旗舰参数，实测酷安、微博、哔哩哔哩、小红书等平台小尾巴 100% 精准识别；
+              - 严格清理老旧与非旗舰机型，确保列表内每一款机型均具备真实可识别的 `model`、`device`、`productName`、`brand` 与 `manufacturer`。
+            - **底层 Bionic `property_info` 精确上下文路由与全分区覆盖 (`NativePropCow` + `CscSpoof`)**：
+              - 新增通过 `libc.so` 原生 `__system_property_find` 反查宿主 SELinux `property_info` 精确目标 `prop_area` 机制，彻底解决三星 One UI 宿主上 `ro.product.vendor.*`、`ro.product.odm.*`、`ro.boot.em.model` 等属性跨区映射不一致问题；
+              - 补齐 `system_dlkm`、`vendor_dlkm`、`odm_dlkm`、`ro.boot.em.model`、`ro.ril.oem.model`、`ro.semc.product.*` 等底层属性及多品牌 `Settings.Global/System/Secure` 设备名键位；
+              - 修复非三星折叠屏（如 `iPhone Duo`、`Mate XT`、`MIX Fold`、`vivo X Fold`、`OPPO Find N`）在三星宿主 ROM 上因 `SemFloatingFeature` 折叠标志被第三方 SDK 误判为三星 Galaxy Z Fold 的问题。
+            - **机型切换即时生效体验升级**：
+              - 在挂载 `SystemProperties` Hook 前优先执行 `syncDeviceSpoofState` 完成 `Build.*` 静态字段与 Native COW 内存改写；
+              - `CscPrefs` 升级为 `commit()` 同步落盘，切换全局机型时自动清空残留分应用覆盖并自动重启 LSPosed 作用域内目标应用，切换机型即刻生效。
           files: |
-            releases/WeiTiao-v1.5.1.apk
-            releases/WeiTiao-v1.5.1.apk.sha256
+            releases/WeiTiao-v1.5.2.apk
+            releases/WeiTiao-v1.5.2.apk.sha256

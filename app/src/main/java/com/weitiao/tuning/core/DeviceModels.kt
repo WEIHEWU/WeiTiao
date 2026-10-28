@@ -39,12 +39,7 @@ data class DeviceProfile(
             )
 
     val characteristics: String
-        get() = when {
-            isFold -> "fold,nosdcard"
-            isFlip -> "flip,nosdcard"
-            isTablet -> "tablet,nosdcard"
-            else -> "nosdcard"
-        }
+        get() = if (isTablet) "tablet,nosdcard" else "nosdcard"
 
     val socModel: String
         get() {
@@ -57,48 +52,65 @@ data class DeviceProfile(
                     else -> "Apple A17 Pro"
                 }
                 "huawei" -> when {
-                    n.contains("80") -> "Kirin 9030"
+                    n.contains("90") || n.contains("xt 2") -> "Kirin 9040"
+                    n.contains("80") || n.contains("xts") || n.contains("x7") || n.contains("pura x") -> "Kirin 9030"
                     n.contains("xt") || n.contains("x6") || (n.contains("70") && !n.contains("pura 70")) -> "Kirin 9020"
                     n.contains("pura 70") -> "Kirin 9010"
                     else -> "Kirin 9000S"
                 }
                 "google" -> when {
+                    n.contains("11") -> "Tensor G6"
                     n.contains("10") -> "Tensor G5"
                     n.contains("9") -> "Tensor G4"
                     n.contains("8") -> "Tensor G3"
                     else -> "Tensor G2"
                 }
                 else -> when {
-                    // 联发科天玑旗舰 (Dimensity 9500 / 9400 / 9300+)
-                    (n.contains("x300") && !n.contains("ultra")) ||
+                    // 联发科天玑旗舰 (Dimensity 9500 / 9400+ / 9400 / 9300+)
+                    n.contains("x500") ||
+                        (n.contains("x300") && !n.contains("ultra")) ||
+                        n.contains("find x10") ||
                         (n.contains("find x9") && !n.contains("ultra")) ||
+                        n.contains("k100") ||
                         n.contains("k90 至尊") ||
-                        n.contains("neo11 pro") -> "MT6993"
+                        n.contains("ace 6 ultra") ||
+                        n.contains("ace 5 ultra") ||
+                        n.contains("neo 11 ultra") -> "MT6993"
                     (n.contains("x200") && !n.contains("ultra")) ||
                         (n.contains("find x8") && !n.contains("ultra")) ||
                         n.contains("k80 至尊") ||
+                        n.contains("neo 10 pro") ||
                         n.contains("neo10 pro") ||
                         n.contains("tab s11") -> "MT6991"
-                    n.contains("x100 pro") ||
+                    n.contains("x100s") ||
+                        n.contains("x100 pro") ||
                         n.contains("k70 至尊") ||
                         n.contains("tab s10") -> "MT6989"
                     // 高通骁龙 8 Elite Gen 2 / Gen 5 (SM8850)
-                    n.contains("xiaomi 17") ||
-                        n.contains("mix fold 5") ||
+                    n.contains("xiaomi 18") ||
+                        n.contains("xiaomi 17") ||
                         n.contains("k90") ||
                         n.contains("oneplus 16") ||
                         n.contains("oneplus 15") ||
+                        n.contains("ace 6") ||
                         n.contains("s26") ||
                         n.contains("fold8") ||
                         n.contains("flip8") ||
                         n.contains("w26") ||
                         n.contains("x300 ultra") ||
+                        n.contains("x fold6") ||
+                        n.contains("iqoo 16") ||
                         n.contains("iqoo 15") ||
+                        n.contains("neo 11") ||
                         n.contains("find x9 ultra") ||
+                        n.contains("find n6") ||
                         n.contains("gt 8") ||
+                        n.contains("magic9") ||
                         n.contains("magic8") ||
+                        n.contains("magic v6") ||
                         n.contains("redmagic 11") ||
-                        n.contains("rog phone 10") ||
+                        n.contains("meizu 22") ||
+                        n.contains("xperia 1 viii") ||
                         n.contains("xperia 1 vii") -> "SM8850"
                     // 高通骁龙 8 Elite (SM8750-AB)
                     n.contains("xiaomi 15") ||
@@ -106,19 +118,19 @@ data class DeviceProfile(
                         n.contains("k80 pro") ||
                         n.contains("oneplus 13") ||
                         n.contains("ace 5 pro") ||
-                        n.contains("open 2") ||
                         n.contains("s25") ||
                         n.contains("fold7") ||
                         n.contains("flip7") ||
                         n.contains("x200 ultra") ||
-                        n.contains("x fold4") ||
+                        n.contains("x fold5") ||
                         n.contains("iqoo 13") ||
                         n.contains("find x8 ultra") ||
                         n.contains("find n5") ||
                         n.contains("gt7 pro") ||
                         n.contains("gt 7 pro") ||
                         n.contains("magic7") ||
-                        n.contains("magic v4") ||
+                        n.contains("magic v5") ||
+                        n.contains("magic v flip2") ||
                         n.contains("redmagic 10") ||
                         n.contains("rog phone 9") -> "SM8750-AB"
                     // 高通骁龙 8 Gen 3 (SM8650-AB)
@@ -140,65 +152,79 @@ data class DeviceProfile(
 object DeviceModels {
 
     private val APPLE_DEVICES: List<DeviceProfile> = listOf(
-        // 2026.09 首款双屏折叠旗舰
-        DeviceProfile("iPhone Duo", "iPhone Duo", "A3600", "A3600", "Apple", "Apple", "Apple"),
-        // 2026.09 旗舰系列
-        DeviceProfile("iPhone 18 Pro Max", "iPhone 18 Pro Max", "A3627", "A3627", "Apple", "Apple", "Apple"),
-        DeviceProfile("iPhone 18 Pro", "iPhone 18 Pro", "A3624", "A3624", "Apple", "Apple", "Apple"),
-        // 2025.09 旗舰系列
+        // 2026.09 首款双屏折叠旗舰 (标识符 iPhone19,4 / 设备 iPhone Duo / 产品 A3720)
+        DeviceProfile("iPhone Duo", "iPhone19,4", "iPhone Duo", "A3720", "Apple", "Apple", "Apple"),
+        // 2026.09 旗舰系列 (国行 A3718 / A3715)
+        DeviceProfile("iPhone 18 Pro Max", "iPhone 18 Pro Max", "A3718", "A3718", "Apple", "Apple", "Apple"),
+        DeviceProfile("iPhone 18 Pro", "iPhone 18 Pro", "A3715", "A3715", "Apple", "Apple", "Apple"),
+        // 2025.09 旗舰系列 (国行 A3527 / A3524 / A3515)
         DeviceProfile("iPhone 17 Pro Max", "iPhone 17 Pro Max", "A3527", "A3527", "Apple", "Apple", "Apple"),
         DeviceProfile("iPhone 17 Pro", "iPhone 17 Pro", "A3524", "A3524", "Apple", "Apple", "Apple"),
         DeviceProfile("iPhone 17 Air", "iPhone 17 Air", "A3515", "A3515", "Apple", "Apple", "Apple"),
-        // 2024.09 旗舰系列
+        // 2024.09 旗舰系列 (国行 A3297 / A3294)
         DeviceProfile("iPhone 16 Pro Max", "iPhone 16 Pro Max", "A3297", "A3297", "Apple", "Apple", "Apple"),
         DeviceProfile("iPhone 16 Pro", "iPhone 16 Pro", "A3294", "A3294", "Apple", "Apple", "Apple"),
-        // 2023.09/10 钛金属旗舰
+        // 2023.09/10 钛金属旗舰 (国行 A3106 / A3102)
         DeviceProfile("iPhone 15 Pro Max", "iPhone 15 Pro Max", "A3106", "A3106", "Apple", "Apple", "Apple"),
         DeviceProfile("iPhone 15 Pro", "iPhone 15 Pro", "A3102", "A3102", "Apple", "Apple", "Apple"),
     )
 
     private val ONEPLUS_DEVICES: List<DeviceProfile> = listOf(
-        // 2026.10.12 最新发布机皇 185Hz 东方屏
-        DeviceProfile("OnePlus 16", "PJZ130", "PJZ130", "PJZ130", "OnePlus", "OnePlus", "OnePlus"),
-        // 2025.10 数字旗舰
-        DeviceProfile("OnePlus 15 Pro", "PJZ120", "PJZ120", "PJZ120", "OnePlus", "OnePlus", "OnePlus"),
-        DeviceProfile("OnePlus 15", "PLK110", "PLK110", "PLK110", "OnePlus", "OnePlus", "OnePlus"),
-        // 2024.10 数字旗舰
-        DeviceProfile("OnePlus 13", "PJZ110", "PJZ110", "PJZ110", "OnePlus", "OnePlus", "OnePlus"),
+        // 2026.10 最新发布机皇 185Hz 东方屏
+        DeviceProfile("OnePlus 16", "PYB110", "pokemon", "PYB110", "OnePlus", "OnePlus", "OnePlus"),
+        // 2025/2026 数字旗舰
+        DeviceProfile("OnePlus 15", "PLK110", "OP60FFL1", "PLK110", "OnePlus", "OnePlus", "OnePlus"),
+        DeviceProfile("OnePlus 15T", "PLZ110", "fairlady", "PLZ110", "OnePlus", "OnePlus", "OnePlus"),
+        // 2024/2025 数字旗舰
+        DeviceProfile("OnePlus 13", "PJZ110", "OP5D0DL1", "PJZ110", "OnePlus", "OnePlus", "OnePlus"),
+        DeviceProfile("OnePlus 13T", "PKX110", "pagani", "PKX110", "OnePlus", "OnePlus", "OnePlus"),
         // 2023.12 十周年旗舰
-        DeviceProfile("OnePlus 12", "PJD110", "PJD110", "PJD110", "OnePlus", "OnePlus", "OnePlus"),
+        DeviceProfile("OnePlus 12", "PJD110", "waffle", "PJD110", "OnePlus", "OnePlus", "OnePlus"),
         // 折叠屏旗舰系列
-        DeviceProfile("OnePlus Open 2", "CPH2651", "CPH2651", "CPH2651", "OnePlus", "OnePlus", "OnePlus"),
-        DeviceProfile("OnePlus Open", "CPH2551", "CPH2551", "CPH2551", "OnePlus", "OnePlus", "OnePlus"),
+        DeviceProfile("OnePlus Open", "CPH2551", "OP594DL1", "CPH2551", "OnePlus", "OnePlus", "OnePlus"),
         // Ace 性能旗舰
-        DeviceProfile("OnePlus Ace 5 Pro", "PKR110", "PKR110", "PKR110", "OnePlus", "OnePlus", "OnePlus"),
-        DeviceProfile("OnePlus Ace 5", "PKK110", "PKK110", "PKK110", "OnePlus", "OnePlus", "OnePlus"),
-        DeviceProfile("OnePlus Ace 3 Pro", "PJX110", "PJX110", "PJX110", "OnePlus", "OnePlus", "OnePlus"),
+        DeviceProfile("OnePlus Ace 6 Ultra", "PMB110", "roadster", "PMB110", "OnePlus", "OnePlus", "OnePlus"),
+        DeviceProfile("OnePlus Ace 6", "PLQ110", "ktm", "PLQ110", "OnePlus", "OnePlus", "OnePlus"),
+        DeviceProfile("OnePlus Ace 5 Ultra", "PLC110", "emira", "PLC110", "OnePlus", "OnePlus", "OnePlus"),
+        DeviceProfile("OnePlus Ace 5 Pro", "PKR110", "hummer", "PKR110", "OnePlus", "OnePlus", "OnePlus"),
+        DeviceProfile("OnePlus Ace 5", "PKG110", "giulia", "PKG110", "OnePlus", "OnePlus", "OnePlus"),
+        DeviceProfile("OnePlus Ace 3 Pro", "PJX110", "corvette", "PJX110", "OnePlus", "OnePlus", "OnePlus"),
     )
 
     private val XIAOMI_DEVICES: List<DeviceProfile> = listOf(
+        // 2026 旗舰系列
+        DeviceProfile("Xiaomi 18 Pro Max", "M154FF", "madrid", "madrid", "Xiaomi", "Xiaomi", "Xiaomi"),
+        DeviceProfile("Xiaomi 18 Pro", "M610BB", "hongkong", "hongkong", "Xiaomi", "Xiaomi", "Xiaomi"),
+        DeviceProfile("Xiaomi 18 Fold", "2608BPX34C", "lhasa", "lhasa", "Xiaomi", "Xiaomi", "Xiaomi"),
         // 2025/2026 旗舰系列
-        DeviceProfile("Xiaomi 17 Ultra", "26020PN00C", "tianji", "tianji", "Xiaomi", "Xiaomi", "Xiaomi"),
-        DeviceProfile("Xiaomi 17 Pro Max", "25090PN00C", "chiyou", "chiyou", "Xiaomi", "Xiaomi", "Xiaomi"),
-        DeviceProfile("Xiaomi 17 Pro", "25080PN00C", "fuxi", "fuxi", "Xiaomi", "Xiaomi", "Xiaomi"),
-        DeviceProfile("Xiaomi 17", "25070PN00C", "dada2", "dada2", "Xiaomi", "Xiaomi", "Xiaomi"),
+        DeviceProfile("Xiaomi 17 Ultra", "2512BPNDAC", "nezha", "nezha", "Xiaomi", "Xiaomi", "Xiaomi"),
+        DeviceProfile("Xiaomi 17 Ultra by Leica", "25128PNA1C", "nezha", "nezha", "Xiaomi", "Xiaomi", "Xiaomi"),
+        DeviceProfile("Xiaomi 17 Pro Max", "2509FPN0BC", "popsicle", "popsicle", "Xiaomi", "Xiaomi", "Xiaomi"),
+        DeviceProfile("Xiaomi 17 Pro", "25098PN5AC", "pandora", "pandora", "Xiaomi", "Xiaomi", "Xiaomi"),
+        DeviceProfile("Xiaomi 17 Max", "2605EPN8EC", "byron", "byron", "Xiaomi", "Xiaomi", "Xiaomi"),
+        DeviceProfile("Xiaomi 17", "25113PN0EC", "pudding", "pudding", "Xiaomi", "Xiaomi", "Xiaomi"),
         // 2024/2025 旗舰系列
-        DeviceProfile("Xiaomi 15 Ultra", "25010PN30C", "xuanyuan", "xuanyuan", "Xiaomi", "Xiaomi", "Xiaomi"),
+        DeviceProfile("Xiaomi 15 Ultra", "25019PNF3C", "xuanyuan", "xuanyuan", "Xiaomi", "Xiaomi", "Xiaomi"),
+        DeviceProfile("Xiaomi 15S Pro", "25042PN24C", "dijun", "dijun", "Xiaomi", "Xiaomi", "Xiaomi"),
         DeviceProfile("Xiaomi 15 Pro", "2410DPN6CC", "haotian", "haotian", "Xiaomi", "Xiaomi", "Xiaomi"),
         DeviceProfile("Xiaomi 15", "24129PN74C", "dada", "dada", "Xiaomi", "Xiaomi", "Xiaomi"),
         // 2023/2024 旗舰系列
-        DeviceProfile("Xiaomi 14 Ultra", "24030PN60C", "aurora", "aurora", "Xiaomi", "Xiaomi", "Xiaomi"),
+        DeviceProfile("Xiaomi 14 Ultra", "24031PN0DC", "aurora", "aurora", "Xiaomi", "Xiaomi", "Xiaomi"),
         DeviceProfile("Xiaomi 14 Pro", "23116PN5BC", "shennong", "shennong", "Xiaomi", "Xiaomi", "Xiaomi"),
         DeviceProfile("Xiaomi 14", "23127PN0CC", "houji", "houji", "Xiaomi", "Xiaomi", "Xiaomi"),
         // MIX 折叠旗舰系列
-        DeviceProfile("Xiaomi MIX Fold 5", "25072PX00C", "goku2", "goku2", "Xiaomi", "Xiaomi", "Xiaomi"),
         DeviceProfile("Xiaomi MIX Fold 4", "24072PX77C", "goku", "goku", "Xiaomi", "Xiaomi", "Xiaomi"),
-        DeviceProfile("Xiaomi MIX Flip 2", "2505CPX00C", "ruyi2", "ruyi2", "Xiaomi", "Xiaomi", "Xiaomi"),
-        DeviceProfile("Xiaomi MIX Flip", "2405CPX3DG", "ruyi", "ruyi", "Xiaomi", "Xiaomi", "Xiaomi"),
+        DeviceProfile("Xiaomi MIX Flip 2", "2505APX7BC", "bixi", "bixi", "Xiaomi", "Xiaomi", "Xiaomi"),
+        DeviceProfile("Xiaomi MIX Flip", "2405CPX3DC", "ruyi", "ruyi", "Xiaomi", "Xiaomi", "Xiaomi"),
         // Redmi 旗舰系列 (K系列旗舰)
-        DeviceProfile("Redmi K80 至尊版", "2507FRK00C", "dali", "dali", "Xiaomi", "Redmi", "Xiaomi"),
-        DeviceProfile("Redmi K80 Pro", "24117RK2CC", "miro", "miro", "Xiaomi", "Redmi", "Xiaomi"),
-        DeviceProfile("Redmi K80", "24122RKC7C", "zorn", "zorn", "Xiaomi", "Redmi", "Xiaomi"),
+        DeviceProfile("REDMI K100 Pro Max", "M098FE", "songyuan", "songyuan", "Xiaomi", "Redmi", "Xiaomi"),
+        DeviceProfile("REDMI K100 Pro", "M511CD", "athens", "athens", "Xiaomi", "Redmi", "Xiaomi"),
+        DeviceProfile("REDMI K90 至尊版", "M332BF", "warsaw", "warsaw", "Xiaomi", "Redmi", "Xiaomi"),
+        DeviceProfile("REDMI K90 Pro Max", "25102RKBEC", "myron", "myron", "Xiaomi", "Redmi", "Xiaomi"),
+        DeviceProfile("REDMI K90", "2510DRK44C", "annibale", "annibale", "Xiaomi", "Redmi", "Xiaomi"),
+        DeviceProfile("Redmi K80 至尊版", "25060RK16C", "dali", "dali", "Xiaomi", "Redmi", "Xiaomi"),
+        DeviceProfile("Redmi K80 Pro", "24122RKC7C", "miro", "miro", "Xiaomi", "Redmi", "Xiaomi"),
+        DeviceProfile("Redmi K80", "24117RK2CC", "zorn", "zorn", "Xiaomi", "Redmi", "Xiaomi"),
         DeviceProfile("Redmi K70 至尊版", "2407FRK8EC", "rothko", "rothko", "Xiaomi", "Redmi", "Xiaomi"),
         DeviceProfile("Redmi K70 Pro", "23117RK66C", "manet", "manet", "Xiaomi", "Redmi", "Xiaomi"),
     )
@@ -213,7 +239,7 @@ object DeviceModels {
         DeviceProfile("Galaxy S25 Ultra", "SM-S9380", "e3", "e3zc", "Samsung"),
         DeviceProfile("Galaxy S25+", "SM-S9360", "e2", "e2zc", "Samsung"),
         DeviceProfile("Galaxy S25", "SM-S9310", "e1", "e1zc", "Samsung"),
-        DeviceProfile("Galaxy S25 Slim", "SM-S9370", "e2s", "e2szc", "Samsung"),
+        DeviceProfile("Galaxy S25 Edge", "SM-S9370", "pa1q", "pa1qzc", "Samsung"),
 
         // ==== Galaxy S24 系列 (2024.01) ====
         DeviceProfile("Galaxy S24 Ultra", "SM-S9280", "e3q", "e3qzc", "Samsung"),
@@ -237,90 +263,129 @@ object DeviceModels {
         DeviceProfile("Galaxy W25 Flip", "SM-W7025", "w25f", "w25fzc", "Samsung"),
 
         // ==== Galaxy Tab 旗舰平板系列 ====
+        DeviceProfile("Galaxy Tab S11 Ultra", "SM-X9360", "gts11u", "gts11uzc", "Samsung"),
+        DeviceProfile("Galaxy Tab S11+", "SM-X8360", "gts11p", "gts11pzc", "Samsung"),
         DeviceProfile("Galaxy Tab S10 Ultra", "SM-X9260", "gts10u", "gts10uzc", "Samsung"),
         DeviceProfile("Galaxy Tab S10+", "SM-X8260", "gts10p", "gts10pzc", "Samsung"),
     )
 
     private val VIVO_DEVICES: List<DeviceProfile> = listOf(
         // ==== vivo X 系列影像旗舰 ====
-        DeviceProfile("vivo X300 Ultra", "V2544A", "V2544A", "V2544A", "vivo", "vivo", "vivo"),
-        DeviceProfile("vivo X300 Pro", "V2515A", "V2515A", "V2515A", "vivo", "vivo", "vivo"),
-        DeviceProfile("vivo X300", "V2513A", "V2513A", "V2513A", "vivo", "vivo", "vivo"),
-        DeviceProfile("vivo X200 Ultra", "V2444A", "V2444A", "V2444A", "vivo", "vivo", "vivo"),
-        DeviceProfile("vivo X200 Pro", "V2415A", "V2415A", "V2415A", "vivo", "vivo", "vivo"),
-        DeviceProfile("vivo X200 Pro mini", "V2405A", "V2405A", "V2405A", "vivo", "vivo", "vivo"),
-        DeviceProfile("vivo X200", "V2413A", "V2413A", "V2413A", "vivo", "vivo", "vivo"),
-        DeviceProfile("vivo X100 Ultra", "V2366A", "V2366A", "V2366A", "vivo", "vivo", "vivo"),
-        DeviceProfile("vivo X100 Pro", "V2324A", "V2324A", "V2324A", "vivo", "vivo", "vivo"),
+        DeviceProfile("vivo X500 Pro Max", "V2602DA", "PD2602", "PD2602", "vivo", "vivo", "vivo"),
+        DeviceProfile("vivo X500 Pro", "V2608DA", "PD2608", "PD2608", "vivo", "vivo", "vivo"),
+        DeviceProfile("vivo X500", "V2609A", "PD2609", "PD2609", "vivo", "vivo", "vivo"),
+        DeviceProfile("vivo X300 Ultra", "V2547DA", "PD2547", "PD2547", "vivo", "vivo", "vivo"),
+        DeviceProfile("vivo X300s", "V2548A", "PD2548", "PD2548", "vivo", "vivo", "vivo"),
+        DeviceProfile("vivo X300 Pro", "V2502DA", "PD2502", "PD2502", "vivo", "vivo", "vivo"),
+        DeviceProfile("vivo X300", "V2509A", "PD2509", "PD2509", "vivo", "vivo", "vivo"),
+        DeviceProfile("vivo X200 Ultra", "V2454DA", "PD2454", "PD2454", "vivo", "vivo", "vivo"),
+        DeviceProfile("vivo X200s", "V2458A", "PD2458", "PD2458", "vivo", "vivo", "vivo"),
+        DeviceProfile("vivo X200 Pro", "V2405DA", "PD2405", "PD2405", "vivo", "vivo", "vivo"),
+        DeviceProfile("vivo X200 Pro mini", "V2419A", "PD2419", "PD2419", "vivo", "vivo", "vivo"),
+        DeviceProfile("vivo X200", "V2415A", "PD2415", "PD2415", "vivo", "vivo", "vivo"),
+        DeviceProfile("vivo X100 Ultra", "V2366HA", "PD2366", "PD2366", "vivo", "vivo", "vivo"),
+        DeviceProfile("vivo X100s Pro", "V2324HA", "PD2324", "PD2324", "vivo", "vivo", "vivo"),
+        DeviceProfile("vivo X100 Pro", "V2324A", "PD2324", "PD2324", "vivo", "vivo", "vivo"),
 
         // ==== vivo X Fold 折叠旗舰 ====
-        DeviceProfile("vivo X Fold4 Pro", "V2437A", "V2437A", "V2437A", "vivo", "vivo", "vivo"),
-        DeviceProfile("vivo X Fold3 Pro", "V2337A", "V2337A", "V2337A", "vivo", "vivo", "vivo"),
-        DeviceProfile("vivo X Fold3", "V2303A", "V2303A", "V2303A", "vivo", "vivo", "vivo"),
+        DeviceProfile("vivo X Fold6", "V2545A", "PD2545", "PD2545", "vivo", "vivo", "vivo"),
+        DeviceProfile("vivo X Fold5", "V2436A", "PD2436", "PD2436", "vivo", "vivo", "vivo"),
+        DeviceProfile("vivo X Fold3 Pro", "V2337A", "PD2337", "PD2337", "vivo", "vivo", "vivo"),
+        DeviceProfile("vivo X Fold3", "V2303A", "PD2303", "PD2303", "vivo", "vivo", "vivo"),
 
         // ==== iQOO 旗舰系列 ====
-        DeviceProfile("iQOO 15 Pro", "V2529A", "V2529A", "V2529A", "vivo", "iQOO", "vivo"),
-        DeviceProfile("iQOO 15", "V2508A", "V2508A", "V2508A", "vivo", "iQOO", "vivo"),
-        DeviceProfile("iQOO 13", "V2408A", "V2408A", "V2408A", "vivo", "iQOO", "vivo"),
-        DeviceProfile("iQOO 12 Pro", "V2329A", "V2329A", "V2329A", "vivo", "iQOO", "vivo"),
-        DeviceProfile("iQOO 12", "V2307A", "V2307A", "V2307A", "vivo", "iQOO", "vivo"),
-        DeviceProfile("iQOO Neo11 Pro", "V2526A", "V2526A", "V2526A", "vivo", "iQOO", "vivo"),
-        DeviceProfile("iQOO Neo10 Pro", "V2426A", "V2426A", "V2426A", "vivo", "iQOO", "vivo"),
+        DeviceProfile("iQOO 16", "V2606A", "PD2606", "PD2606", "vivo", "iQOO", "vivo"),
+        DeviceProfile("iQOO 15 Ultra", "V2546A", "PD2546", "PD2546", "vivo", "iQOO", "vivo"),
+        DeviceProfile("iQOO 15", "V2505A", "PD2505", "PD2505", "vivo", "iQOO", "vivo"),
+        DeviceProfile("iQOO 13", "V2408A", "PD2408", "PD2408", "vivo", "iQOO", "vivo"),
+        DeviceProfile("iQOO 12 Pro", "V2329A", "PD2329", "PD2329", "vivo", "iQOO", "vivo"),
+        DeviceProfile("iQOO 12", "V2307A", "PD2307", "PD2307", "vivo", "iQOO", "vivo"),
+        DeviceProfile("iQOO Neo 11 Ultra", "V2573A", "PD2573", "PD2573", "vivo", "iQOO", "vivo"),
+        DeviceProfile("iQOO Neo 11", "V2520A", "PD2520", "PD2520", "vivo", "iQOO", "vivo"),
+        DeviceProfile("iQOO Neo 10 Pro+", "V2463A", "PD2463", "PD2463", "vivo", "iQOO", "vivo"),
+        DeviceProfile("iQOO Neo 10 Pro", "V2426A", "PD2426", "PD2426", "vivo", "iQOO", "vivo"),
     )
 
     private val OPPO_DEVICES: List<DeviceProfile> = listOf(
         // ==== OPPO Find X 旗舰系列 ====
-        DeviceProfile("OPPO Find X9 Ultra", "PKG120", "PKG120", "PKG120", "OPPO", "OPPO", "OPPO"),
-        DeviceProfile("OPPO Find X9 Pro", "PKC120", "PKC120", "PKC120", "OPPO", "OPPO", "OPPO"),
-        DeviceProfile("OPPO Find X9", "PKB120", "PKB120", "PKB120", "OPPO", "OPPO", "OPPO"),
-        DeviceProfile("OPPO Find X8 Ultra", "PKG110", "PKG110", "PKG110", "OPPO", "OPPO", "OPPO"),
-        DeviceProfile("OPPO Find X8 Pro", "PKC110", "PKC110", "PKC110", "OPPO", "OPPO", "OPPO"),
-        DeviceProfile("OPPO Find X8", "PKB110", "PKB110", "PKB110", "OPPO", "OPPO", "OPPO"),
-        DeviceProfile("OPPO Find X7 Ultra", "PHY110", "PHY110", "PHY110", "OPPO", "OPPO", "OPPO"),
+        DeviceProfile("OPPO Find X10 Pro Max", "PMX110", "mars", "PMX110", "OPPO", "OPPO", "OPPO"),
+        DeviceProfile("OPPO Find X10", "PMW110", "uranus", "PMW110", "OPPO", "OPPO", "OPPO"),
+        DeviceProfile("OPPO Find X9 Ultra", "PMA120", "lighthouse", "PMA120", "OPPO", "OPPO", "OPPO"),
+        DeviceProfile("OPPO Find X9s Pro", "PME110", "venus", "PME110", "OPPO", "OPPO", "OPPO"),
+        DeviceProfile("OPPO Find X9 Pro", "PLG120", "changjiang", "PLG120", "OPPO", "OPPO", "OPPO"),
+        DeviceProfile("OPPO Find X9", "PLJ110", "zhujiang", "PLJ110", "OPPO", "OPPO", "OPPO"),
+        DeviceProfile("OPPO Find X8 Ultra", "PKJ110", "PKJ110", "PKJ110", "OPPO", "OPPO", "OPPO"),
+        DeviceProfile("OPPO Find X8s+", "PLB110", "slmh", "PLB110", "OPPO", "OPPO", "OPPO"),
+        DeviceProfile("OPPO Find X8s", "PKT110", "koktokay", "PKT110", "OPPO", "OPPO", "OPPO"),
+        DeviceProfile("OPPO Find X8 Pro", "PKC130", "konka", "PKC130", "OPPO", "OPPO", "OPPO"),
+        DeviceProfile("OPPO Find X8", "PKB110", "yala", "PKB110", "OPPO", "OPPO", "OPPO"),
+        DeviceProfile("OPPO Find X7 Ultra", "PHY120", "pangu", "PHY120", "OPPO", "OPPO", "OPPO"),
 
         // ==== OPPO Find N 折叠旗舰 ====
-        DeviceProfile("OPPO Find N5", "PHY120", "PHY120", "PHY120", "OPPO", "OPPO", "OPPO"),
-        DeviceProfile("OPPO Find N3", "PHN110", "PHN110", "PHN110", "OPPO", "OPPO", "OPPO"),
+        DeviceProfile("OPPO Find N6", "PLP120", "swangoose", "PLP120", "OPPO", "OPPO", "OPPO"),
+        DeviceProfile("OPPO Find N5", "PKH120", "petrel", "PKH120", "OPPO", "OPPO", "OPPO"),
+        DeviceProfile("OPPO Find N3", "PHN110", "xueying", "PHN110", "OPPO", "OPPO", "OPPO"),
 
         // ==== realme 性能旗舰 ====
-        DeviceProfile("realme GT7 Pro", "RMX5010", "RMX5010", "RMX5010", "OPPO", "realme", "OPPO"),
-        DeviceProfile("realme GT5 Pro", "RMX3888", "RMX3888", "RMX3888", "OPPO", "realme", "OPPO"),
+        DeviceProfile("realme GT 8 Pro", "RMX5210", "RE611CL1", "RMX5210", "OPPO", "realme", "realme"),
+        DeviceProfile("realme GT7 Pro", "RMX5010", "RE601CL1", "RMX5010", "OPPO", "realme", "realme"),
+        DeviceProfile("realme GT5 Pro", "RMX3888", "RE5C4FL1", "RMX3888", "OPPO", "realme", "realme"),
     )
 
     private val HUAWEI_HONOR_DEVICES: List<DeviceProfile> = listOf(
         // ==== HUAWEI 顶级旗舰系列 ====
-        DeviceProfile("HUAWEI Mate XT 非凡大师", "GND-AL00", "GND-AL00", "GND-AL00", "HUAWEI", "HUAWEI", "HUAWEI"),
-        DeviceProfile("HUAWEI Mate 80 RS 非凡大师", "ADY-AL20", "ADY-AL20", "ADY-AL20", "HUAWEI", "HUAWEI", "HUAWEI"),
-        DeviceProfile("HUAWEI Mate 80 Pro+", "ADY-AL30", "ADY-AL30", "ADY-AL30", "HUAWEI", "HUAWEI", "HUAWEI"),
-        DeviceProfile("HUAWEI Mate 80 Pro", "HBN-AL20", "HBN-AL20", "HBN-AL20", "HUAWEI", "HUAWEI", "HUAWEI"),
-        DeviceProfile("HUAWEI Mate 70 RS 非凡大师", "ADY-AL10", "ADY-AL10", "ADY-AL10", "HUAWEI", "HUAWEI", "HUAWEI"),
-        DeviceProfile("HUAWEI Mate 70 Pro+", "ADY-AL00", "ADY-AL00", "ADY-AL00", "HUAWEI", "HUAWEI", "HUAWEI"),
-        DeviceProfile("HUAWEI Mate 70 Pro", "HBN-AL00", "HBN-AL00", "HBN-AL00", "HUAWEI", "HUAWEI", "HUAWEI"),
-        DeviceProfile("HUAWEI Mate 70", "HBN-AL10", "HBN-AL10", "HBN-AL10", "HUAWEI", "HUAWEI", "HUAWEI"),
-        DeviceProfile("HUAWEI Mate 60 Pro+", "ALN-AL10", "ALN-AL10", "ALN-AL10", "HUAWEI", "HUAWEI", "HUAWEI"),
-        DeviceProfile("HUAWEI Mate 60 Pro", "ALN-AL00", "ALN-AL00", "ALN-AL00", "HUAWEI", "HUAWEI", "HUAWEI"),
-        DeviceProfile("HUAWEI Mate X6", "ALT-AL20", "ALT-AL20", "ALT-AL20", "HUAWEI", "HUAWEI", "HUAWEI"),
-        DeviceProfile("HUAWEI Mate X5", "ALT-AL10", "ALT-AL10", "ALT-AL10", "HUAWEI", "HUAWEI", "HUAWEI"),
-        DeviceProfile("HUAWEI Pura 80 Ultra", "HBP-AL10", "HBP-AL10", "HBP-AL10", "HUAWEI", "HUAWEI", "HUAWEI"),
-        DeviceProfile("HUAWEI Pura 80 Pro+", "HNE-AL10", "HNE-AL10", "HNE-AL10", "HUAWEI", "HUAWEI", "HUAWEI"),
-        DeviceProfile("HUAWEI Pura 70 Ultra", "HBP-AL00", "HBP-AL00", "HBP-AL00", "HUAWEI", "HUAWEI", "HUAWEI"),
-        DeviceProfile("HUAWEI Pura 70 Pro+", "HBN-AL80", "HBN-AL80", "HBN-AL80", "HUAWEI", "HUAWEI", "HUAWEI"),
-        DeviceProfile("HUAWEI Pura 70 Pro", "HNE-AL00", "HNE-AL00", "HNE-AL00", "HUAWEI", "HUAWEI", "HUAWEI"),
-        DeviceProfile("HUAWEI Pocket 2", "LEM-AL00", "LEM-AL00", "LEM-AL00", "HUAWEI", "HUAWEI", "HUAWEI"),
+        DeviceProfile("HUAWEI Mate XT 2 非凡大师", "LAP-AL10", "Laptua", "LAP-AL10", "HUAWEI", "HUAWEI", "HUAWEI"),
+        DeviceProfile("HUAWEI Mate XTs 非凡大师", "GRL-AL20", "Greenlan", "GRL-AL20", "HUAWEI", "HUAWEI", "HUAWEI"),
+        DeviceProfile("HUAWEI Mate XT 非凡大师", "GRL-AL10", "Greenlan", "GRL-AL10", "HUAWEI", "HUAWEI", "HUAWEI"),
+        DeviceProfile("HUAWEI Mate 90 RS 非凡大师", "CMU-AL10", "CosmosU", "CMU-AL10", "HUAWEI", "HUAWEI", "HUAWEI"),
+        DeviceProfile("HUAWEI Mate 90 Pro Max", "CMM-AL10", "CosmosM", "CMM-AL10", "HUAWEI", "HUAWEI", "HUAWEI"),
+        DeviceProfile("HUAWEI Mate 90 Pro", "CMS-AL20", "Cosmos", "CMS-AL20", "HUAWEI", "HUAWEI", "HUAWEI"),
+        DeviceProfile("HUAWEI Mate 80 RS 非凡大师", "SGU-AL10", "SagittariusU", "SGU-AL10", "HUAWEI", "HUAWEI", "HUAWEI"),
+        DeviceProfile("HUAWEI Mate 80 Pro Max", "SGT-AL10", "Sagittarius", "SGT-AL10", "HUAWEI", "HUAWEI", "HUAWEI"),
+        DeviceProfile("HUAWEI Mate 80 Pro", "SGT-AL00", "Sagittarius", "SGT-AL00", "HUAWEI", "HUAWEI", "HUAWEI"),
+        DeviceProfile("HUAWEI Mate 80", "VYG-AL30", "Voyager", "VYG-AL30", "HUAWEI", "HUAWEI", "HUAWEI"),
+        DeviceProfile("HUAWEI Mate 70 RS 非凡大师", "PLU-AL10", "PillarU", "PLU-AL10", "HUAWEI", "HUAWEI", "HUAWEI"),
+        DeviceProfile("HUAWEI Mate 70 Pro+", "PLA-AL10", "Pillar+", "PLA-AL10", "HUAWEI", "HUAWEI", "HUAWEI"),
+        DeviceProfile("HUAWEI Mate 70 Pro", "PLR-AL30", "Pillar", "PLR-AL30", "HUAWEI", "HUAWEI", "HUAWEI"),
+        DeviceProfile("HUAWEI Mate 70", "CLS-AL30", "Celestial", "CLS-AL30", "HUAWEI", "HUAWEI", "HUAWEI"),
+        DeviceProfile("HUAWEI Mate 60 Pro+", "ALN-AL10", "Allen", "ALN-AL10", "HUAWEI", "HUAWEI", "HUAWEI"),
+        DeviceProfile("HUAWEI Mate 60 Pro", "ALN-AL80", "Allen", "ALN-AL80", "HUAWEI", "HUAWEI", "HUAWEI"),
+        DeviceProfile("HUAWEI Mate X7", "DEL-AL20", "Delphi", "DEL-AL20", "HUAWEI", "HUAWEI", "HUAWEI"),
+        DeviceProfile("HUAWEI Mate X6", "ICL-AL20", "Icelan", "ICL-AL20", "HUAWEI", "HUAWEI", "HUAWEI"),
+        DeviceProfile("HUAWEI Mate X5", "ALT-AL10", "Alta", "ALT-AL10", "HUAWEI", "HUAWEI", "HUAWEI"),
+        DeviceProfile("HUAWEI Pura 90 Pro Max", "SCA-AL00", "Sicilia", "SCA-AL00", "HUAWEI", "HUAWEI", "HUAWEI"),
+        DeviceProfile("HUAWEI Pura 90 Pro", "MLN-AL00", "Malena", "MLN-AL00", "HUAWEI", "HUAWEI", "HUAWEI"),
+        DeviceProfile("HUAWEI Pura 80 Ultra", "LMU-AL00", "LamarrU", "LMU-AL00", "HUAWEI", "HUAWEI", "HUAWEI"),
+        DeviceProfile("HUAWEI Pura 80 Pro+", "LMR-AL10", "Lamarr", "LMR-AL10", "HUAWEI", "HUAWEI", "HUAWEI"),
+        DeviceProfile("HUAWEI Pura 80 Pro", "LMR-AL00", "Lamarr", "LMR-AL00", "HUAWEI", "HUAWEI", "HUAWEI"),
+        DeviceProfile("HUAWEI Pura 70 Ultra", "HBP-AL00", "HWHBP", "HBP-AL00", "HUAWEI", "HUAWEI", "HUAWEI"),
+        DeviceProfile("HUAWEI Pura 70 Pro+", "HBN-AL80", "HWHBN", "HBN-AL80", "HUAWEI", "HUAWEI", "HUAWEI"),
+        DeviceProfile("HUAWEI Pura 70 Pro", "HBN-AL00", "HWHBN", "HBN-AL00", "HUAWEI", "HUAWEI", "HUAWEI"),
+        DeviceProfile("HUAWEI Pura X", "VDE-AL10", "Verde", "VDE-AL10", "HUAWEI", "HUAWEI", "HUAWEI"),
+        DeviceProfile("HUAWEI Pocket 2", "LEM-AL00", "Lem", "LEM-AL00", "HUAWEI", "HUAWEI", "HUAWEI"),
 
         // ==== Honor 荣耀旗舰系列 ====
-        DeviceProfile("Honor Magic8 RSR 保时捷设计", "PTP-AN30", "PTP-AN30", "PTP-AN30", "Honor", "HONOR", "HONOR"),
-        DeviceProfile("Honor Magic8 Pro", "PTP-AN20", "PTP-AN20", "PTP-AN20", "Honor", "HONOR", "HONOR"),
-        DeviceProfile("Honor Magic7 RSR 保时捷设计", "PTP-AN26", "PTP-AN26", "PTP-AN26", "Honor", "HONOR", "HONOR"),
-        DeviceProfile("Honor Magic7 Pro", "PTP-AN10", "PTP-AN10", "PTP-AN10", "Honor", "HONOR", "HONOR"),
-        DeviceProfile("Honor Magic7", "PTP-AN00", "PTP-AN00", "PTP-AN00", "Honor", "HONOR", "HONOR"),
-        DeviceProfile("Honor Magic6 RSR 保时捷设计", "BVL-AN20", "BVL-AN20", "BVL-AN20", "Honor", "HONOR", "HONOR"),
-        DeviceProfile("Honor Magic6 Pro", "BVL-AN16", "BVL-AN16", "BVL-AN16", "Honor", "HONOR", "HONOR"),
-        DeviceProfile("Honor Magic V4", "FCP-AN20", "FCP-AN20", "FCP-AN20", "Honor", "HONOR", "HONOR"),
-        DeviceProfile("Honor Magic V3", "FCP-AN10", "FCP-AN10", "FCP-AN10", "Honor", "HONOR", "HONOR"),
+        DeviceProfile("Honor Magic9 Pro Max", "WKL-AN80", "Twinkle", "WKL-AN80", "Honor", "HONOR", "HONOR"),
+        DeviceProfile("Honor Magic9", "MLY-AN00", "Molly", "MLY-AN00", "Honor", "HONOR", "HONOR"),
+        DeviceProfile("Honor Magic8 RSR 保时捷设计", "BKQ-AN20", "Kurt Geiger", "BKQ-AN20", "Honor", "HONOR", "HONOR"),
+        DeviceProfile("Honor Magic8 Pro", "BKQ-AN90", "Beryl", "BKQ-AN90", "Honor", "HONOR", "HONOR"),
+        DeviceProfile("Honor Magic8", "BKQ-AN80", "Bacchus", "BKQ-AN80", "Honor", "HONOR", "HONOR"),
+        DeviceProfile("Honor Magic7 RSR 保时捷设计", "PTP-AN20", "Patek", "PTP-AN20", "Honor", "HONOR", "HONOR"),
+        DeviceProfile("Honor Magic7 Pro", "PTP-AN70", "Patek", "PTP-AN70", "Honor", "HONOR", "HONOR"),
+        DeviceProfile("Honor Magic7", "PTP-AN60", "Philippe", "PTP-AN60", "Honor", "HONOR", "HONOR"),
+        DeviceProfile("Honor Magic6 RSR 保时捷设计", "BVL-AN20", "Bvlgari", "BVL-AN20", "Honor", "HONOR", "HONOR"),
+        DeviceProfile("Honor Magic6 Pro", "BVL-AN16", "Bvlgari", "BVL-AN16", "Honor", "HONOR", "HONOR"),
+        DeviceProfile("Honor Magic V6", "PNM-AN20", "Phenom", "PNM-AN20", "Honor", "HONOR", "HONOR"),
+        DeviceProfile("Honor Magic V5", "MBH-AN10", "Maybach", "MBH-AN10", "Honor", "HONOR", "HONOR"),
+        DeviceProfile("Honor Magic V3", "FCP-AN20", "FalconP", "FCP-AN20", "Honor", "HONOR", "HONOR"),
+        DeviceProfile("Honor Magic V Flip2", "CLE-AN00", "Celine", "CLE-AN00", "Honor", "HONOR", "HONOR"),
     )
 
     private val GOOGLE_DEVICES: List<DeviceProfile> = listOf(
+        // 2026 旗舰系列
+        DeviceProfile("Pixel 11 Pro Fold", "Pixel 11 Pro Fold", "rango2", "rango2", "Google", "Google", "Google"),
+        DeviceProfile("Pixel 11 Pro XL", "Pixel 11 Pro XL", "mustang2", "mustang2", "Google", "Google", "Google"),
+        DeviceProfile("Pixel 11 Pro", "Pixel 11 Pro", "blazer2", "blazer2", "Google", "Google", "Google"),
         // 2025 旗舰系列
         DeviceProfile("Pixel 10 Pro Fold", "Pixel 10 Pro Fold", "rango", "rango", "Google", "Google", "Google"),
         DeviceProfile("Pixel 10 Pro XL", "Pixel 10 Pro XL", "frankel", "frankel", "Google", "Google", "Google"),
@@ -338,24 +403,26 @@ object DeviceModels {
 
     private val GAMING_OTHER_DEVICES: List<DeviceProfile> = listOf(
         // ==== 红魔电竞旗舰 ====
-        DeviceProfile("RedMagic 11 Pro+", "NX799J", "NX799J", "NX799J", "Gaming", "nubia", "nubia"),
+        DeviceProfile("RedMagic 11 Pro+", "NX809J", "REDMAGIC 11 PRO", "NX809J", "Gaming", "REDMAGIC", "Nubia"),
         DeviceProfile("RedMagic 10 Pro+", "NX789J", "NX789J", "NX789J", "Gaming", "nubia", "nubia"),
         DeviceProfile("RedMagic 10 Pro", "NX779J", "NX779J", "NX779J", "Gaming", "nubia", "nubia"),
-        DeviceProfile("RedMagic 9S Pro+", "NX769J-S", "NX769J-S", "NX769J-S", "Gaming", "nubia", "nubia"),
+        DeviceProfile("RedMagic 9S Pro+", "NX769J", "NX769J", "NX769J", "Gaming", "nubia", "nubia"),
         DeviceProfile("RedMagic 9 Pro", "NX769J", "NX769J", "NX769J", "Gaming", "nubia", "nubia"),
 
         // ==== ROG 游戏手机旗舰 ====
-        DeviceProfile("ROG Phone 10 Pro", "ASUS_AI2601", "ASUS_AI2601", "ASUS_AI2601", "Gaming", "asus", "asus"),
-        DeviceProfile("ROG Phone 9 Pro", "ASUS_AI2501", "ASUS_AI2501", "ASUS_AI2501", "Gaming", "asus", "asus"),
-        DeviceProfile("ROG Phone 8 Pro", "ASUS_AI2401", "ASUS_AI2401", "ASUS_AI2401", "Gaming", "asus", "asus"),
+        DeviceProfile("ROG Phone 9 Pro", "ASUS_AI2501", "AI2501", "ASUS_AI2501", "Gaming", "asus", "asus"),
+        DeviceProfile("ROG Phone 8 Pro", "ASUS_AI2401", "AI2401", "ASUS_AI2401", "Gaming", "asus", "asus"),
 
         // ==== 魅族数字旗舰 ====
-        DeviceProfile("MEIZU 21 PRO", "MEIZU 21 PRO", "meizu21Pro", "meizu21Pro", "MEIZU", "meizu", "meizu"),
-        DeviceProfile("MEIZU 21", "MEIZU 21", "meizu21", "meizu21", "MEIZU", "meizu", "meizu"),
+        DeviceProfile("MEIZU 22 PRO", "MEIZU 22 Pro", "meizu22Pro", "meizu_22Pro_CN", "MEIZU", "meizu", "meizu"),
+        DeviceProfile("MEIZU 22", "MEIZU 22", "meizu22", "meizu_22_CN", "MEIZU", "meizu", "meizu"),
+        DeviceProfile("MEIZU 21 PRO", "MEIZU 21 PRO", "meizu21Pro", "meizu_21Pro_CN", "MEIZU", "meizu", "meizu"),
+        DeviceProfile("MEIZU 21", "MEIZU 21", "meizu21", "meizu_21_CN", "MEIZU", "meizu", "meizu"),
 
         // ==== 索尼微单影像旗舰 ====
-        DeviceProfile("Sony Xperia 1 VII", "XQ-FC72", "XQ-FC72", "XQ-FC72", "Sony", "Sony", "Sony"),
-        DeviceProfile("Sony Xperia 1 VI", "XQ-EC72", "XQ-EC72", "XQ-EC72", "Sony", "Sony", "Sony"),
+        DeviceProfile("Sony Xperia 1 VIII", "XQ-GE74", "XQ-GE74", "XQ-GE74", "Sony", "Sony", "Sony"),
+        DeviceProfile("Sony Xperia 1 VII", "XQ-FS72", "pdx256", "XQ-FS72", "Sony", "Sony", "Sony"),
+        DeviceProfile("Sony Xperia 1 VI", "XQ-EC72", "pdx245", "XQ-EC72", "Sony", "Sony", "Sony"),
     )
 
     private fun normalizeFamily(family: String): String = when (family.lowercase()) {

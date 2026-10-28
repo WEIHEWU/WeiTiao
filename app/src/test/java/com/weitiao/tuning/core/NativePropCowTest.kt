@@ -40,7 +40,7 @@ class NativePropCowTest {
         }
     }
 
-    private fun createBionicPropArea(sizeBytes: Int = 16 * 1024): Pair<ByteArrayMemoryAccessor, NativePropCow.PropMapArea> {
+    private fun createBionicPropArea(sizeBytes: Int = 128 * 1024): Pair<ByteArrayMemoryAccessor, NativePropCow.PropMapArea> {
         val mem = ByteArrayMemoryAccessor(ByteArray(sizeBytes))
         val area = NativePropCow.PropMapArea(
             start = mem.baseAddr,
@@ -192,25 +192,31 @@ class NativePropCowTest {
     }
 
     @Test
-    fun multiContextRoutingSelectsVendorOdmBuildAndDefaultProp() {
+    fun multiContextRoutingSelectsVendorOdmBuildAndExportedDefaultProp() {
         val areas = listOf(
             NativePropCow.PropMapArea(0x1000, 0x2000, 0x1000, "/dev/__properties__/u:object_r:build_prop:s0"),
             NativePropCow.PropMapArea(0x2000, 0x3000, 0x1000, "/dev/__properties__/u:object_r:default_prop:s0"),
-            NativePropCow.PropMapArea(0x3000, 0x4000, 0x1000, "/dev/__properties__/u:object_r:build_vendor_prop:s0"),
-            NativePropCow.PropMapArea(0x4000, 0x5000, 0x1000, "/dev/__properties__/u:object_r:build_odm_prop:s0"),
+            NativePropCow.PropMapArea(0x3000, 0x4000, 0x1000, "/dev/__properties__/u:object_r:exported_default_prop:s0"),
+            NativePropCow.PropMapArea(0x4000, 0x5000, 0x1000, "/dev/__properties__/u:object_r:vendor_default_prop:s0"),
+            NativePropCow.PropMapArea(0x5000, 0x6000, 0x1000, "/dev/__properties__/u:object_r:build_vendor_prop:s0"),
+            NativePropCow.PropMapArea(0x6000, 0x7000, 0x1000, "/dev/__properties__/u:object_r:build_odm_prop:s0"),
         )
 
         val vendorTargets = NativePropCow.selectTargetAreasForInsertion("ro.vendor.oplus.market.name", areas, null)
         assertTrue(vendorTargets.any { it.path.endsWith("build_vendor_prop:s0") })
+        assertTrue(vendorTargets.any { it.path.endsWith("vendor_default_prop:s0") })
+        assertTrue(vendorTargets.any { it.path.endsWith("exported_default_prop:s0") })
         assertTrue(vendorTargets.any { it.path.endsWith("build_prop:s0") })
         assertTrue(vendorTargets.any { it.path.endsWith("default_prop:s0") })
 
         val odmTargets = NativePropCow.selectTargetAreasForInsertion("ro.product.odm.marketname", areas, null)
         assertTrue(odmTargets.any { it.path.endsWith("build_odm_prop:s0") })
+        assertTrue(odmTargets.any { it.path.endsWith("exported_default_prop:s0") })
         assertTrue(odmTargets.any { it.path.endsWith("default_prop:s0") })
 
         val vivoTargets = NativePropCow.selectTargetAreasForInsertion("ro.vivo.market.name", areas, null)
         assertTrue(vivoTargets.any { it.path.endsWith("build_prop:s0") })
+        assertTrue(vivoTargets.any { it.path.endsWith("exported_default_prop:s0") })
         assertTrue(vivoTargets.any { it.path.endsWith("default_prop:s0") })
     }
 }

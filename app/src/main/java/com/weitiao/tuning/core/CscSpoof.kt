@@ -112,9 +112,15 @@ object CscSpoof {
         "ro.product.product.model",
         "ro.product.system.model",
         "ro.product.system_ext.model",
+        "ro.product.system_dlkm.model",
+        "ro.product.vendor_dlkm.model",
+        "ro.product.odm_dlkm.model",
         "ro.product.model_for_attestation",
         "ro.product.vendor.model_for_attestation",
         "ro.product.odm.model_for_attestation",
+        "ro.boot.em.model",
+        "ro.ril.oem.model",
+        "ro.semc.product.model",
     )
 
     private val DEVICE_KEYS = listOf(
@@ -126,10 +132,14 @@ object CscSpoof {
         "ro.product.product.device",
         "ro.product.system.device",
         "ro.product.system_ext.device",
+        "ro.product.system_dlkm.device",
+        "ro.product.vendor_dlkm.device",
+        "ro.product.odm_dlkm.device",
         "ro.product.device_for_attestation",
         "ro.product.board",
         "ro.hardware",
         "ro.board.platform",
+        "ro.semc.product.device",
     )
 
     private val SOC_MODEL_KEYS = listOf(
@@ -147,6 +157,9 @@ object CscSpoof {
         "ro.product.product.name",
         "ro.product.system.name",
         "ro.product.system_ext.name",
+        "ro.product.system_dlkm.name",
+        "ro.product.vendor_dlkm.name",
+        "ro.product.odm_dlkm.name",
         "ro.product.name_for_attestation",
     )
 
@@ -159,6 +172,9 @@ object CscSpoof {
         "ro.product.system.marketname",
         "ro.product.product.marketname",
         "ro.product.system_ext.marketname",
+        "ro.product.system_dlkm.marketname",
+        "ro.product.vendor_dlkm.marketname",
+        "ro.product.odm_dlkm.marketname",
         // OPPO / 一加 / 真我 (ColorOS / OPlus)
         "ro.vendor.oplus.market.name",
         "ro.oplus.market.name",
@@ -177,7 +193,8 @@ object CscSpoof {
         "ro.config.devicename",
         "msc.config.marketing_name",
         "hw_sc.product.marketing_name",
-        // 魅族 / 红魔 / ROG / 通用展示名
+        // 索尼 / 魅族 / 红魔 / ROG / 通用展示名
+        "ro.semc.product.name",
         "ro.meizu.product.model",
         "ro.product.flyme.model",
         "ro.nubia.market.name",
@@ -196,6 +213,9 @@ object CscSpoof {
         "ro.product.product.brand",
         "ro.product.system.brand",
         "ro.product.system_ext.brand",
+        "ro.product.system_dlkm.brand",
+        "ro.product.vendor_dlkm.brand",
+        "ro.product.odm_dlkm.brand",
         "ro.product.brand_for_attestation",
     )
 
@@ -207,6 +227,9 @@ object CscSpoof {
         "ro.product.product.manufacturer",
         "ro.product.system.manufacturer",
         "ro.product.system_ext.manufacturer",
+        "ro.product.system_dlkm.manufacturer",
+        "ro.product.vendor_dlkm.manufacturer",
+        "ro.product.odm_dlkm.manufacturer",
         "ro.product.manufacturer_for_attestation",
     )
 
@@ -218,6 +241,9 @@ object CscSpoof {
         "ro.system.build.fingerprint",
         "ro.system_ext.build.fingerprint",
         "ro.product.build.fingerprint",
+        "ro.system_dlkm.build.fingerprint",
+        "ro.vendor_dlkm.build.fingerprint",
+        "ro.odm_dlkm.build.fingerprint",
     )
 
     /**
@@ -239,6 +265,7 @@ object CscSpoof {
 
         devMap["ro.build.display.id"] = "${profile.model}_$buildId"
         devMap["ro.build.flavor"] = "${profile.productName}-user"
+        devMap["ro.build.description"] = "${profile.productName}-user 16 $buildId ${profile.model} release-keys"
         devMap["ro.build.characteristics"] = profile.characteristics
         devMap["ro.soc.manufacturer"] = profile.socManufacturer
         devMap["ro.miui.cust_device"] = profile.device
@@ -247,12 +274,16 @@ object CscSpoof {
 
     /**
      * 为给定 [DeviceProfile] 构建 Samsung SemFloatingFeature 覆盖映射表。
+     * 注意：仅当目标伪装机型本身是三星品牌时才允许开启 SEC_FLOATING_FEATURE_FRAMEWORK_SUPPORT_FOLDABLE_TYPE_FOLD / FLIP，
+     * 否则非三星折叠屏（如 iPhone Duo、Xiaomi MIX Fold、vivo X Fold、OPPO Find N、HUAWEI Mate XT/X6）
+     * 在三星宿主 ROM 上会被第三方 SDK 误判为三星 Galaxy Z Fold/Flip 导致伪装失效！
      */
     fun buildFloatingFeaturesForProfile(profile: DeviceProfile): Map<String, String> {
         val floatMap = HashMap<String, String>(8)
-        floatMap["SEC_FLOATING_FEATURE_FRAMEWORK_SUPPORT_FOLDABLE_TYPE_FOLD"] = if (profile.isFold) "TRUE" else "FALSE"
-        floatMap["SEC_FLOATING_FEATURE_FRAMEWORK_SUPPORT_FOLDABLE_TYPE_FLIP"] = if (profile.isFlip) "TRUE" else "FALSE"
-        floatMap["SEC_FLOATING_FEATURE_FRAMEWORK_CONFIG_FOLD_MODEL"] = if (profile.isFold || profile.isFlip) "TRUE" else "FALSE"
+        val isSamsung = profile.brand.equals("samsung", ignoreCase = true)
+        floatMap["SEC_FLOATING_FEATURE_FRAMEWORK_SUPPORT_FOLDABLE_TYPE_FOLD"] = if (isSamsung && profile.isFold) "TRUE" else "FALSE"
+        floatMap["SEC_FLOATING_FEATURE_FRAMEWORK_SUPPORT_FOLDABLE_TYPE_FLIP"] = if (isSamsung && profile.isFlip) "TRUE" else "FALSE"
+        floatMap["SEC_FLOATING_FEATURE_FRAMEWORK_CONFIG_FOLD_MODEL"] = if (isSamsung && (profile.isFold || profile.isFlip)) "TRUE" else "FALSE"
         floatMap["SEC_FLOATING_FEATURE_SETTINGS_CONFIG_BRAND_NAME"] = profile.name
         floatMap["SEC_FLOATING_FEATURE_COMMON_CONFIG_BRAND_NAME"] = profile.name
         return floatMap

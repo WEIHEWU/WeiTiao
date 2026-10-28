@@ -27,21 +27,63 @@ class DeviceModelsTest {
     @Test
     fun huaweiAndPixelProfilesAreAccurate() {
         val pura70Pro = requireNotNull(DeviceModels.findByName("HUAWEI Pura 70 Pro"))
-        assertEquals("HNE-AL00", pura70Pro.model)
+        assertEquals("HBN-AL00", pura70Pro.model)
+        assertEquals("HWHBN", pura70Pro.device)
         val pixel9Pro = requireNotNull(DeviceModels.findByName("Pixel 9 Pro"))
         assertEquals("caiman", pixel9Pro.device)
 
         val oneplus16 = requireNotNull(DeviceModels.findByName("OnePlus 16"))
-        assertEquals("PJZ130", oneplus16.model)
+        assertEquals("PYB110", oneplus16.model)
+        assertEquals("pokemon", oneplus16.device)
         assertEquals("OnePlus", oneplus16.brand)
 
         val iphoneDuo = requireNotNull(DeviceModels.findByName("iPhone Duo"))
-        assertEquals("A3600", iphoneDuo.device)
+        assertEquals("iPhone19,4", iphoneDuo.model)
+        assertEquals("iPhone Duo", iphoneDuo.device)
+        assertEquals("A3720", iphoneDuo.productName)
         assertEquals("Apple", iphoneDuo.brand)
 
         val xiaomi17u = requireNotNull(DeviceModels.findByName("Xiaomi 17 Ultra"))
-        assertEquals("26020PN00C", xiaomi17u.model)
-        assertEquals("tianji", xiaomi17u.device)
+        assertEquals("2512BPNDAC", xiaomi17u.model)
+        assertEquals("nezha", xiaomi17u.device)
+
+        val xiaomi17pm = requireNotNull(DeviceModels.findByName("Xiaomi 17 Pro Max"))
+        assertEquals("2509FPN0BC", xiaomi17pm.model)
+        assertEquals("popsicle", xiaomi17pm.device)
+
+        val xiaomi17p = requireNotNull(DeviceModels.findByName("Xiaomi 17 Pro"))
+        assertEquals("25098PN5AC", xiaomi17p.model)
+        assertEquals("pandora", xiaomi17p.device)
+
+        val xperia1viii = requireNotNull(DeviceModels.findByName("Sony Xperia 1 VIII"))
+        assertEquals("XQ-GE74", xperia1viii.model)
+        assertEquals("XQ-GE74", xperia1viii.device)
+        assertEquals("Sony", xperia1viii.brand)
+
+        val xperia1vii = requireNotNull(DeviceModels.findByName("Sony Xperia 1 VII"))
+        assertEquals("XQ-FS72", xperia1vii.model)
+        assertEquals("pdx256", xperia1vii.device)
+        assertEquals("Sony", xperia1vii.brand)
+
+        val x300u = requireNotNull(DeviceModels.findByName("vivo X300 Ultra"))
+        assertEquals("V2547DA", x300u.model)
+        assertEquals("PD2547", x300u.device)
+
+        val findX9u = requireNotNull(DeviceModels.findByName("OPPO Find X9 Ultra"))
+        assertEquals("PMA120", findX9u.model)
+        assertEquals("lighthouse", findX9u.device)
+
+        val mate80rs = requireNotNull(DeviceModels.findByName("HUAWEI Mate 80 RS 非凡大师"))
+        assertEquals("SGU-AL10", mate80rs.model)
+        assertEquals("SagittariusU", mate80rs.device)
+
+        val magicV6 = requireNotNull(DeviceModels.findByName("Honor Magic V6"))
+        assertEquals("PNM-AN20", magicV6.model)
+        assertEquals("Phenom", magicV6.device)
+
+        val redMagic11 = requireNotNull(DeviceModels.findByName("RedMagic 11 Pro+"))
+        assertEquals("NX809J", redMagic11.model)
+        assertEquals("REDMAGIC", redMagic11.brand)
     }
 
     @Test
@@ -117,7 +159,7 @@ class DeviceModelsTest {
         assertEquals("q8x", CscSpoof.matchDeviceProp("ro.product.device", config))
         assertEquals("q8xzc", CscSpoof.matchDeviceProp("ro.product.name", config))
         assertEquals("samsung", CscSpoof.matchDeviceProp("ro.product.brand", config))
-        assertEquals("fold,nosdcard", CscSpoof.matchDeviceProp("ro.build.characteristics", config))
+        assertEquals("nosdcard", CscSpoof.matchDeviceProp("ro.build.characteristics", config))
         assertEquals("TRUE", CscSpoof.matchFloatingFeature("SEC_FLOATING_FEATURE_FRAMEWORK_SUPPORT_FOLDABLE_TYPE_FOLD", config))
     }
 
@@ -264,14 +306,23 @@ class DeviceModelsTest {
     fun iphoneDuoAndAllFoldablesResolveFullPropsAndInlineSafeFingerprints() {
         val iphoneDuo = requireNotNull(DeviceModels.findByName("iPhone Duo"))
         assertTrue("iPhone Duo must be recognized as foldable", iphoneDuo.isFold)
-        assertEquals("fold,nosdcard", iphoneDuo.characteristics)
+        assertEquals("nosdcard", iphoneDuo.characteristics)
         assertEquals("Apple", iphoneDuo.socManufacturer)
 
         val duoProps = CscSpoof.buildDevicePropsForProfile(iphoneDuo)
-        assertEquals("iPhone Duo", duoProps["ro.product.model"])
-        assertEquals("iPhone Duo", duoProps["ro.product.bootimage.model"])
-        assertEquals("A3600", duoProps["ro.product.device"])
-        assertEquals("A3600", duoProps["ro.product.bootimage.device"])
+        assertEquals("iPhone19,4", duoProps["ro.product.model"])
+        assertEquals("iPhone19,4", duoProps["ro.product.bootimage.model"])
+        assertEquals("iPhone19,4", duoProps["ro.product.system_dlkm.model"])
+        assertEquals("iPhone19,4", duoProps["ro.product.vendor_dlkm.model"])
+        assertEquals("iPhone19,4", duoProps["ro.product.odm_dlkm.model"])
+        assertEquals("iPhone19,4", duoProps["ro.boot.em.model"])
+        assertEquals("iPhone19,4", duoProps["ro.ril.oem.model"])
+        assertEquals("iPhone19,4", duoProps["ro.semc.product.model"])
+        assertEquals("iPhone Duo", duoProps["ro.product.device"])
+        assertEquals("iPhone Duo", duoProps["ro.product.bootimage.device"])
+        assertEquals("iPhone Duo", duoProps["ro.semc.product.device"])
+        assertEquals("A3720", duoProps["ro.product.name"])
+        assertEquals("A3720", duoProps["ro.product.bootimage.name"])
         assertEquals("Apple A20 Pro", duoProps["ro.soc.model"])
         assertEquals("Apple A20 Pro", duoProps["ro.vendor.qti.soc_model"])
         assertEquals("iPhone Duo", duoProps["ro.product.marketname"])
@@ -279,13 +330,19 @@ class DeviceModelsTest {
         assertEquals("iPhone Duo", duoProps["ro.config.marketing_name"])
         assertEquals("iPhone Duo", duoProps["ro.vivo.market.name"])
         assertEquals("iPhone Duo", duoProps["ro.vendor.oplus.market.name"])
+        assertEquals("iPhone Duo", duoProps["ro.semc.product.name"])
         assertEquals("iPhone Duo", duoProps["bluetooth.device.default_name"])
-        assertEquals("fold,nosdcard", duoProps["ro.build.characteristics"])
-        assertTrue(duoProps["ro.build.display.id"]!!.startsWith("iPhone Duo_"))
+        assertEquals("nosdcard", duoProps["ro.build.characteristics"])
+        assertTrue(duoProps["ro.build.display.id"]!!.startsWith("iPhone19,4_"))
+        assertTrue(duoProps["ro.build.description"]!!.contains("iPhone19,4"))
 
+        // Non-Samsung foldables MUST NOT claim SEC_FLOATING_FEATURE_FRAMEWORK_SUPPORT_FOLDABLE_TYPE_FOLD = TRUE
+        // on a Samsung host ROM, otherwise apps mistake them for Samsung Galaxy Z Fold!
         val duoFloating = CscSpoof.buildFloatingFeaturesForProfile(iphoneDuo)
-        assertEquals("TRUE", duoFloating["SEC_FLOATING_FEATURE_FRAMEWORK_SUPPORT_FOLDABLE_TYPE_FOLD"])
+        assertEquals("FALSE", duoFloating["SEC_FLOATING_FEATURE_FRAMEWORK_SUPPORT_FOLDABLE_TYPE_FOLD"])
         assertEquals("FALSE", duoFloating["SEC_FLOATING_FEATURE_FRAMEWORK_SUPPORT_FOLDABLE_TYPE_FLIP"])
+        assertEquals("FALSE", duoFloating["SEC_FLOATING_FEATURE_FRAMEWORK_CONFIG_FOLD_MODEL"])
+        assertEquals("iPhone Duo", duoFloating["SEC_FLOATING_FEATURE_SETTINGS_CONFIG_BRAND_NAME"])
 
         // Ensure every single profile in DeviceModels.ALL has an inline-safe fingerprint (<= 91 UTF-8 bytes)
         // so NativePropCow never triggers a Bionic kLongFlag crash or truncation.
@@ -322,12 +379,15 @@ class DeviceModelsTest {
         assertEquals("nosdcard", xperia.characteristics)
 
         val pocket2 = requireNotNull(DeviceModels.findByName("HUAWEI Pocket 2"))
-        assertEquals("flip,nosdcard", pocket2.characteristics)
+        assertTrue(pocket2.isFlip)
+        assertEquals("nosdcard", pocket2.characteristics)
 
         val mateXT = requireNotNull(DeviceModels.findByName("HUAWEI Mate XT 非凡大师"))
-        assertEquals("fold,nosdcard", mateXT.characteristics)
+        assertTrue(mateXT.isFold)
+        assertEquals("nosdcard", mateXT.characteristics)
 
         val tabS11U = requireNotNull(DeviceModels.findByName("Galaxy Tab S11 Ultra"))
+        assertTrue(tabS11U.isTablet)
         assertEquals("tablet,nosdcard", tabS11U.characteristics)
     }
 }

@@ -18,6 +18,37 @@ object LsposedScopeHelper {
     private const val LSPD_DB_PATH = "/data/adb/lspd/config/modules_config.db"
     private const val MODULE_PKG = "com.weitiao.tuning"
 
+    private val SYSTEM_SKIP_RESTART_PACKAGES: Set<String> = setOf(
+        MODULE_PKG,
+        "android",
+        "com.android.systemui",
+        "com.android.phone",
+        "com.android.settings",
+        "com.samsung.android.app.settings",
+        "com.samsung.android.app.telephonyui",
+        "com.tencent.mm",
+    )
+
+    /**
+     * 解析当前需要重启以使新机型配置立即生效的应用列表：
+     * 优先使用显式勾选的 [explicitTargets]，若为空（即“全部应用”模式）则自动获取当前 LSPosed 已勾选的作用域应用。
+     */
+    fun resolveRestartableTargetPackages(explicitTargets: Set<String>): Set<String> {
+        val raw: Set<String> = if (explicitTargets.isNotEmpty()) {
+            explicitTargets
+        } else {
+            val serviceScope: Set<String> = runCatching {
+                com.weitiao.tuning.App.getXposedService()?.scope?.toSet() ?: emptySet<String>()
+            }.getOrDefault(emptySet<String>())
+            serviceScope + HookLiveness.recentHookedPackages().orEmpty()
+        }
+        return raw.filterTo(LinkedHashSet<String>()) { pkg ->
+            pkg.isNotBlank() &&
+                pkg !in SYSTEM_SKIP_RESTART_PACKAGES &&
+                !pkg.startsWith("com.android.server")
+        }
+    }
+
     /**
      * 模块核心推荐作用域清单（确保不被覆盖或遗漏）
      */

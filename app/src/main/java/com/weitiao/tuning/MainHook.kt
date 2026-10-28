@@ -68,6 +68,9 @@ class MainHook : XposedModule() {
         val config = resolved.config
         val isStoreApp = param.packageName in STORE_PACKAGES
 
+        // 优先应用 Build 类静态常量与 Native COW 内存属性伪装（在挂载 SystemProperties Hook 前预热并改写底层 Bionic prop_area）
+        syncDeviceSpoofState(resolved, param.packageName)
+
         // 挂载基础系统属性与CSC特性拦截器
         hookSystemProperties(param.classLoader, param.packageName)
         hookSemSystemProperties(param.classLoader, param.packageName)
@@ -82,9 +85,6 @@ class MainHook : XposedModule() {
         hookSemFloatingFeature(param.classLoader, param.packageName)
         hookSettingsProvider(param.classLoader, param.packageName)
         hookActivityLifecycleForHotSpoof(param.classLoader, param.packageName)
-
-        // 尝试应用 Build 类静态常量与 Native COW 内存属性伪装（与商店跨区开关独立，支持分应用独立机型及热切换）
-        syncDeviceSpoofState(resolved, param.packageName)
 
         log(
             Log.INFO, TAG,
@@ -466,7 +466,16 @@ class MainHook : XposedModule() {
     // ---- Settings Provider / Bluetooth / WebSettings（系统设置、蓝牙设备名与 WebView UA 伪装） ----
 
     private fun hookSettingsProvider(cl: ClassLoader, packageName: String) {
-        val deviceNameKeys = setOf("device_name", "device_provisioned_name", "bluetooth_name")
+        val deviceNameKeys = setOf(
+            "device_name",
+            "device_provisioned_name",
+            "bluetooth_name",
+            "default_device_name",
+            "oppo_device_name",
+            "vivo_device_name",
+            "miui_device_name",
+            "marketing_name",
+        )
         runCatching {
             val globalClass = Class.forName("android.provider.Settings\$Global", false, cl)
             safeHook(globalClass, "getString", android.content.ContentResolver::class.java, String::class.java) { chain ->

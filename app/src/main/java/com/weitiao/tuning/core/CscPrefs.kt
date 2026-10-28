@@ -31,7 +31,9 @@ object CscPrefs {
             runCatching {
                 val editor = remote.edit()
                 CscConfig.toPrefs(editor, config)
-                editor.apply()
+                if (!editor.commit()) {
+                    editor.apply()
+                }
             }.onFailure {
                 Log.e("CscPrefs", "写入 LSPosed remote preferences 失败", it)
             }
