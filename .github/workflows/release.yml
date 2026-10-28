@@ -24,29 +24,30 @@ jobs:
 
       - name: Verify APK & Generate SHA-256 Checksum
         run: |
-          test -f releases/WeiTiao-v1.5.2.apk
+          test -f releases/WeiTiao-v1.5.3.apk
           cd releases
-          sha256sum WeiTiao-v1.5.2.apk > WeiTiao-v1.5.2.apk.sha256
-          cat WeiTiao-v1.5.2.apk.sha256
+          sha256sum WeiTiao-v1.5.3.apk > WeiTiao-v1.5.3.apk.sha256
+          cat WeiTiao-v1.5.3.apk.sha256
 
       - name: Create GitHub Release and Upload APK + Checksum
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.5.2
-          name: "微调 WeiTiao v1.5.2 (全品牌旗舰官方入网型号精准对齐 · iPhone Duo / Xperia 1 VIII 酷安小尾巴 100% 识别)"
+          tag_name: v1.5.3
+          name: "微调 WeiTiao v1.5.3 (Google Play 版微信 8.0.79+ 步数修改修复 · 双层计步拦截与主动平滑递增)"
           body: |
-            ### 微调 (WeiTiao) v1.5.2
+            ### 微调 (WeiTiao) v1.5.3
 
-            - **全品牌旗舰机型库官方入网型号与平台规则 100% 精准对齐**：
-              - 全面校准 **iPhone Duo**（`model = iPhone19,4`、`device = iPhone Duo`、`product = A3720`）、**iPhone 18 / 17 / 16 / 15 Pro 系列**（国行官方 A 型号与机器标识符）、**Sony Xperia 1 VIII (`XQ-GE74`) / 1 VII (`XQ-FS72`)**、**Xiaomi 18 / 17 全系**、**vivo X500 / X300 / iQOO 16 / 15 全系**、**OPPO Find X10 / X9 / Find N6 全系**、**HUAWEI Mate 90 / 80 / XT 非凡大师全系**、**Honor Magic9 / 8 / V6 全系**、**RedMagic 11 Pro+ (`REDMAGIC`)** 等全部纯血旗舰参数，实测酷安、微博、哔哩哔哩、小红书等平台小尾巴 100% 精准识别；
-              - 严格清理老旧与非旗舰机型，确保列表内每一款机型均具备真实可识别的 `model`、`device`、`productName`、`brand` 与 `manufacturer`。
-            - **底层 Bionic `property_info` 精确上下文路由与全分区覆盖 (`NativePropCow` + `CscSpoof`)**：
-              - 新增通过 `libc.so` 原生 `__system_property_find` 反查宿主 SELinux `property_info` 精确目标 `prop_area` 机制，彻底解决三星 One UI 宿主上 `ro.product.vendor.*`、`ro.product.odm.*`、`ro.boot.em.model` 等属性跨区映射不一致问题；
-              - 补齐 `system_dlkm`、`vendor_dlkm`、`odm_dlkm`、`ro.boot.em.model`、`ro.ril.oem.model`、`ro.semc.product.*` 等底层属性及多品牌 `Settings.Global/System/Secure` 设备名键位；
-              - 修复非三星折叠屏（如 `iPhone Duo`、`Mate XT`、`MIX Fold`、`vivo X Fold`、`OPPO Find N`）在三星宿主 ROM 上因 `SemFloatingFeature` 折叠标志被第三方 SDK 误判为三星 Galaxy Z Fold 的问题。
-            - **机型切换即时生效体验升级**：
-              - 在挂载 `SystemProperties` Hook 前优先执行 `syncDeviceSpoofState` 完成 `Build.*` 静态字段与 Native COW 内存改写；
-              - `CscPrefs` 升级为 `commit()` 同步落盘，切换全局机型时自动清空残留分应用覆盖并自动重启 LSPosed 作用域内目标应用，切换机型即刻生效。
+            - **全面修复 Google Play 版及国内版微信 8.0.79+ 步数修改失效问题 (`WechatHooks`)**：
+              - **双层计步传感器拦截（彻底免疫 `targetSdk >= 34` Hidden API 限制）**：
+                - 第一层：修复 `mSensorsEvents` 字段查找（遍历父类 `SystemSensorManager$BaseSensorEventQueue`），并移除错误的 `sensor.hashCode()` 伪造 `handle` 回退；
+                - 第二层：在 `SensorManager.registerListener` / `SystemSensorManager.registerListenerImpl` 注册计步器时，基于 100% 公开 Android SDK API（`Sensor.getType()`、`SensorEvent.sensor`、`SensorEvent.values`）动态 Hook 目标 `SensorEventListener.onSensorChanged(SensorEvent)`，彻底绕开 Google Play 版微信 8.0.79 (`targetSdk >= 34`) 触发的隐藏字段反射封锁。
+              - **根除加速度计/陀螺仪高频误判与单帧暴涨防作弊丢弃**：
+                - 彻底移除 `(sensor == null && values[0] > 0f)` 兜底判断，严禁 50Hz 加速度计/陀螺仪事件混入计步引擎导致第一帧与第二帧之间直接冲顶 `50,000` 步被微信判定为异常突跳丢弃；
+                - 新增首帧基准锚点保护（首帧 `0` 突跳建立 `preSensorStep` 基准）与单次事件平滑增量上限（`<= 2000` 步/帧）。
+              - **新增后台平滑主动计步驱动器 (`WeiTiao-StepTicker`)**：
+                - 解决手机静置桌面时硬件 `TYPE_STEP_COUNTER` (`ON_CHANGE` 模式) 不触发第二次事件导致自动步数卡在 `0` 的问题，静置状态下也能平滑、稳定地将微信运动步数推升至设定上限。
+            - **微信进程隔离保护 (`CscSpoof` & `MainHook`)**：
+              - 在全局默认「全部作用域应用」机型伪装模式下默认排除微信 (`com.tencent.mm`)，防止全局伪装为 `iPhone Duo`（`Apple / iPhone19,4`）及 `NativePropCow` 注入干扰微信主进程与 `:push` 进程健康度及计步器权限。
           files: |
-            releases/WeiTiao-v1.5.2.apk
-            releases/WeiTiao-v1.5.2.apk.sha256
+            releases/WeiTiao-v1.5.3.apk
+            releases/WeiTiao-v1.5.3.apk.sha256

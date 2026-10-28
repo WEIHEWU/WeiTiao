@@ -69,16 +69,30 @@ object CscSpoof {
         return config.deviceName
     }
 
+    private val DEVICE_SPOOF_GLOBAL_EXCLUDE = setOf(
+        "com.tencent.mm",
+        "com.sec.android.app.samsungapps",
+        "com.samsung.android.themestore",
+        "com.samsung.android.themecenter",
+        "com.osp.app.signin",
+        "com.samsung.android.samsungaccount",
+        "com.samsung.android.authfw",
+    )
+
     /**
      * 判断指定包名是否应当启用机型伪装。
+     * 微信 (com.tencent.mm) 与三星商店系应用默认在 Xposed scope.list 中，
+     * 在「全部应用」默认模式下排除全局机型伪装，防止微信主进程/:push 进程机型属性冲突导致微信运动步数异常；
+     * 若用户在「分应用独立机型」或「指定应用白名单」中显式选择了它们，则正常按用户配置伪装。
      */
     fun isDeviceSpoofTarget(config: CscConfig, packageName: String): Boolean {
         if (!config.spoofDevice) return false
         if (!config.perAppDeviceModels[packageName].isNullOrBlank()) return true
         if (config.deviceName.isBlank()) return false
-        return !config.deviceTargetFilterEnabled ||
-            config.deviceTargetPackages.isEmpty() ||
-            packageName in config.deviceTargetPackages
+        if (config.deviceTargetFilterEnabled && config.deviceTargetPackages.isNotEmpty()) {
+            return packageName in config.deviceTargetPackages
+        }
+        return packageName !in DEVICE_SPOOF_GLOBAL_EXCLUDE
     }
 
     /**

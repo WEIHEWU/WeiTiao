@@ -1,6 +1,10 @@
 package com.weitiao.tuning
 
+import com.weitiao.tuning.core.CscConfig
+import com.weitiao.tuning.core.CscSpoof
 import com.weitiao.tuning.core.TuningConfig
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -149,5 +153,100 @@ class WechatStepEngineTest {
         val base10 = engine10x.processStepCounter(1000f, config10x)
         val after100Steps10x = engine10x.processStepCounter(1100f, config10x)
         assertTrue("10x multiplier must add 1000 steps", (after100Steps10x - base10) == 1000f)
+    }
+
+    @Test
+    fun liveWechatHookEstablishesZeroJumpBaselineAndIncrementsSmoothly() {
+        val engine = createTestEngine()
+        val config = TuningConfig(
+            stepEnabled = true,
+            stepMultiplier = 50,
+            stepMaximum = 20_000,
+            stepAuto = true,
+            stepEndHour = 24,
+        )
+
+        val values = floatArrayOf(3500f)
+        // Event #1: must establish baseline with 0 spike so WeChat sets preSensorStep = 3500
+        engine.process(values, isDetector = false, cfg = config, isLiveWechatHook = true)
+        assertEquals(3500f, values[0], 0.01f)
+
+        // Subsequent events: each event must add <= 2000 steps smoothly until reaching 20,000
+        var prev = values[0]
+        var wechatAccumulatedToday = 0f
+        for (i in 1..25) {
+            values[0] = 3500f // stationary phone
+            engine.process(values, isDetector = false, cfg = config, isLiveWechatHook = true)
+            val diff = values[0] - prev
+            assertTrue("Per-event diff ($diff) must be non-negative and <= 2000", diff in 0f..2000f)
+            wechatAccumulatedToday += diff
+            prev = values[0]
+        }
+
+        assertEquals(20_000f, wechatAccumulatedToday, 0.01f)
+        assertFalse("Auto tick should stop once maximum is reached", engine.shouldDispatchAutoTick(config))
+    }
+
+    @Test
+    fun liveWechatHookBuffersLargeMultiplierStepGainsSmoothly() {
+        val engine = createTestEngine()
+        val config = TuningConfig(
+            stepEnabled = true,
+            stepMultiplier = 500,
+            stepMaximum = 50_000,
+            stepAuto = false,
+            stepEndHour = 24,
+        )
+
+        // Event #1: baseline at 1000f
+        val values = floatArrayOf(1000f)
+        engine.process(values, isDetector = false, cfg = config, isLiveWechatHook = true)
+        assertEquals(1000f, values[0], 0.01f)
+
+        // Event #2: walk 20 real steps (+10,000 target steps)
+        values[0] = 1020f
+        engine.process(values, isDetector = false, cfg = config, isLiveWechatHook = true)
+        // First chunk must be capped at 2,000 so WeChat doesn't reject it as a spike
+        assertEquals(3000f, values[0], 0.01f)
+        assertTrue("Pending steps should keep auto ticker active", engine.shouldDispatchAutoTick(config))
+
+        // 4 subsequent ticks drain the remaining 8,000 buffered steps in 2,000-step chunks
+        for (tick in 1..4) {
+            values[0] = 1020f
+            engine.process(values, isDetector = false, cfg = config, isLiveWechatHook = true)
+            assertEquals(1000f + (tick + 1) * 2000f, values[0], 0.01f)
+        }
+        assertFalse("All pending steps drained", engine.shouldDispatchAutoTick(config))
+    }
+
+    @Test
+    fun cscSpoofExcludesWechatInGlobalDefaultMode() {
+        val defaultAllAppsConfig = CscConfig(
+            enabled = true,
+            spoofDevice = true,
+            deviceName = "iPhone Duo",
+            deviceTargetFilterEnabled = false,
+            deviceTargetPackages = emptySet(),
+        )
+        assertFalse(
+            "WeChat must be excluded from global device spoof by default",
+            CscSpoof.isDeviceSpoofTarget(defaultAllAppsConfig, "com.tencent.mm"),
+        )
+        assertTrue(
+            "Other apps should still be spoofed in global default mode",
+            CscSpoof.isDeviceSpoofTarget(defaultAllAppsConfig, "com.ss.android.ugc.aweme"),
+        )
+
+        val explicitWechatConfig = CscConfig(
+            enabled = true,
+            spoofDevice = true,
+            deviceName = "iPhone Duo",
+            deviceTargetFilterEnabled = true,
+            deviceTargetPackages = setOf("com.tencent.mm"),
+        )
+        assertTrue(
+            "WeChat can still be spoofed when explicitly added to deviceTargetPackages",
+            CscSpoof.isDeviceSpoofTarget(explicitWechatConfig, "com.tencent.mm"),
+        )
     }
 }

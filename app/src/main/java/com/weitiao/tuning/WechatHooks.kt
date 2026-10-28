@@ -7,11 +7,15 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.util.SparseArray
 import com.weitiao.tuning.core.TuningConfig
 import dalvik.system.DexFile
 import io.github.libxposed.api.XposedInterface
 import java.io.File
+import java.lang.ref.WeakReference
 import java.lang.reflect.Executable
 import java.lang.reflect.Field
 import java.lang.reflect.Method
@@ -22,15 +26,18 @@ import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * 健壮的微信步数与防撤回 Hook 实现。
+ * 健壮的微信步数与防撤回 Hook 实现（兼容国内版与 Google Play 版微信 8.0.79+ / targetSdk 34+）。
  *
  * 核心设计：
- * 1. 步数算法：基于「单调递增绝对锚点偏移模型」。对外输出永远单调递增，跨天平滑衔接，
- *    彻底杜绝负向跳变（diffStep < 0）触发微信的 rebootIncrease 恶性重启累加。
- *    微信计算出的当日步数严格封顶于 stepMaximum。
- * 2. 动态传感器 Handle 追踪：通过 Hook registerListenerImpl 动态记录 TYPE_STEP_COUNTER 的 handle，
- *    彻底解决 Android 13/14/15/16 及 One UI 各版本反射解析 Handle 失败的问题。
- * 3. 移除任何针对特定微信版本
+ * 1. 双层传感器拦截（底层 SensorEventQueue + 公开 SDK SensorEventListener.onSensorChanged）：
+ *    - 第一层：通过父类链反射 `BaseSensorEventQueue.mSensorsEvents` 与真实 `mHandle` 拦截 `dispatchSensorEvent`；
+ *    - 第二层：在 `registerListener` / `registerListenerImpl` 时基于 100% 公开 SDK API (`Sensor.getType()`)
+ *      动态 Hook 目标监听器的 `onSensorChanged(SensorEvent)`，彻底免疫 Google Play 版微信 8.0.79 (targetSdk >= 34)
+ *      触发的 Android 14–17 Hidden API 反射限制。
+ * 2. 彻底移除 `(sensor == null && values[0] > 0f)` 误判回退，严禁加速度计/陀螺仪/光线传感器污染计步引擎。
+ * 3. 平滑主动驱动器 + 单次增量防异常跳变：
+ *    - 首帧事件仅建立基准锚点（0 突跳），随后通过监听器的 Handler/Looper 平滑递增，
+ *      即使手机静置在桌面也能在「自动递增模式」下稳定把微信运动步数推升至上限，且绝不触发微信单次跳变防作弊丢弃。
  */
 internal class WechatHooks(
     private val install: (Executable, (XposedInterface.Chain) -> Any?) -> Unit,
@@ -38,15 +45,30 @@ internal class WechatHooks(
     private val logger: (String, Throwable?) -> Unit,
 ) {
     private val activated = AtomicBoolean()
+    private val autoTickerStarted = AtomicBoolean()
     private val stepCounterHandles = CopyOnWriteArraySet<Int>()
+    private val stepDetectorHandles = CopyOnWriteArraySet<Int>()
+    private val hookedListenerClasses = ConcurrentHashMap.newKeySet<Class<*>>()
+    private val activeStepListeners = ConcurrentHashMap<Int, RegisteredStepListener>()
+    private val processedInDispatchQueue = ThreadLocal<Boolean>()
+    private val syntheticDispatchInProgress = ThreadLocal<Boolean>()
     private val messageCache = ConcurrentHashMap<Long, Any>()
+
+    @Volatile private var lastRawHardwareStep = 0f
 
     private val stepEngine = WechatStepEngine(logger)
     @Volatile private var messageInsertMethod: Method? = null
     @Volatile private var messageStorage: Any? = null
 
+    private class RegisteredStepListener(
+        val listenerRef: WeakReference<SensorEventListener>,
+        val sensor: Sensor,
+        val handler: Handler?,
+        @Volatile var templateEvent: SensorEvent? = null,
+    )
+
     fun register(classLoader: ClassLoader, processName: String) {
-        // 1. 传感器 Hook 立即安装（吸收 sporteditor 机制，绝不等待 Application）
+        // 1. 传感器 Hook 立即安装（双层拦截，绝不等待 Application）
         installSensorManagerHook(classLoader)
         installSensorEventHook(classLoader)
 
@@ -85,34 +107,227 @@ internal class WechatHooks(
     }
 
     /**
-     * Hook SensorManager.registerListenerImpl，动态捕获计步器 handle。
+     * Hook SensorManager.registerListener 与 SystemSensorManager.registerListenerImpl：
+     * 1. 使用 100% 公开 SDK `sensor.type` 识别 TYPE_STEP_COUNTER (19) 与 TYPE_STEP_DETECTOR (18)。
+     * 2. 动态 Hook 传入的 SensorEventListener 实现类的 onSensorChanged(SensorEvent)，绕开 Google 版微信 Hidden API 限制。
+     * 3. 捕获真实传感器 handle（严禁使用 hashCode 伪造 handle）。
      */
     private fun installSensorManagerHook(classLoader: ClassLoader) {
         runCatching {
-            val smClass = Class.forName("android.hardware.SystemSensorManager", false, classLoader)
-            val targets = smClass.declaredMethods.filter {
-                it.name == "registerListenerImpl" && it.parameterTypes.isNotEmpty() &&
+            val smClass = Class.forName("android.hardware.SensorManager", false, classLoader)
+            smClass.declaredMethods.filter {
+                it.name == "registerListener" && it.parameterTypes.size >= 2 &&
                     SensorEventListener::class.java.isAssignableFrom(it.parameterTypes[0])
-            }
-            targets.forEach { method ->
+            }.forEach { method ->
                 method.isAccessible = true
                 install(method) { chain ->
-                    val sensor = chain.args.firstOrNull { it is Sensor } as? Sensor
-                    if (sensor != null && (sensor.type == Sensor.TYPE_STEP_COUNTER || sensor.type == Sensor.TYPE_STEP_DETECTOR)) {
-                        val handle = readIntField(sensor, "mHandle") ?: sensor.hashCode()
-                        stepCounterHandles.add(handle)
-                    }
+                    onSensorListenerRegistered(chain.args)
+                    chain.proceed()
+                }
+            }
+
+            smClass.declaredMethods.filter {
+                it.name == "unregisterListener" && it.parameterTypes.isNotEmpty() &&
+                    SensorEventListener::class.java.isAssignableFrom(it.parameterTypes[0])
+            }.forEach { method ->
+                method.isAccessible = true
+                install(method) { chain ->
+                    onSensorListenerUnregistered(chain.args)
                     chain.proceed()
                 }
             }
         }.onFailure {
-            logger("SensorManager 监听 Hook 失败（将使用反射回退模式）", it)
+            logger("SensorManager.registerListener Hook 失败", it)
+        }
+
+        runCatching {
+            val sysSmClass = Class.forName("android.hardware.SystemSensorManager", false, classLoader)
+            sysSmClass.declaredMethods.filter {
+                it.name == "registerListenerImpl" && it.parameterTypes.isNotEmpty() &&
+                    SensorEventListener::class.java.isAssignableFrom(it.parameterTypes[0])
+            }.forEach { method ->
+                method.isAccessible = true
+                install(method) { chain ->
+                    onSensorListenerRegistered(chain.args)
+                    chain.proceed()
+                }
+            }
+
+            sysSmClass.declaredMethods.filter {
+                it.name == "unregisterListenerImpl" && it.parameterTypes.isNotEmpty() &&
+                    SensorEventListener::class.java.isAssignableFrom(it.parameterTypes[0])
+            }.forEach { method ->
+                method.isAccessible = true
+                install(method) { chain ->
+                    onSensorListenerUnregistered(chain.args)
+                    chain.proceed()
+                }
+            }
+        }.onFailure {
+            logger("SystemSensorManager.registerListenerImpl Hook 失败", it)
+        }
+    }
+
+    private fun onSensorListenerRegistered(args: List<Any?>) {
+        val listener = args.firstOrNull { it is SensorEventListener } as? SensorEventListener ?: return
+        val sensor = args.firstOrNull { it is Sensor } as? Sensor ?: return
+        val handler = args.firstOrNull { it is Handler } as? Handler
+        val type = sensor.type
+        if (type != Sensor.TYPE_STEP_COUNTER && type != Sensor.TYPE_STEP_DETECTOR) return
+
+        extractSensorHandle(sensor)?.let { handle ->
+            if (type == Sensor.TYPE_STEP_COUNTER) {
+                stepCounterHandles.add(handle)
+            } else {
+                stepDetectorHandles.add(handle)
+            }
+        }
+
+        hookStepListenerClass(listener.javaClass)
+
+        if (type == Sensor.TYPE_STEP_COUNTER) {
+            val key = System.identityHashCode(listener)
+            activeStepListeners[key] = RegisteredStepListener(
+                listenerRef = WeakReference(listener),
+                sensor = sensor,
+                handler = handler,
+            )
+            ensureAutoTickerRunning()
+        }
+    }
+
+    private fun onSensorListenerUnregistered(args: List<Any?>) {
+        val listener = args.firstOrNull { it is SensorEventListener } as? SensorEventListener ?: return
+        val sensor = args.firstOrNull { it is Sensor } as? Sensor
+        if (sensor == null || sensor.type == Sensor.TYPE_STEP_COUNTER) {
+            activeStepListeners.remove(System.identityHashCode(listener))
         }
     }
 
     /**
+     * 基于 100% 公开 Android SDK API (`SensorEvent.sensor.type`, `SensorEvent.values`) 拦截计步回调。
+     * 即使 Google Play 版微信 8.0.79 (targetSdk >= 34) 封锁了 `mSensorsEvents` / `mHandle` 隐藏字段反射，
+     * 此层依然 100% 精准生效。
+     */
+    private fun hookStepListenerClass(listenerClass: Class<*>) {
+        if (!hookedListenerClasses.add(listenerClass)) return
+        runCatching {
+            val method = findMethod(listenerClass, "onSensorChanged", SensorEvent::class.java) ?: return
+            install(method) { chain ->
+                val event = chain.args.firstOrNull() as? SensorEvent ?: return@install chain.proceed()
+                val values = event.values
+                if (values == null || values.isEmpty()) return@install chain.proceed()
+
+                val sensorType = event.sensor?.type ?: 0
+                val isStepCounter = sensorType == Sensor.TYPE_STEP_COUNTER
+                val isStepDetector = sensorType == Sensor.TYPE_STEP_DETECTOR
+                if (!isStepCounter && !isStepDetector) {
+                    return@install chain.proceed()
+                }
+
+                if (isStepCounter) {
+                    val listener = chain.thisObject as? SensorEventListener
+                    if (listener != null) {
+                        val entry = activeStepListeners[System.identityHashCode(listener)]
+                        if (entry != null && entry.templateEvent == null) {
+                            entry.templateEvent = event
+                        }
+                    }
+                    if (syntheticDispatchInProgress.get() != true && processedInDispatchQueue.get() != true) {
+                        if (values[0] > 0f) {
+                            lastRawHardwareStep = values[0]
+                        }
+                    }
+                }
+
+                val cfg = config()
+                if (cfg.stepEnabled && processedInDispatchQueue.get() != true) {
+                    stepEngine.process(values, isStepDetector, cfg, isLiveWechatHook = true)
+                }
+                chain.proceed()
+            }
+            logger("已挂载微信计步监听器 ${listenerClass.name}.onSensorChanged", null)
+        }.onFailure {
+            hookedListenerClasses.remove(listenerClass)
+            logger("挂载微信计步监听器失败: ${listenerClass.name}", it)
+        }
+    }
+
+    /**
+     * 后台平滑计步驱动器：
+     * 当开启「自动递增模式」或存在待释放的倍率步数时，定期在监听器所属 Handler/Looper 上触发平滑增量，
+     * 解决手机静置时硬件 TYPE_STEP_COUNTER (ON_CHANGE) 不触发第二次事件导致微信步数卡死为 0 的问题。
+     */
+    private fun ensureAutoTickerRunning() {
+        if (!autoTickerStarted.compareAndSet(false, true)) return
+        Thread({
+            while (true) {
+                try {
+                    Thread.sleep(AUTO_TICK_INTERVAL_MS)
+                    val cfg = config()
+                    if (!cfg.stepEnabled || !stepEngine.shouldDispatchAutoTick(cfg)) {
+                        continue
+                    }
+                    val iter = activeStepListeners.entries.iterator()
+                    while (iter.hasNext()) {
+                        val (_, entry) = iter.next()
+                        val listener = entry.listenerRef.get()
+                        if (listener == null) {
+                            iter.remove()
+                            continue
+                        }
+                        val event = entry.templateEvent
+                            ?: createFallbackSensorEvent(entry.sensor)?.also { entry.templateEvent = it }
+                            ?: continue
+                        val targetHandler = entry.handler ?: Handler(Looper.getMainLooper())
+                        targetHandler.post {
+                            runCatching {
+                                val currentCfg = config()
+                                if (!currentCfg.stepEnabled || !stepEngine.shouldDispatchAutoTick(currentCfg)) {
+                                    return@runCatching
+                                }
+                                val rawHw = lastRawHardwareStep.takeIf { it > 0f }
+                                    ?: stepEngine.currentHardwareBaseline()
+                                if (event.values != null && event.values.isNotEmpty()) {
+                                    event.values[0] = rawHw
+                                }
+                                event.timestamp = SystemClock.elapsedRealtimeNanos()
+                                event.accuracy = SensorManager.SENSOR_STATUS_ACCURACY_HIGH
+                                syntheticDispatchInProgress.set(true)
+                                try {
+                                    listener.onSensorChanged(event)
+                                } finally {
+                                    syntheticDispatchInProgress.set(false)
+                                }
+                            }
+                        }
+                    }
+                } catch (_: InterruptedException) {
+                    break
+                } catch (_: Throwable) {
+                }
+            }
+        }, "WeiTiao-StepTicker").apply { isDaemon = true }.start()
+    }
+
+    private fun createFallbackSensorEvent(sensor: Sensor): SensorEvent? = runCatching {
+        val ctor = SensorEvent::class.java.getDeclaredConstructor(Int::class.javaPrimitiveType).apply {
+            isAccessible = true
+        }
+        val event = ctor.newInstance(16)
+        findField(SensorEvent::class.java, "sensor")?.set(event, sensor)
+        event.accuracy = SensorManager.SENSOR_STATUS_ACCURACY_HIGH
+        event.timestamp = SystemClock.elapsedRealtimeNanos()
+        if (event.values != null && event.values.isNotEmpty()) {
+            event.values[0] = lastRawHardwareStep.takeIf { it > 0f } ?: 1000f
+        }
+        event
+    }.getOrNull()
+
+    /**
      * Hook SystemSensorManager$SensorEventQueue.dispatchSensorEvent。
-     * 核心设计参考 sporteditor，直接拦截传感器底层事件分发，使用 mSensorsEvents 精准匹配。
+     * 注意：`mSensorsEvents` 定义在父类 `SystemSensorManager$BaseSensorEventQueue` 中，
+     * 必须使用向父类遍历的 `findField(queueClass, "mSensorsEvents")` 获取！
      */
     private fun installSensorEventHook(classLoader: ClassLoader) {
         runCatching {
@@ -128,53 +343,78 @@ internal class WechatHooks(
             }
             check(targets.isNotEmpty()) { "dispatchSensorEvent 不存在" }
 
-            val sensorsEventsField: Field? = runCatching {
-                queueClass.getDeclaredField("mSensorsEvents").apply { isAccessible = true }
-            }.getOrNull()
+            val sensorsEventsField: Field? = findField(queueClass, "mSensorsEvents")
+            val listenerField: Field? = findField(queueClass, "mListener")
 
             targets.forEach { method ->
                 method.isAccessible = true
                 install(method) { chain ->
+                    val handle = chain.getArg(0) as? Int ?: return@install chain.proceed()
+                    val values = chain.getArg(1) as? FloatArray ?: return@install chain.proceed()
+                    if (values.isEmpty()) return@install chain.proceed()
+
+                    // 通过 BaseSensorEventQueue.mSensorsEvents 获取当前 handle 对应的 SensorEvent 与 Sensor
+                    val eventObj: Any? = runCatching {
+                        val events = sensorsEventsField?.get(chain.thisObject) as? SparseArray<*>
+                        events?.get(handle)
+                    }.getOrNull()
+
+                    val sensor: Sensor? = runCatching {
+                        (eventObj as? SensorEvent)?.sensor ?: (readField(eventObj, "sensor") as? Sensor)
+                    }.getOrNull()
+
+                    val sensorType = sensor?.type ?: 0
+                    val isStepCounter = sensorType == Sensor.TYPE_STEP_COUNTER ||
+                        (sensor == null && handle in stepCounterHandles)
+                    val isStepDetector = sensorType == Sensor.TYPE_STEP_DETECTOR ||
+                        (sensor == null && handle in stepDetectorHandles)
+
+                    // 严格过滤非计步传感器（绝不把 sensor == null 的加速度计/陀螺仪当成计步器！）
+                    if (!isStepCounter && !isStepDetector) {
+                        return@install chain.proceed()
+                    }
+
+                    if (isStepCounter) {
+                        if (values[0] > 0f) {
+                            lastRawHardwareStep = values[0]
+                        }
+                        runCatching {
+                            val queueListener = listenerField?.get(chain.thisObject) as? SensorEventListener
+                            if (queueListener != null) {
+                                hookStepListenerClass(queueListener.javaClass)
+                                val entry = activeStepListeners[System.identityHashCode(queueListener)]
+                                if (entry != null && entry.templateEvent == null && eventObj is SensorEvent) {
+                                    entry.templateEvent = eventObj
+                                }
+                            }
+                        }
+                    }
+
                     val cfg = config()
                     if (!cfg.stepEnabled) {
                         return@install chain.proceed()
                     }
 
-                    val handle = chain.getArg(0) as? Int ?: return@install chain.proceed()
-                    val values = chain.getArg(1) as? FloatArray ?: return@install chain.proceed()
-                    if (values.isEmpty()) return@install chain.proceed()
+                    stepEngine.process(values, isStepDetector, cfg, isLiveWechatHook = true)
 
-                    // 反射获取 Sensor（sporteditor 方案：mSensorsEvents.get(handle).sensor）
-                    val sensor: Sensor? = runCatching {
-                        val events = sensorsEventsField?.get(chain.thisObject) as? SparseArray<*>
-                        val event = events?.get(handle)
-                        (event as? SensorEvent)?.sensor ?: (readField(event, "sensor") as? Sensor)
-                    }.getOrNull()
-
-                    val sensorType = sensor?.type ?: 0
-                    val isStepCounter = sensorType == Sensor.TYPE_STEP_COUNTER // 19
-                    val isStepDetector = sensorType == Sensor.TYPE_STEP_DETECTOR // 18
-
-                    // 过滤非计步传感器（如加速度计 1、光线感应器 5 等）
-                    if (sensor != null && !isStepCounter && !isStepDetector) {
-                        return@install chain.proceed()
+                    processedInDispatchQueue.set(true)
+                    try {
+                        chain.proceed()
+                    } finally {
+                        processedInDispatchQueue.set(false)
                     }
-
-                    val isLikelyStep = isStepCounter || isStepDetector ||
-                        handle in stepCounterHandles || (sensor == null && values[0] > 0f)
-
-                    if (!isLikelyStep) {
-                        return@install chain.proceed()
-                    }
-
-                    // 核心计步引擎处理
-                    stepEngine.process(values, isStepDetector, cfg)
-
-                    chain.proceed()
                 }
             }
             logger("微信计步器 Hook 已就绪（${targets.size} 个入口）", null)
         }.onFailure { logger("微信计步器 Hook 安装失败", it) }
+    }
+
+    private fun extractSensorHandle(sensor: Sensor): Int? {
+        readIntField(sensor, "mHandle")?.let { return it }
+        runCatching {
+            findMethod(sensor.javaClass, "getHandle")?.invoke(sensor) as? Int
+        }.getOrNull()?.let { return it }
+        return null
     }
 
     private fun readIntField(target: Any, name: String): Int? =
@@ -183,9 +423,10 @@ internal class WechatHooks(
     /**
      * 极速内存计步引擎：
      * 1. 纯内存原子计算，零磁盘阻塞 I/O，无锁无卡顿。
-     * 2. 支持自动步数（逐步增加）与真实步数倍率放大。
-     * 3. 严格封顶：values[0] 注入值永远保证今日增量 <= stepMaximum，微信计算出的今日步数绝对不超限。
-     * 4. 设备重启、跨天平滑衔接，严格保证 output 永远单调递增，彻底杜绝微信负跳变重启累加。
+     * 2. 首帧锚点保护：进程/当日首个计步事件仅对齐基准（0 突跳），防止被微信首帧吞没或判定为异常跳变。
+     * 3. 支持自动步数（逐步平滑增加）与真实步数倍率放大（含缓冲平滑释放）。
+     * 4. 严格封顶：values[0] 注入值永远保证今日增量 <= stepMaximum，微信计算出的今日步数绝对不超限。
+     * 5. 设备重启、跨天平滑衔接，严格保证 output 永远单调递增，彻底杜绝微信负跳变重启累加。
      */
     internal class WechatStepEngine(
         private val logger: (String, Throwable?) -> Unit,
@@ -195,12 +436,14 @@ internal class WechatHooks(
         @Volatile private var lastHardwareRaw = 0f
         @Volatile private var lastOutput = 0f
         @Volatile private var currentDelivered = 0L
+        @Volatile private var pendingSteps = 0L
+        @Volatile private var baselineEstablished = false
         @Volatile private var lastClampLogTime = 0L
 
         @Synchronized
         fun processStepCounter(raw: Float, cfg: TuningConfig): Float {
             val arr = floatArrayOf(raw)
-            process(arr, isDetector = false, cfg = cfg)
+            process(arr, isDetector = false, cfg = cfg, isLiveWechatHook = false)
             return arr[0]
         }
 
@@ -208,7 +451,28 @@ internal class WechatHooks(
         fun processPassthrough(raw: Float): Float = raw
 
         @Synchronized
-        fun process(values: FloatArray, isDetector: Boolean, cfg: TuningConfig) {
+        fun currentHardwareBaseline(): Float =
+            lastHardwareRaw.takeIf { it > 0f } ?: baseHardwareRaw.takeIf { it > 0f } ?: 1000f
+
+        @Synchronized
+        fun shouldDispatchAutoTick(cfg: TuningConfig): Boolean {
+            if (!cfg.stepEnabled) return false
+            val calendar = Calendar.getInstance()
+            val currentHour = calendar.get(Calendar.HOUR_OF_DAY)
+            val endHour = if (cfg.stepEndHour <= 0) 24 else cfg.stepEndHour.coerceIn(1, 24)
+            if (currentHour >= endHour) return false
+            val maxCap = cfg.stepMaximum.coerceAtLeast(1).toLong()
+            if (currentDelivered >= maxCap) return false
+            return cfg.stepAuto || pendingSteps > 0L || !baselineEstablished
+        }
+
+        @Synchronized
+        fun process(
+            values: FloatArray,
+            isDetector: Boolean,
+            cfg: TuningConfig,
+            isLiveWechatHook: Boolean = false,
+        ) {
             if (!cfg.stepEnabled) return
             val calendar = Calendar.getInstance()
             val currentHour = calendar.get(Calendar.HOUR_OF_DAY)
@@ -220,7 +484,7 @@ internal class WechatHooks(
 
             val raw = values[0]
             val maxCap = cfg.stepMaximum.coerceAtLeast(1).toLong()
-            val multiplier = cfg.stepMultiplier.coerceIn(1, 1000).toLong()
+            val multiplier = cfg.stepMultiplier.coerceIn(1, 10_000).toLong()
 
             // 跨天重置
             if (todayKey != today) {
@@ -228,11 +492,13 @@ internal class WechatHooks(
                 baseHardwareRaw = maxOf(lastOutput, raw)
                 lastHardwareRaw = raw
                 currentDelivered = 0L
+                pendingSteps = 0L
+                baselineEstablished = false
             }
 
             // 设备重启检测（raw < lastHardwareRaw）：对齐硬件基准，维持当前输出不倒退
             if (raw + 100f < lastHardwareRaw) {
-                baseHardwareRaw = lastOutput - currentDelivered
+                baseHardwareRaw = maxOf(0f, lastOutput - currentDelivered)
                 lastHardwareRaw = raw
             }
 
@@ -263,10 +529,32 @@ internal class WechatHooks(
                 }
             } else {
                 // Type 19: STEP_COUNTER
+                // 首帧事件仅建立微信计步基准锚点，不产生瞬间巨幅跳变，确保后续增量被微信 100% 计入今日步数
+                if (!baselineEstablished) {
+                    baselineEstablished = true
+                    if (baseHardwareRaw <= 0f) {
+                        baseHardwareRaw = maxOf(lastOutput, raw)
+                    }
+                    lastHardwareRaw = raw
+                    val totalTodaySteps = currentDelivered.toFloat().coerceAtMost(maxCap.toFloat())
+                    var output = baseHardwareRaw + totalTodaySteps
+                    if (output < lastOutput) {
+                        output = lastOutput
+                    }
+                    lastOutput = output
+                    values[0] = output
+                    return
+                }
+
                 if (cfg.stepAuto) {
-                    // 自动步数模式：每个传感器事件递增增量
+                    // 自动步数模式：每个传感器事件平滑递增增量
                     if (currentDelivered < maxCap) {
-                        val gain = multiplier.coerceAtMost(maxCap - currentDelivered)
+                        val stepPerEvent = if (isLiveWechatHook) {
+                            maxOf(multiplier, multiplier * 30L).coerceIn(300L, MAX_LIVE_EVENT_STEP_GAIN)
+                        } else {
+                            multiplier
+                        }
+                        val gain = stepPerEvent.coerceAtMost(maxCap - currentDelivered)
                         currentDelivered += gain
                     } else {
                         logCapReached(maxCap)
@@ -274,7 +562,22 @@ internal class WechatHooks(
                 } else {
                     // 真实步数倍率模式：当硬件产生有效步数时按 multiplier 倍率放大（含 1x 基础步数）
                     val deltaRaw = (raw - lastHardwareRaw).coerceIn(0f, 10_000f)
-                    if (deltaRaw > 0f) {
+                    if (isLiveWechatHook) {
+                        if (deltaRaw > 0f && deltaRaw < 500f) {
+                            val realGain = (deltaRaw * multiplier).toLong().coerceAtLeast(0L)
+                            pendingSteps = (pendingSteps + realGain).coerceAtMost((maxCap - currentDelivered).coerceAtLeast(0L))
+                        }
+                        if (pendingSteps > 0L && currentDelivered < maxCap) {
+                            val chunk = pendingSteps
+                                .coerceAtMost(MAX_LIVE_EVENT_STEP_GAIN)
+                                .coerceAtMost(maxCap - currentDelivered)
+                            currentDelivered += chunk
+                            pendingSteps = (pendingSteps - chunk).coerceAtLeast(0L)
+                        } else if (currentDelivered >= maxCap) {
+                            pendingSteps = 0L
+                            logCapReached(maxCap)
+                        }
+                    } else if (deltaRaw > 0f) {
                         val realGain = (deltaRaw * multiplier).toLong().coerceAtLeast(0L)
                         if (currentDelivered < maxCap) {
                             val gain = realGain.coerceAtMost(maxCap - currentDelivered)
@@ -669,6 +972,9 @@ internal class WechatHooks(
     }
 
     private companion object {
+        const val AUTO_TICK_INTERVAL_MS = 1200L
+        const val MAX_LIVE_EVENT_STEP_GAIN = 2_000L
+
         val RECALL_MEDIA_TABLES = setOf("ImgInfo2", "videoinfo2", "voiceinfo", "voiceinfo2")
         const val FIELD_MSG_ID = "field_msgId"
         const val FIELD_CREATE_TIME = "field_createTime"

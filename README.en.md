@@ -1,6 +1,6 @@
 # WeiTiao
 
-[中文说明](README.md) · **[Direct Download APK (WeiTiao-v1.5.2.apk · 1.6 MB)](https://github.com/WEIHEWU/WeiTiao/raw/main/releases/WeiTiao-v1.5.2.apk)** · [Releases](https://github.com/WEIHEWU/WeiTiao/releases)
+[中文说明](README.md) · **[Direct Download APK (WeiTiao-v1.5.3.apk · 1.6 MB)](https://github.com/WEIHEWU/WeiTiao/raw/main/releases/WeiTiao-v1.5.3.apk)** · [Releases](https://github.com/WEIHEWU/WeiTiao/releases)
 
 An LSPosed (`libxposed API 102`) & Root enhancement module for Samsung One UI built with **`miuix` (`0.8.8`)**, combining **Native COW System Property Spoofing Engine**, **App Store Region Unlock (CSC/SIM spoofing)**, **Per-App Hardware Model Spoofing (3-Year Pure Flagships)**, **One-Tap Samsung One UI `CscFeature` Presets**, **WeChat Steps & Cached Anti-Recall**, **Screen-On Fast Charging with Live Telemetry**, and **USB PD Bypass Power**.
 

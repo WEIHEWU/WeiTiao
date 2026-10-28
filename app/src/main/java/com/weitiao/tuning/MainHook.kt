@@ -47,7 +47,12 @@ class MainHook : XposedModule() {
             return
         }
 
-        // 微信功能挂载
+        val resolved = ConfigHolder.currentResolved(prefs)
+        val config = resolved.config
+        val isStoreApp = param.packageName in STORE_PACKAGES
+
+        // 微信功能挂载：默认仅挂载微信步数与防撤回 Hook，绝不向微信注入 CSC / NativePropCow / Build 伪装
+        // （除非用户显式将微信加入了分应用机型伪装目标）
         if (param.packageName == WECHAT_PACKAGE) {
             WechatHooks(
                 install = { executable, interceptor ->
@@ -62,11 +67,10 @@ class MainHook : XposedModule() {
                     )
                 },
             ).register(param.classLoader, param.packageName)
+            if (!isDeviceTarget(config, param.packageName)) {
+                return
+            }
         }
-
-        val resolved = ConfigHolder.currentResolved(prefs)
-        val config = resolved.config
-        val isStoreApp = param.packageName in STORE_PACKAGES
 
         // 优先应用 Build 类静态常量与 Native COW 内存属性伪装（在挂载 SystemProperties Hook 前预热并改写底层 Bionic prop_area）
         syncDeviceSpoofState(resolved, param.packageName)
