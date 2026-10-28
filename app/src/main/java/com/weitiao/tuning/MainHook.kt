@@ -64,14 +64,9 @@ class MainHook : XposedModule() {
             ).register(param.classLoader, param.packageName)
         }
 
-        val config = ConfigHolder.current(prefs)
+        val resolved = ConfigHolder.currentResolved(prefs)
+        val config = resolved.config
         val isStoreApp = param.packageName in STORE_PACKAGES
-        val isDeviceSpoofTarget = isDeviceTarget(config, param.packageName)
-
-        // 若既非应用商店/三星账号判区组件，也未被开启机型伪装，则直接跳过，不在无关进程挂载属性拦截
-        if (!isStoreApp && !isDeviceSpoofTarget && param.packageName == WECHAT_PACKAGE) {
-            return
-        }
 
         // 挂载基础系统属性与CSC特性拦截器
         hookSystemProperties(param.classLoader, param.packageName)
@@ -86,18 +81,10 @@ class MainHook : XposedModule() {
         hookSemCscFeature(param.classLoader)
         hookSemFloatingFeature(param.classLoader, param.packageName)
         hookSettingsProvider(param.classLoader, param.packageName)
+        hookActivityLifecycleForHotSpoof(param.classLoader, param.packageName)
 
-        // 尝试应用 Build 类静态常量与 Native COW 内存属性伪装（与商店跨区开关独立，支持分应用独立机型）
-        if (isDeviceSpoofTarget) {
-            applyBuildFields(config, param.packageName)
-            runCatching {
-                val fastProps = ConfigHolder.currentResolved(prefs).devicePropsFor(param.packageName)
-                val patchedCount = NativePropCow.applyCowSpoof(fastProps)
-                log(Log.INFO, TAG, "WeiTiao: ${param.packageName} 已应用 Native COW 内存补丁，改写 $patchedCount 处底层系统属性")
-            }.onFailure { err ->
-                log(Log.ERROR, TAG, "WeiTiao: NativePropCow error in ${param.packageName}: $err\n${Log.getStackTraceString(err)}")
-            }
-        }
+        // 尝试应用 Build 类静态常量与 Native COW 内存属性伪装（与商店跨区开关独立，支持分应用独立机型及热切换）
+        syncDeviceSpoofState(resolved, param.packageName)
 
         log(
             Log.INFO, TAG,
@@ -108,6 +95,12 @@ class MainHook : XposedModule() {
     }
 
     private val prefs: SharedPreferences by lazy { getRemotePreferences(CscConstants.PREFS_NAME) }
+
+    @Volatile
+    private var lastAppliedProfileKey: String = ""
+
+    @Volatile
+    private var lastAppliedModelString: String = ""
 
     // ---- TelephonyManager（SIM 欺骗，影响按 SIM 判区的应用） ----
 
@@ -277,14 +270,32 @@ class MainHook : XposedModule() {
         }
     }
 
-    // ---- android.os.Build 静态字段（多数第三方 App 的实际读取入口） ----
+    // ---- android.os.Build 静态字段、HTTP User-Agent 与 Native COW 热同步 ----
 
-    private fun applyBuildFields(config: CscConfig, packageName: String) {
+    private fun syncDeviceSpoofState(resolved: ResolvedConfig, packageName: String) {
+        val config = resolved.config
         if (!isDeviceTarget(config, packageName)) return
-        val profile = CscSpoof.deviceProfileFor(config, packageName) ?: return
-        val osRelease = Build.VERSION.RELEASE.ifBlank { "17" }
+        val profile = resolved.deviceProfileFor(packageName) ?: return
+        val profileKey = "${profile.name}|${profile.model}|${profile.device}|${profile.brand}"
+        if (profileKey == lastAppliedProfileKey) return
+
+        val prevModel = lastAppliedModelString
+        lastAppliedProfileKey = profileKey
+        lastAppliedModelString = profile.model
+
+        applyBuildFields(profile, prevModel, packageName)
+        runCatching {
+            val fastProps = resolved.devicePropsFor(packageName)
+            val patchedCount = NativePropCow.applyCowSpoof(fastProps)
+            log(Log.INFO, TAG, "WeiTiao: $packageName 已应用 Native COW 内存补丁，改写 $patchedCount 处底层系统属性")
+        }.onFailure { err ->
+            log(Log.ERROR, TAG, "WeiTiao: NativePropCow error in $packageName: $err\n${Log.getStackTraceString(err)}")
+        }
+    }
+
+    private fun applyBuildFields(profile: DeviceProfile, previousSpoofModel: String, packageName: String) {
         val buildId = Build.ID.ifBlank { "UP1A.231005.007" }
-        val fingerprint = "${profile.brand}/${profile.productName}/${profile.device}:$osRelease/$buildId/${profile.model}:user/release-keys"
+        val fingerprint = CscSpoof.buildFingerprintForProfile(profile)
         val values = mapOf(
             "MODEL" to profile.model,
             "DEVICE" to profile.device,
@@ -296,7 +307,8 @@ class MainHook : XposedModule() {
             "FINGERPRINT" to fingerprint,
             "ID" to buildId,
             "DISPLAY" to "${profile.model}_$buildId",
-            "SOC_MODEL" to profile.device,
+            "SOC_MODEL" to profile.socModel,
+            "SOC_MANUFACTURER" to profile.socManufacturer,
             "TAGS" to "release-keys",
             "TYPE" to "user",
         )
@@ -304,7 +316,45 @@ class MainHook : XposedModule() {
         values.forEach { (name, value) ->
             if (setStaticFinalString(Build::class.java, name, value)) applied++
         }
-        log(Log.INFO, TAG, "WeiTiao: $packageName 已应用机型 ${profile.name} (${profile.model})，字段=$applied/${values.size}")
+
+        // 同步修正 JVM http.agent 系统属性，防止 OkHttp / HttpURLConnection 在请求头泄漏原生 SM-* 型号
+        runCatching {
+            val currentAgent = System.getProperty("http.agent")
+            if (!currentAgent.isNullOrBlank()) {
+                val updatedAgent = rewriteUserAgentModel(currentAgent, profile.model, previousSpoofModel)
+                if (updatedAgent != currentAgent) {
+                    System.setProperty("http.agent", updatedAgent)
+                }
+            }
+        }
+
+        log(Log.INFO, TAG, "WeiTiao: $packageName 已应用机型 ${profile.name} (${profile.model}, SoC=${profile.socModel})，字段=$applied/${values.size}")
+    }
+
+    private fun rewriteUserAgentModel(rawUa: String, targetModel: String, previousSpoofModel: String = lastAppliedModelString): String {
+        if (targetModel.isBlank()) return rawUa
+        var updated = rawUa
+        if (NATIVE_MODEL.isNotBlank() && updated.contains(NATIVE_MODEL)) {
+            updated = updated.replace(NATIVE_MODEL, targetModel)
+        }
+        if (previousSpoofModel.isNotBlank() && updated.contains(previousSpoofModel)) {
+            updated = updated.replace(previousSpoofModel, targetModel)
+        }
+        return updated
+    }
+
+    private fun hookActivityLifecycleForHotSpoof(cl: ClassLoader, packageName: String) {
+        runCatching {
+            val instClass = Class.forName("android.app.Instrumentation", false, cl)
+            val activityClass = Class.forName("android.app.Activity", false, cl)
+            safeHook(instClass, "callActivityOnResume", activityClass) { chain ->
+                runCatching {
+                    val resolved = ConfigHolder.currentResolved(prefs)
+                    syncDeviceSpoofState(resolved, packageName)
+                }
+                chain.proceed()
+            }
+        }
     }
 
     private fun isDeviceTarget(config: CscConfig, packageName: String): Boolean =
@@ -413,14 +463,15 @@ class MainHook : XposedModule() {
         return value.toIntOrNull() ?: chain.proceed()
     }
 
-    // ---- Settings Provider（系统设置与蓝牙/设备名称读取） ----
+    // ---- Settings Provider / Bluetooth / WebSettings（系统设置、蓝牙设备名与 WebView UA 伪装） ----
 
     private fun hookSettingsProvider(cl: ClassLoader, packageName: String) {
+        val deviceNameKeys = setOf("device_name", "device_provisioned_name", "bluetooth_name")
         runCatching {
             val globalClass = Class.forName("android.provider.Settings\$Global", false, cl)
             safeHook(globalClass, "getString", android.content.ContentResolver::class.java, String::class.java) { chain ->
                 val name = chain.getArg(1) as? String
-                if (name == "device_name" || name == "device_provisioned_name") {
+                if (name in deviceNameKeys) {
                     val resolved = ConfigHolder.currentResolved(prefs)
                     if (isDeviceTarget(resolved.config, packageName)) {
                         resolved.deviceProfileFor(packageName)?.name?.let { return@safeHook it }
@@ -431,7 +482,18 @@ class MainHook : XposedModule() {
             val systemClass = Class.forName("android.provider.Settings\$System", false, cl)
             safeHook(systemClass, "getString", android.content.ContentResolver::class.java, String::class.java) { chain ->
                 val name = chain.getArg(1) as? String
-                if (name == "device_name") {
+                if (name in deviceNameKeys) {
+                    val resolved = ConfigHolder.currentResolved(prefs)
+                    if (isDeviceTarget(resolved.config, packageName)) {
+                        resolved.deviceProfileFor(packageName)?.name?.let { return@safeHook it }
+                    }
+                }
+                chain.proceed()
+            }
+            val secureClass = Class.forName("android.provider.Settings\$Secure", false, cl)
+            safeHook(secureClass, "getString", android.content.ContentResolver::class.java, String::class.java) { chain ->
+                val name = chain.getArg(1) as? String
+                if (name in deviceNameKeys) {
                     val resolved = ConfigHolder.currentResolved(prefs)
                     if (isDeviceTarget(resolved.config, packageName)) {
                         resolved.deviceProfileFor(packageName)?.name?.let { return@safeHook it }
@@ -441,6 +503,45 @@ class MainHook : XposedModule() {
             }
         }.onFailure {
             // 忽略非标准环境
+        }
+
+        // BluetoothAdapter.getName() 拦截，防止社交/电商应用通过蓝牙名称识破真实三星型号
+        runCatching {
+            val btClass = Class.forName("android.bluetooth.BluetoothAdapter", false, cl)
+            safeHook(btClass, "getName") { chain ->
+                val resolved = ConfigHolder.currentResolved(prefs)
+                if (isDeviceTarget(resolved.config, packageName)) {
+                    resolved.deviceProfileFor(packageName)?.name?.let { return@safeHook it }
+                }
+                chain.proceed()
+            }
+        }
+
+        // WebSettings.getDefaultUserAgent(Context) 与 getUserAgentString() 拦截，防止 H5 / 小程序 User-Agent 泄漏原生型号
+        runCatching {
+            val wsClass = Class.forName("android.webkit.WebSettings", false, cl)
+            safeHook(wsClass, "getDefaultUserAgent", android.content.Context::class.java) { chain ->
+                val rawUa = chain.proceed() as? String ?: return@safeHook null
+                val resolved = ConfigHolder.currentResolved(prefs)
+                if (isDeviceTarget(resolved.config, packageName)) {
+                    val targetModel = resolved.deviceProfileFor(packageName)?.model
+                    if (!targetModel.isNullOrBlank()) {
+                        return@safeHook rewriteUserAgentModel(rawUa, targetModel)
+                    }
+                }
+                rawUa
+            }
+            safeHook(wsClass, "getUserAgentString") { chain ->
+                val rawUa = chain.proceed() as? String ?: return@safeHook null
+                val resolved = ConfigHolder.currentResolved(prefs)
+                if (isDeviceTarget(resolved.config, packageName)) {
+                    val targetModel = resolved.deviceProfileFor(packageName)?.model
+                    if (!targetModel.isNullOrBlank()) {
+                        return@safeHook rewriteUserAgentModel(rawUa, targetModel)
+                    }
+                }
+                rawUa
+            }
         }
     }
 
@@ -522,54 +623,11 @@ class MainHook : XposedModule() {
         }
 
         private fun buildDeviceResolved(profile: DeviceProfile): DeviceResolved {
-            val devMap = HashMap<String, String>(32)
-            val floatMap = HashMap<String, String>(8)
-            val fingerprint = "${profile.brand}/${profile.productName}/${profile.device}:14/UP1A.231005.007/${profile.model}:user/release-keys"
-            val isFold = profile.name.contains("Fold", ignoreCase = true) || profile.device.startsWith("q") || profile.model.contains("F9")
-            val isFlip = profile.name.contains("Flip", ignoreCase = true) || profile.device.startsWith("b") || profile.model.contains("F7")
-            val isTablet = profile.name.contains("Tab", ignoreCase = true) || profile.device.startsWith("gts") || profile.model.contains("X")
-            val characteristics = when {
-                isFold -> "fold,nosdcard"
-                isFlip -> "flip,nosdcard"
-                isTablet -> "tablet,nosdcard"
-                else -> "nosdcard"
-            }
-
-            val modelKeys = listOf("ro.product.model", "ro.product.vendor.model", "ro.product.odm.model", "ro.product.product.model", "ro.product.system.model", "ro.product.system_ext.model")
-            for (k in modelKeys) devMap[k] = profile.model
-
-            val devKeys = listOf("ro.product.device", "ro.build.product", "ro.product.odm.device", "ro.product.vendor.device", "ro.product.product.device", "ro.product.system.device", "ro.product.system_ext.device", "ro.product.board", "ro.hardware", "ro.board.platform")
-            for (k in devKeys) devMap[k] = profile.device
-
-            val nameKeys = listOf("ro.product.name", "ro.product.odm.name", "ro.product.vendor.name", "ro.product.product.name", "ro.product.system.name", "ro.product.system_ext.name")
-            for (k in nameKeys) devMap[k] = profile.productName
-
-            devMap["ro.product.marketname"] = profile.name
-            devMap["ro.vendor.oplus.market.name"] = profile.name
-            devMap["ro.product.display"] = profile.name
-
-            val brandKeys = listOf("ro.product.brand", "ro.product.odm.brand", "ro.product.vendor.brand", "ro.product.product.brand", "ro.product.system.brand", "ro.product.system_ext.brand")
-            for (k in brandKeys) devMap[k] = profile.brand
-
-            val mfrKeys = listOf("ro.product.manufacturer", "ro.product.odm.manufacturer", "ro.product.vendor.manufacturer", "ro.product.product.manufacturer", "ro.product.system.manufacturer", "ro.product.system_ext.manufacturer")
-            for (k in mfrKeys) devMap[k] = profile.manufacturer
-
-            devMap["ro.build.flavor"] = "${profile.productName}-user"
-
-            val fpKeys = listOf("ro.build.fingerprint", "ro.bootimage.build.fingerprint", "ro.vendor.build.fingerprint", "ro.odm.build.fingerprint", "ro.system.build.fingerprint", "ro.system_ext.build.fingerprint")
-            for (k in fpKeys) devMap[k] = fingerprint
-
-            devMap["ro.soc.model"] = profile.device
-            devMap["ro.vendor.qti.soc_name"] = profile.device
-            devMap["ro.build.characteristics"] = characteristics
-
-            if (isFold) floatMap["SEC_FLOATING_FEATURE_FRAMEWORK_SUPPORT_FOLDABLE_TYPE_FOLD"] = "TRUE"
-            if (isFlip) floatMap["SEC_FLOATING_FEATURE_FRAMEWORK_SUPPORT_FOLDABLE_TYPE_FLIP"] = "TRUE"
-            if (isFold || isFlip) floatMap["SEC_FLOATING_FEATURE_FRAMEWORK_CONFIG_FOLD_MODEL"] = "TRUE"
-            floatMap["SEC_FLOATING_FEATURE_SETTINGS_CONFIG_BRAND_NAME"] = profile.name
-            floatMap["SEC_FLOATING_FEATURE_COMMON_CONFIG_BRAND_NAME"] = profile.name
-
-            return DeviceResolved(profile = profile, devMap = devMap, floatMap = floatMap)
+            return DeviceResolved(
+                profile = profile,
+                devMap = CscSpoof.buildDevicePropsForProfile(profile),
+                floatMap = CscSpoof.buildFloatingFeaturesForProfile(profile),
+            )
         }
 
         private fun buildResolved(config: CscConfig): ResolvedConfig {
@@ -678,6 +736,7 @@ class MainHook : XposedModule() {
     private companion object {
         const val TAG = "CscChanger"
         const val WECHAT_PACKAGE = "com.tencent.mm"
+        val NATIVE_MODEL: String = runCatching { Build.MODEL ?: "" }.getOrDefault("")
         val STORE_PACKAGES = setOf(
             "com.sec.android.app.samsungapps",
             "com.samsung.android.themestore",

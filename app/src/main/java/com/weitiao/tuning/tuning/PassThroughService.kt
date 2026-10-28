@@ -42,35 +42,49 @@ class PassThroughService : Service() {
 
     @Volatile private var isCharging = false
     @Volatile private var isScreenOn = true
+    @Volatile private var lastNotifiedStatus: String? = null
+    @Volatile private var lastNotifiedVisible: Boolean? = null
 
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
                 Intent.ACTION_BATTERY_CHANGED -> {
-                    batteryLevel = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, 0)
+                    val newLevel = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, 0)
                     val plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) > 0
+                    val levelChanged = newLevel != batteryLevel
+                    batteryLevel = newLevel
                     if (plugged != isCharging) {
                         isCharging = plugged
+                        if (plugged && isScreenOn) {
+                            startActivePolling()
+                        } else {
+                            stopActivePollingAndEvaluate()
+                        }
+                    } else if (levelChanged && isCharging && isScreenOn) {
                         requestEvaluation()
                     }
                 }
                 Intent.ACTION_POWER_CONNECTED -> {
                     isCharging = true
-                    handler.removeCallbacks(pollRunnable)
-                    handler.post(pollRunnable)
+                    if (isScreenOn) {
+                        startActivePolling()
+                    } else {
+                        requestEvaluation()
+                    }
                 }
                 Intent.ACTION_POWER_DISCONNECTED -> {
                     isCharging = false
-                    requestEvaluation()
+                    stopActivePollingAndEvaluate()
                 }
                 Intent.ACTION_SCREEN_ON -> {
                     isScreenOn = true
-                    handler.removeCallbacks(pollRunnable)
-                    handler.post(pollRunnable)
+                    if (isCharging) {
+                        startActivePolling()
+                    }
                 }
                 Intent.ACTION_SCREEN_OFF -> {
                     isScreenOn = false
-                    requestEvaluation()
+                    stopActivePollingAndEvaluate()
                 }
             }
         }
@@ -78,15 +92,32 @@ class PassThroughService : Service() {
 
     private val pollRunnable = object : Runnable {
         override fun run() {
+            handler.removeCallbacks(this)
             if (!isFeatureEnabled()) {
                 disableAndStop()
                 return
             }
             requestEvaluation()
-            // 待命状态（未插电或息屏）拉长轮询至 15s，插电且亮屏时保持 3.5s 极速响应
-            val nextDelay = if (isCharging && isScreenOn) POLL_INTERVAL_MS else POLL_IDLE_MS
-            handler.postDelayed(this, nextDelay)
+            // 仅在「插电且亮屏」时维持 3.5s 前台窗口探测；未插电或息屏时完全停止轮询，由广播驱动唤醒
+            if (isCharging && isScreenOn) {
+                pollRunning = true
+                handler.postDelayed(this, POLL_INTERVAL_MS)
+            } else {
+                pollRunning = false
+            }
         }
+    }
+
+    private fun startActivePolling() {
+        pollRunning = true
+        handler.removeCallbacks(pollRunnable)
+        handler.post(pollRunnable)
+    }
+
+    private fun stopActivePollingAndEvaluate() {
+        pollRunning = false
+        handler.removeCallbacks(pollRunnable)
+        requestEvaluation()
     }
 
     override fun onCreate() {
@@ -129,11 +160,10 @@ class PassThroughService : Service() {
             disableAndStop()
             return START_NOT_STICKY
         }
-        if (!pollRunning) {
-            pollRunning = true
-            handler.post(pollRunnable)
+        if (isCharging && isScreenOn) {
+            startActivePolling()
         } else {
-            requestEvaluation()
+            stopActivePollingAndEvaluate()
         }
         return START_STICKY
     }
@@ -315,19 +345,19 @@ class PassThroughService : Service() {
      *                即用户看不到任何东西，但前台服务依旧存活。
      */
     private fun updateNotification(status: String, visible: Boolean) {
+        if (status == lastNotifiedStatus && visible == lastNotifiedVisible) {
+            return
+        }
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
             != PackageManager.PERMISSION_GRANTED
         ) {
             return
         }
+        lastNotifiedStatus = status
+        lastNotifiedVisible = visible
         val notification = buildNotification(status, visible)
-        if (visible) {
-            getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, notification)
-        } else {
-            // 用静默通道重新投递同一 ID，把上一次的可见通知顶掉
-            getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, notification)
-        }
+        getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, notification)
     }
 
     override fun onDestroy() {

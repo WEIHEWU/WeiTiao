@@ -259,4 +259,75 @@ class DeviceModelsTest {
         assertEquals(1, com.weitiao.tuning.data.CscCatalog.search(list, "45400").size)
         assertEquals(0, com.weitiao.tuning.data.CscCatalog.search(list, "nonexistent").size)
     }
+
+    @Test
+    fun iphoneDuoAndAllFoldablesResolveFullPropsAndInlineSafeFingerprints() {
+        val iphoneDuo = requireNotNull(DeviceModels.findByName("iPhone Duo"))
+        assertTrue("iPhone Duo must be recognized as foldable", iphoneDuo.isFold)
+        assertEquals("fold,nosdcard", iphoneDuo.characteristics)
+        assertEquals("Apple", iphoneDuo.socManufacturer)
+
+        val duoProps = CscSpoof.buildDevicePropsForProfile(iphoneDuo)
+        assertEquals("iPhone Duo", duoProps["ro.product.model"])
+        assertEquals("iPhone Duo", duoProps["ro.product.bootimage.model"])
+        assertEquals("A3600", duoProps["ro.product.device"])
+        assertEquals("A3600", duoProps["ro.product.bootimage.device"])
+        assertEquals("Apple A20 Pro", duoProps["ro.soc.model"])
+        assertEquals("Apple A20 Pro", duoProps["ro.vendor.qti.soc_model"])
+        assertEquals("iPhone Duo", duoProps["ro.product.marketname"])
+        assertEquals("iPhone Duo", duoProps["ro.product.bootimage.marketname"])
+        assertEquals("iPhone Duo", duoProps["ro.config.marketing_name"])
+        assertEquals("iPhone Duo", duoProps["ro.vivo.market.name"])
+        assertEquals("iPhone Duo", duoProps["ro.vendor.oplus.market.name"])
+        assertEquals("iPhone Duo", duoProps["bluetooth.device.default_name"])
+        assertEquals("fold,nosdcard", duoProps["ro.build.characteristics"])
+        assertTrue(duoProps["ro.build.display.id"]!!.startsWith("iPhone Duo_"))
+
+        val duoFloating = CscSpoof.buildFloatingFeaturesForProfile(iphoneDuo)
+        assertEquals("TRUE", duoFloating["SEC_FLOATING_FEATURE_FRAMEWORK_SUPPORT_FOLDABLE_TYPE_FOLD"])
+        assertEquals("FALSE", duoFloating["SEC_FLOATING_FEATURE_FRAMEWORK_SUPPORT_FOLDABLE_TYPE_FLIP"])
+
+        // Ensure every single profile in DeviceModels.ALL has an inline-safe fingerprint (<= 91 UTF-8 bytes)
+        // so NativePropCow never triggers a Bionic kLongFlag crash or truncation.
+        DeviceModels.ALL.forEach { profile ->
+            val fp = CscSpoof.buildFingerprintForProfile(profile)
+            val byteLen = fp.toByteArray(Charsets.UTF_8).size
+            assertTrue(
+                "Fingerprint for ${profile.name} ($fp) is $byteLen bytes, must be <= 91 bytes",
+                byteLen <= 91,
+            )
+            val props = CscSpoof.buildDevicePropsForProfile(profile)
+            props.forEach { (k, v) ->
+                val vBytes = v.toByteArray(Charsets.UTF_8).size
+                assertTrue(
+                    "Prop $k for ${profile.name} ($v) is $vBytes bytes, must be <= 91 bytes",
+                    vBytes <= 91,
+                )
+            }
+        }
+    }
+
+    @Test
+    fun barPhonesAreNotMisclassifiedAsFlipOrFold() {
+        val pixel10Pro = requireNotNull(DeviceModels.findByName("Pixel 10 Pro"))
+        assertEquals("nosdcard", pixel10Pro.characteristics)
+
+        val redMagic = requireNotNull(DeviceModels.findByName("RedMagic 11 Pro+"))
+        assertEquals("nosdcard", redMagic.characteristics)
+
+        val realme = requireNotNull(DeviceModels.findByName("realme GT 8 Pro"))
+        assertEquals("nosdcard", realme.characteristics)
+
+        val xperia = requireNotNull(DeviceModels.findByName("Sony Xperia 1 VII"))
+        assertEquals("nosdcard", xperia.characteristics)
+
+        val pocket2 = requireNotNull(DeviceModels.findByName("HUAWEI Pocket 2"))
+        assertEquals("flip,nosdcard", pocket2.characteristics)
+
+        val mateXT = requireNotNull(DeviceModels.findByName("HUAWEI Mate XT 非凡大师"))
+        assertEquals("fold,nosdcard", mateXT.characteristics)
+
+        val tabS11U = requireNotNull(DeviceModels.findByName("Galaxy Tab S11 Ultra"))
+        assertEquals("tablet,nosdcard", tabS11U.characteristics)
+    }
 }

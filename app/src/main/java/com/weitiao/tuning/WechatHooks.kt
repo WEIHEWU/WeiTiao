@@ -238,11 +238,11 @@ internal class WechatHooks(
 
             // 截止时间判定：到达或超过截止小时，冻结增加步数
             if (currentHour >= endHour) {
+                lastHardwareRaw = raw
                 if (isDetector) {
                     values[0] = 0f
                 } else {
-                    val deltaHw = (raw - lastHardwareRaw).coerceAtLeast(0f)
-                    val total = (deltaHw + currentDelivered).coerceAtMost(maxCap.toFloat())
+                    val total = currentDelivered.toFloat().coerceAtMost(maxCap.toFloat())
                     var output = baseHardwareRaw + total
                     if (output < lastOutput) output = lastOutput
                     lastOutput = output
@@ -272,12 +272,12 @@ internal class WechatHooks(
                         logCapReached(maxCap)
                     }
                 } else {
-                    // 真实步数倍率模式：当硬件产生有效步数时放大
-                    val deltaRaw = (raw - lastHardwareRaw).coerceAtLeast(0f)
-                    if (deltaRaw > 0f && deltaRaw < 500f) {
-                        val realBoost = (deltaRaw * (multiplier - 1)).toLong().coerceAtLeast(0L)
+                    // 真实步数倍率模式：当硬件产生有效步数时按 multiplier 倍率放大（含 1x 基础步数）
+                    val deltaRaw = (raw - lastHardwareRaw).coerceIn(0f, 10_000f)
+                    if (deltaRaw > 0f) {
+                        val realGain = (deltaRaw * multiplier).toLong().coerceAtLeast(0L)
                         if (currentDelivered < maxCap) {
-                            val gain = realBoost.coerceAtMost(maxCap - currentDelivered)
+                            val gain = realGain.coerceAtMost(maxCap - currentDelivered)
                             currentDelivered += gain
                         } else {
                             logCapReached(maxCap)
@@ -287,8 +287,7 @@ internal class WechatHooks(
                 lastHardwareRaw = raw
 
                 // 核心输出：保证单调递增，且当日增量严格 <= maxCap
-                val deltaHardware = (raw - lastHardwareRaw).coerceAtLeast(0f)
-                val totalTodaySteps = (deltaHardware + currentDelivered).coerceAtMost(maxCap.toFloat())
+                val totalTodaySteps = currentDelivered.toFloat().coerceAtMost(maxCap.toFloat())
                 var output = baseHardwareRaw + totalTodaySteps
                 if (output < lastOutput) {
                     output = lastOutput

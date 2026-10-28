@@ -82,8 +82,8 @@ fun DeviceTargetPicker(
             .sortedBy { it.label.lowercase() }
     }
 
-    var selected by remember { mutableStateOf(initialSelection.toSet()) }
-    var perAppModels by remember { mutableStateOf(initialPerAppModels.toMap()) }
+    var selected by remember(initialSelection, show) { mutableStateOf(initialSelection.toSet()) }
+    var perAppModels by remember(initialPerAppModels, show) { mutableStateOf(initialPerAppModels.toMap()) }
     var pickingModelForPkg by remember { mutableStateOf<String?>(null) }
 
     val filteredApps = remember(query, allApps, selected, perAppModels) {

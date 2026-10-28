@@ -94,13 +94,18 @@ class BrightScreenFastChargeService : Service() {
 
             if (isWiredCharging) {
                 wasChargingLastTick = true
-                readMetricsAsync()
                 evaluatePolicy()
-                updateLiveNotification()
-                handler.postDelayed(this, TICKER_ACTIVE_MS)
+                if (isScreenOn) {
+                    readMetricsAsync()
+                    updateLiveNotification()
+                    handler.postDelayed(this, TICKER_ACTIVE_MS)
+                } else {
+                    // 息屏充电时已交还官方温控，暂停 5s RootShell 采样与通知刷新，亮屏广播会立即恢复
+                    refreshServiceNotification()
+                }
             } else {
                 enterStandby()
-                handler.postDelayed(this, TICKER_IDLE_MS)
+                // 未插电待命态完全由动态广播唤醒，不再周期性轮询，彻底消除待机耗电
             }
         }
     }
@@ -108,6 +113,13 @@ class BrightScreenFastChargeService : Service() {
     private val chargingReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
+                Intent.ACTION_BATTERY_CHANGED -> {
+                    val plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) > 0
+                    if (plugged != isWiredCharging) {
+                        handler.removeCallbacks(tickerRunnable)
+                        handler.post(tickerRunnable)
+                    }
+                }
                 // 插电/亮屏/拔电事件响应
                 Intent.ACTION_POWER_CONNECTED,
                 Intent.ACTION_SCREEN_ON -> {
@@ -143,6 +155,7 @@ class BrightScreenFastChargeService : Service() {
         isScreenOn = powerManager?.isInteractive ?: true
 
         val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_BATTERY_CHANGED)
             addAction(Intent.ACTION_POWER_CONNECTED)
             addAction(Intent.ACTION_POWER_DISCONNECTED)
             addAction(Intent.ACTION_SCREEN_ON)

@@ -24,33 +24,31 @@ jobs:
 
       - name: Verify APK & Generate SHA-256 Checksum
         run: |
-          test -f releases/WeiTiao-v1.5.0.apk
+          test -f releases/WeiTiao-v1.5.1.apk
           cd releases
-          sha256sum WeiTiao-v1.5.0.apk > WeiTiao-v1.5.0.apk.sha256
-          cat WeiTiao-v1.5.0.apk.sha256
+          sha256sum WeiTiao-v1.5.1.apk > WeiTiao-v1.5.1.apk.sha256
+          cat WeiTiao-v1.5.1.apk.sha256
 
       - name: Create GitHub Release and Upload APK + Checksum
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.5.0
-          name: "微调 WeiTiao v1.5.0 (Native COW 属性引擎 · 分应用独立机型 · 实时快充功率与自检探针)"
+          tag_name: v1.5.1
+          name: "微调 WeiTiao v1.5.1 (Bionic 基数树动态注入引擎 · iPhone Duo 全品牌 100% 穿透 · 零耗电精修)"
           body: |
-            ### 微调 (WeiTiao) v1.5.0
+            ### 微调 (WeiTiao) v1.5.1
 
-            - **突破性底层 Native COW 内存属性改写引擎 (NativePropCow)**：
-              - 攻破 iPhone/Apple 及跨品牌机型在加固防篡改应用（腾讯乐固/加固、酷安、QQ 等）中失效的难题；
-              - 精准读取 `/proc/self/maps`，通过 `mmap(MAP_PRIVATE | MAP_FIXED)` 将 `/dev/__properties__/*` 共享内存映射重置为私有写时复制（COW）物理页；
-              - 使 Native libc (`__system_property_get` / `__system_property_read_callback`) 与 Java 层 `Build.*` 返回值达到 100% 绝对一致。
-            - **区域跨区与机型伪装彻底独立解耦 + 分应用独立机型伪装 (Per-App Device Model)**：
-              - 商店跨区 (`enabled`) 与机型伪装 (`spoofDevice`)、自定义 `CscFeature` 完全独立运行，互不干扰；
-              - 支持在「机型伪装生效应用」中为每个勾选应用单独指定不同伪装机型（例如：游戏 A 伪装 ROG 9 Pro 解锁高帧率，游戏 B 伪装 iPhone 17 Pro Max，社交应用伪装折叠屏），保存或切换机型后自动通过 Root 强停重启目标应用立即生效。
-            - **三星 One UI 隐藏特性一键预设 & 环境自检探针**：
-              - 设置页内置「原生通话录音」、「相机快门声音开关」、「状态栏实时网速」、「下拉面板流量统计」一键开关及可视化 Key-Value 快捷编辑器；
-              - 新增「环境与伪装自检探针」，实时展示当前进程 `Build.MODEL`、`ro.csc.sales_code`、持久 `su` 会话池状态与 LSPosed 注入活跃进程。
-            - **持久交互式 Root 会话池 + 实时快充功率 (W/mA/V) 与自定义温控熔断线 (38°C–48°C)**：
-              - `RootShell` 升级为持久交互式 `su` 会话复用（附带单次执行自动兜底），彻底消除周期温控/旁路检测时的进程 fork 开销；
-              - 供电面板与通知栏实时展示充电功率 `W`、电流 `mA`、电压 `V`，并支持 `38°C–48°C` 自定义安全温控熔断阈值；
-              - 微信防撤回新增按微信版本号持久化 DEX 签名缓存，二次启动 0ms 零延迟挂载。
+            - **全新第二代 Native COW + Bionic Radix Trie 基数三叉树动态注入引擎 (`NativePropCow`)**：
+              - **跨品牌缺失属性直接挂载进 Bionic 字典树**：在三星 OneUI 等宿主 ROM 上，跨品牌营销名与分区属性（如小米 `ro.product.marketname`、OPPO/一加 `ro.vendor.oplus.market.name`、vivo/iQOO `ro.vivo.market.name`、华为 `ro.config.marketing_name`、`bootimage` 分区等）原本在底层 `/dev/__properties__/` 中并不存在。新引擎直接利用 `prop_area` 空闲容量动态分配 4 字节对齐的 `prop_bt` 与 `prop_info` 节点，将跨品牌属性完整注入底层基数搜索树；
+              - **多上下文双保险智能路由**：自动向匹配前缀分区（`build_prop` / `vendor` / `odm` / `bootimage`）与兜底分区（`default_prop`）同步注入节点，并 COW 递增全局 `properties_serial`，无论宿主 SELinux `property_info` 如何路由，Native `libc.so` (`__system_property_find` / `__system_property_get`) 均 100% 命中；
+              - **热切换原位复用零内存泄漏**：进程内二次热切换机型时自动在已注入节点上原位覆写，0 额外内存分配，且严格清除 `serial` 第 16 位 `kLongFlag` 杜绝越界崩溃。
+            - **iPhone Duo 等全品牌 203 款旗舰全栈特征对齐**：
+              - 补齐 6 大分区（新增 `bootimage` 分区与 `ro.build.display.id`）及 35 项跨品牌营销名属性；
+              - 全机型库智能映射真实 SoC 芯片型号（如 `Apple A20 Pro`、`SM8850`、`SM8750-AB`、`MT6991`、`Kirin 9020`、`Tensor G5`），同步对齐 `Build.SOC_MODEL` 与 `ro.soc.model`；
+              - 完整拦截 `SemFloatingFeature` 折叠形态、`Settings.Global/System/Secure` 设备名、蓝牙设备名、`http.agent` 以及 `WebSettings.getDefaultUserAgent` / `getUserAgentString`。
+            - **全模块稳定性与零耗电深度精修**：
+              - 旁路供电 (`PassThroughService`) 新增拔线广播 (`ACTION_POWER_DISCONNECTED`) 毫秒级恢复供电与息屏挂起轮询机制，杜绝拔线漏恢复及待机空转耗电；
+              - 修复亮屏快充在非充电状态下开启开关时的后台服务空转问题；
+              - 修复微信运动步数跨进程 `System.currentTimeMillis()` 每次传感器回调触发共享配置 IPC 重载的热路径开销，并支持步数与防撤回配置 2 秒热生效。
           files: |
-            releases/WeiTiao-v1.5.0.apk
-            releases/WeiTiao-v1.5.0.apk.sha256
+            releases/WeiTiao-v1.5.1.apk
+            releases/WeiTiao-v1.5.1.apk.sha256

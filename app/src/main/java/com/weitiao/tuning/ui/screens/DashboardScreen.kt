@@ -286,9 +286,19 @@ fun DashboardScreen(
 
     val lifecycleOwner = LocalLifecycleOwner.current
     var resumeTick by remember { mutableIntStateOf(0) }
+    var isResumed by remember { mutableStateOf(true) }
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) resumeTick++
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> {
+                    isResumed = true
+                    resumeTick++
+                }
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
+                    isResumed = false
+                }
+                else -> {}
+            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
@@ -297,15 +307,14 @@ fun DashboardScreen(
         mutableStateOf(TuningPrefs.isBatteryOptimizationRestricted(context))
     }
 
-    LaunchedEffect(resumeTick, isPlugged, tuning.brightScreenFastCharge) {
+    LaunchedEffect(isResumed, isPlugged) {
+        if (!isResumed) return@LaunchedEffect
         val initial = withContext(Dispatchers.IO) { FastChargeController.readBatteryMetrics(context) }
         applyHardwareMetrics(initial)
-        if (isPlugged || tuning.brightScreenFastCharge) {
-            while (isActive) {
-                delay(4000)
-                val metrics = withContext(Dispatchers.IO) { FastChargeController.readBatteryMetrics(context) }
-                applyHardwareMetrics(metrics)
-            }
+        while (isActive && isResumed && isPlugged) {
+            delay(4000)
+            val metrics = withContext(Dispatchers.IO) { FastChargeController.readBatteryMetrics(context) }
+            applyHardwareMetrics(metrics)
         }
     }
 
@@ -539,7 +548,7 @@ fun DashboardScreen(
                         modifier = Modifier.weight(1f),
                         onClick = {
                             activePanel = PANEL_SPOOF
-                            if (csc.deviceName.isNotBlank()) {
+                            if (csc.deviceName.isNotBlank() || csc.perAppDeviceModels.isNotEmpty()) {
                                 val next = !csc.spoofDevice
                                 updateCsc { it.copy(spoofDevice = next) }
                                 checkLspPrerequisite(next)
@@ -642,10 +651,11 @@ fun DashboardScreen(
                     } else {
                         if (isZh) "区域: 原生直通" else "Region: Native"
                     }
-                    val modelStatus = if (csc.spoofDevice && csc.deviceName.isNotBlank()) {
+                    val modelStatus = if (csc.spoofDevice && (csc.deviceName.isNotBlank() || csc.perAppDeviceModels.isNotEmpty())) {
                         val customCount = csc.perAppDeviceModels.size
+                        val baseLabel = csc.deviceName.ifBlank { if (isZh) "仅分应用独立伪装" else "Per-app only" }
                         val suffix = if (customCount > 0) (if (isZh) " (+$customCount 独立)" else " (+$customCount custom)") else ""
-                        if (isZh) "机型: ${csc.deviceName}$suffix" else "Model: ${csc.deviceName}$suffix"
+                        if (isZh) "机型: $baseLabel$suffix" else "Model: $baseLabel$suffix"
                     } else {
                         if (isZh) "机型: 原生 (${Build.MODEL})" else "Model: Native (${Build.MODEL})"
                     }
@@ -1244,6 +1254,10 @@ fun DashboardScreen(
             if (targets.isNotEmpty()) {
                 scope.launch {
                     val count = withContext(Dispatchers.IO) {
+                        val synced = LsposedScopeHelper.syncScopesWithRoot(context, targets)
+                        if (!synced) {
+                            LsposedScopeHelper.requestScopesViaService(targets)
+                        }
                         StoreCleaner.forceStopPackages(targets.filter { it != "com.tencent.mm" })
                     }
                     if (count > 0) {
@@ -1264,7 +1278,10 @@ fun DashboardScreen(
         onSave = { updated, updatedPerApp ->
             val prevTargets = csc.deviceTargetPackages
             updateCsc {
+                val shouldEnableSpoof = it.spoofDevice ||
+                    (updated.isNotEmpty() && (it.deviceName.isNotBlank() || updatedPerApp.isNotEmpty()))
                 it.copy(
+                    spoofDevice = shouldEnableSpoof,
                     deviceTargetFilterEnabled = updated.isNotEmpty(),
                     deviceTargetPackages = updated,
                     perAppDeviceModels = updatedPerApp,
@@ -1278,8 +1295,8 @@ fun DashboardScreen(
                 } else false
                 if (!synced) {
                     val newlyAdded = updated - prevTargets
-                    newlyAdded.forEach { pkg ->
-                        LsposedScopeHelper.requestScopeViaService(pkg)
+                    if (newlyAdded.isNotEmpty()) {
+                        LsposedScopeHelper.requestScopesViaService(newlyAdded)
                     }
                     StoreCleaner.forceStopPackages(updated.filter { it != "com.tencent.mm" })
                 }
@@ -1344,7 +1361,7 @@ private fun PassThroughAppPickerSheet(
         }
     }
 
-    var selected by remember(initial) { mutableStateOf(initial.toSet()) }
+    var selected by remember(initial, show) { mutableStateOf(initial.toSet()) }
 
     WindowBottomSheet(
         show = show,

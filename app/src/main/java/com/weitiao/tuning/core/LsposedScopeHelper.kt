@@ -113,11 +113,12 @@ object LsposedScopeHelper {
                 db?.close()
             }
 
-            // 4. 将更新后的数据库通过 Root 拷贝回 /data/adb/lspd/config/，并恢复 root:root 0600 权限
+            // 4. 将更新后的数据库通过 Root 原位写回 /data/adb/lspd/config/（保持 inode 不变），并恢复权限与 SELinux 上下文
             val writeBackCmd = """
-                cp -f '${localDb.absolutePath}' $LSPD_DB_PATH
+                cat '${localDb.absolutePath}' > $LSPD_DB_PATH
                 chown root:root $LSPD_DB_PATH
                 chmod 600 $LSPD_DB_PATH
+                chcon u:object_r:adb_data_file:s0 $LSPD_DB_PATH 2>/dev/null || true
                 rm -f /data/adb/lspd/config/modules_config.db-wal /data/adb/lspd/config/modules_config.db-shm
                 rm -f '${cacheDir.absolutePath}'/modules_config.db*
             """.trimIndent()
@@ -128,6 +129,9 @@ object LsposedScopeHelper {
             localDb.delete()
             localWal.delete()
             localShm.delete()
+
+            // 同时通过 libxposed 内存服务通道请求未在当前内存作用域中的应用，确保无需重启系统即可立即挂载
+            requestScopesViaService(targetPackages)
 
             if (writeExit == 0) {
                 Log.i(TAG, "Successfully synced ${targetPackages.size} packages to LSPosed scope database")
@@ -148,32 +152,44 @@ object LsposedScopeHelper {
     }
 
     /**
-     * 通过 libxposed API 102 原生通道请求将单个应用加入模块作用域（无需重启系统，LSPosed 弹出官方确认框）
+     * 通过 libxposed API 102 原生通道批量请求将应用加入模块内存作用域（无需重启系统）
      */
-    fun requestScopeViaService(packageName: String, onResult: (Boolean) -> Unit = {}) {
+    fun requestScopesViaService(packages: Collection<String>, onResult: (Boolean) -> Unit = {}) {
         val service = com.weitiao.tuning.App.getXposedService() ?: run {
             onResult(false)
             return
         }
         runCatching {
-            val currentScope = runCatching { service.scope }.getOrDefault(emptyList())
-            if (packageName in currentScope) {
+            val currentScope = runCatching { service.scope.toSet() }.getOrDefault(emptySet())
+            val missing = packages
+                .map { it.trim() }
+                .filter { it.isNotEmpty() && it != MODULE_PKG && it !in currentScope }
+                .distinct()
+            if (missing.isEmpty()) {
                 onResult(true)
                 return
             }
-            service.requestScope(listOf(packageName), object : io.github.libxposed.service.XposedService.OnScopeEventListener {
+            service.requestScope(missing, object : io.github.libxposed.service.XposedService.OnScopeEventListener {
                 override fun onScopeRequestApproved(approved: List<String>) {
-                    onResult(packageName in approved)
+                    onResult(approved.isNotEmpty())
                 }
 
                 override fun onScopeRequestFailed(message: String) {
+                    Log.w(TAG, "requestScopesViaService failed: $message")
                     onResult(false)
                 }
             })
         }.onFailure {
-            Log.w(TAG, "requestScopeViaService failed for $packageName: ${it.message}")
+            Log.w(TAG, "requestScopesViaService failed for $packages: ${it.message}")
             onResult(false)
         }
+    }
+
+    /**
+     * 通过 libxposed API 102 原生通道请求将单个应用加入模块作用域（无需重启系统，LSPosed 弹出官方确认框）
+     */
+    fun requestScopeViaService(packageName: String, onResult: (Boolean) -> Unit = {}) {
+        requestScopesViaService(listOf(packageName), onResult)
     }
 
     /**

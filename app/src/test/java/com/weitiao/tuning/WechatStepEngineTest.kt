@@ -123,4 +123,31 @@ class WechatStepEngineTest {
         val out3 = engine.processStepCounter(1600f, config)
         assertTrue("Subsequent steps increase monotonically", out3 >= out2)
     }
+
+    @Test
+    fun stepEngineRealStepMultiplierWorksFor1xAndNx() {
+        val engine1x = createTestEngine()
+        val config1x = TuningConfig(
+            stepEnabled = true,
+            stepMultiplier = 1,
+            stepMaximum = 50_000,
+            stepAuto = false,
+            stepEndHour = 24,
+        )
+        val base1 = engine1x.processStepCounter(1000f, config1x)
+        val after100Steps1x = engine1x.processStepCounter(1100f, config1x)
+        assertTrue("1x multiplier must add 100 steps", (after100Steps1x - base1) == 100f)
+
+        val engine10x = createTestEngine()
+        val config10x = TuningConfig(
+            stepEnabled = true,
+            stepMultiplier = 10,
+            stepMaximum = 50_000,
+            stepAuto = false,
+            stepEndHour = 24,
+        )
+        val base10 = engine10x.processStepCounter(1000f, config10x)
+        val after100Steps10x = engine10x.processStepCounter(1100f, config10x)
+        assertTrue("10x multiplier must add 1000 steps", (after100Steps10x - base10) == 1000f)
+    }
 }

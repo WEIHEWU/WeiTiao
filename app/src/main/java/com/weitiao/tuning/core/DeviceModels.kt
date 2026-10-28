@@ -14,6 +14,127 @@ data class DeviceProfile(
     val manufacturer: String = "samsung",
 ) {
     val displayName: String get() = "$name ($model)"
+
+    val isFold: Boolean
+        get() = name.contains("Fold", ignoreCase = true) ||
+            name.contains("Duo", ignoreCase = true) ||
+            name.contains("Open", ignoreCase = true) ||
+            name.contains("Find N", ignoreCase = true) ||
+            name.contains("Mate X", ignoreCase = true) ||
+            name.contains("Magic V", ignoreCase = true) ||
+            (brand.equals("samsung", ignoreCase = true) && (model.startsWith("SM-F9", ignoreCase = true) || model.startsWith("SM-W9", ignoreCase = true)))
+
+    val isFlip: Boolean
+        get() = !isFold && (
+            name.contains("Flip", ignoreCase = true) ||
+                name.contains("Pocket", ignoreCase = true) ||
+                (brand.equals("samsung", ignoreCase = true) && (model.startsWith("SM-F7", ignoreCase = true) || model.startsWith("SM-W7", ignoreCase = true)))
+            )
+
+    val isTablet: Boolean
+        get() = !isFold && !isFlip && (
+            name.contains("Tab", ignoreCase = true) ||
+                name.contains("Pad", ignoreCase = true) ||
+                (brand.equals("samsung", ignoreCase = true) && model.startsWith("SM-X", ignoreCase = true))
+            )
+
+    val characteristics: String
+        get() = when {
+            isFold -> "fold,nosdcard"
+            isFlip -> "flip,nosdcard"
+            isTablet -> "tablet,nosdcard"
+            else -> "nosdcard"
+        }
+
+    val socModel: String
+        get() {
+            val n = name.lowercase()
+            return when (brand.lowercase()) {
+                "apple" -> when {
+                    n.contains("18") || n.contains("duo") -> "Apple A20 Pro"
+                    n.contains("17") -> "Apple A19 Pro"
+                    n.contains("16") -> "Apple A18 Pro"
+                    else -> "Apple A17 Pro"
+                }
+                "huawei" -> when {
+                    n.contains("80") -> "Kirin 9030"
+                    n.contains("xt") || n.contains("x6") || (n.contains("70") && !n.contains("pura 70")) -> "Kirin 9020"
+                    n.contains("pura 70") -> "Kirin 9010"
+                    else -> "Kirin 9000S"
+                }
+                "google" -> when {
+                    n.contains("10") -> "Tensor G5"
+                    n.contains("9") -> "Tensor G4"
+                    n.contains("8") -> "Tensor G3"
+                    else -> "Tensor G2"
+                }
+                else -> when {
+                    // 联发科天玑旗舰 (Dimensity 9500 / 9400 / 9300+)
+                    (n.contains("x300") && !n.contains("ultra")) ||
+                        (n.contains("find x9") && !n.contains("ultra")) ||
+                        n.contains("k90 至尊") ||
+                        n.contains("neo11 pro") -> "MT6993"
+                    (n.contains("x200") && !n.contains("ultra")) ||
+                        (n.contains("find x8") && !n.contains("ultra")) ||
+                        n.contains("k80 至尊") ||
+                        n.contains("neo10 pro") ||
+                        n.contains("tab s11") -> "MT6991"
+                    n.contains("x100 pro") ||
+                        n.contains("k70 至尊") ||
+                        n.contains("tab s10") -> "MT6989"
+                    // 高通骁龙 8 Elite Gen 2 / Gen 5 (SM8850)
+                    n.contains("xiaomi 17") ||
+                        n.contains("mix fold 5") ||
+                        n.contains("k90") ||
+                        n.contains("oneplus 16") ||
+                        n.contains("oneplus 15") ||
+                        n.contains("s26") ||
+                        n.contains("fold8") ||
+                        n.contains("flip8") ||
+                        n.contains("w26") ||
+                        n.contains("x300 ultra") ||
+                        n.contains("iqoo 15") ||
+                        n.contains("find x9 ultra") ||
+                        n.contains("gt 8") ||
+                        n.contains("magic8") ||
+                        n.contains("redmagic 11") ||
+                        n.contains("rog phone 10") ||
+                        n.contains("xperia 1 vii") -> "SM8850"
+                    // 高通骁龙 8 Elite (SM8750-AB)
+                    n.contains("xiaomi 15") ||
+                        n.contains("mix flip 2") ||
+                        n.contains("k80 pro") ||
+                        n.contains("oneplus 13") ||
+                        n.contains("ace 5 pro") ||
+                        n.contains("open 2") ||
+                        n.contains("s25") ||
+                        n.contains("fold7") ||
+                        n.contains("flip7") ||
+                        n.contains("x200 ultra") ||
+                        n.contains("x fold4") ||
+                        n.contains("iqoo 13") ||
+                        n.contains("find x8 ultra") ||
+                        n.contains("find n5") ||
+                        n.contains("gt7 pro") ||
+                        n.contains("gt 7 pro") ||
+                        n.contains("magic7") ||
+                        n.contains("magic v4") ||
+                        n.contains("redmagic 10") ||
+                        n.contains("rog phone 9") -> "SM8750-AB"
+                    // 高通骁龙 8 Gen 3 (SM8650-AB)
+                    else -> "SM8650-AB"
+                }
+            }
+        }
+
+    val socManufacturer: String
+        get() = when {
+            brand.equals("apple", ignoreCase = true) -> "Apple"
+            brand.equals("huawei", ignoreCase = true) -> "HiSilicon"
+            brand.equals("google", ignoreCase = true) -> "Google"
+            socModel.startsWith("MT") -> "MediaTek"
+            else -> "Qualcomm"
+        }
 }
 
 object DeviceModels {
@@ -159,7 +280,7 @@ object DeviceModels {
 
         // ==== OPPO Find N 折叠旗舰 ====
         DeviceProfile("OPPO Find N5", "PHY120", "PHY120", "PHY120", "OPPO", "OPPO", "OPPO"),
-        DeviceProfile("OPPO Find N3", "PHY110", "PHY110", "PHY110", "OPPO", "OPPO", "OPPO"),
+        DeviceProfile("OPPO Find N3", "PHN110", "PHN110", "PHN110", "OPPO", "OPPO", "OPPO"),
 
         // ==== realme 性能旗舰 ====
         DeviceProfile("realme GT7 Pro", "RMX5010", "RMX5010", "RMX5010", "OPPO", "realme", "OPPO"),
@@ -183,14 +304,14 @@ object DeviceModels {
         DeviceProfile("HUAWEI Pura 80 Ultra", "HBP-AL10", "HBP-AL10", "HBP-AL10", "HUAWEI", "HUAWEI", "HUAWEI"),
         DeviceProfile("HUAWEI Pura 80 Pro+", "HNE-AL10", "HNE-AL10", "HNE-AL10", "HUAWEI", "HUAWEI", "HUAWEI"),
         DeviceProfile("HUAWEI Pura 70 Ultra", "HBP-AL00", "HBP-AL00", "HBP-AL00", "HUAWEI", "HUAWEI", "HUAWEI"),
-        DeviceProfile("HUAWEI Pura 70 Pro+", "HNE-AL00", "HNE-AL00", "HNE-AL00", "HUAWEI", "HUAWEI", "HUAWEI"),
+        DeviceProfile("HUAWEI Pura 70 Pro+", "HBN-AL80", "HBN-AL80", "HBN-AL80", "HUAWEI", "HUAWEI", "HUAWEI"),
         DeviceProfile("HUAWEI Pura 70 Pro", "HNE-AL00", "HNE-AL00", "HNE-AL00", "HUAWEI", "HUAWEI", "HUAWEI"),
         DeviceProfile("HUAWEI Pocket 2", "LEM-AL00", "LEM-AL00", "LEM-AL00", "HUAWEI", "HUAWEI", "HUAWEI"),
 
         // ==== Honor 荣耀旗舰系列 ====
         DeviceProfile("Honor Magic8 RSR 保时捷设计", "PTP-AN30", "PTP-AN30", "PTP-AN30", "Honor", "HONOR", "HONOR"),
         DeviceProfile("Honor Magic8 Pro", "PTP-AN20", "PTP-AN20", "PTP-AN20", "Honor", "HONOR", "HONOR"),
-        DeviceProfile("Honor Magic7 RSR 保时捷设计", "PTP-AN20", "PTP-AN20", "PTP-AN20", "Honor", "HONOR", "HONOR"),
+        DeviceProfile("Honor Magic7 RSR 保时捷设计", "PTP-AN26", "PTP-AN26", "PTP-AN26", "Honor", "HONOR", "HONOR"),
         DeviceProfile("Honor Magic7 Pro", "PTP-AN10", "PTP-AN10", "PTP-AN10", "Honor", "HONOR", "HONOR"),
         DeviceProfile("Honor Magic7", "PTP-AN00", "PTP-AN00", "PTP-AN00", "Honor", "HONOR", "HONOR"),
         DeviceProfile("Honor Magic6 RSR 保时捷设计", "BVL-AN20", "BVL-AN20", "BVL-AN20", "Honor", "HONOR", "HONOR"),
@@ -271,11 +392,13 @@ object DeviceModels {
     val BY_FAMILY: Map<String, List<DeviceProfile>> = ALL.groupBy { it.family }
 
     private val NAME_EXACT_MAP: Map<String, DeviceProfile> by lazy {
-        val map = HashMap<String, DeviceProfile>(ALL.size * 3)
+        val map = HashMap<String, DeviceProfile>(ALL.size * 5)
         for (item in ALL) {
             map.putIfAbsent(item.name.lowercase(), item)
             map.putIfAbsent(item.model.lowercase(), item)
             map.putIfAbsent(item.displayName.lowercase(), item)
+            map.putIfAbsent(item.device.lowercase(), item)
+            map.putIfAbsent(item.productName.lowercase(), item)
         }
         map
     }
@@ -298,12 +421,21 @@ object DeviceModels {
     }
 
     private fun normalizeKey(s: String): String {
-        var res = s.lowercase()
-        val prefixes = listOf("galaxy ", "samsung ", "xiaomi ", "redmi ", "vivo ", "huawei ", "honor ", "apple ", "iphone ", "google ", "pixel ", "oppo ", "oneplus ", "meizu ", "sony ")
-        for (prefix in prefixes) {
-            if (res.startsWith(prefix)) {
-                res = res.removePrefix(prefix)
-                break
+        var res = s.trim().lowercase()
+        val prefixes = listOf(
+            "samsung ", "galaxy ", "xiaomi ", "redmi ", "vivo ", "iqoo ",
+            "huawei ", "honor ", "apple ", "iphone ", "google ", "pixel ",
+            "oppo ", "oneplus ", "realme ", "meizu ", "sony ", "xperia ",
+            "nubia ", "redmagic ", "asus ", "rog ",
+        )
+        var changed = true
+        while (changed) {
+            changed = false
+            for (prefix in prefixes) {
+                if (res.startsWith(prefix)) {
+                    res = res.removePrefix(prefix).trimStart()
+                    changed = true
+                }
             }
         }
         return res.filter { it.isLetterOrDigit() }

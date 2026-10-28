@@ -62,7 +62,7 @@ fun DeviceModelPicker(
     val initialFamily = remember(initialSelection) {
         DeviceModels.findByName(initialSelection)?.family ?: families.firstOrNull() ?: "Samsung"
     }
-    var selectedFamily by remember { mutableStateOf(initialFamily) }
+    var selectedFamily by remember(initialFamily, show) { mutableStateOf(initialFamily) }
 
     val filtered = remember(query, selectedFamily) {
         val needle = query.trim()
