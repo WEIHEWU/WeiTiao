@@ -55,11 +55,12 @@ object FastChargeScheduler {
         runCatching {
             val scheduler = context.getSystemService(JobScheduler::class.java) ?: return
             scheduler.cancel(JOB_ID)
+            scheduler.cancel(JOB_ID_KICK)
             scheduler.cancel(JOB_ID_ARM)
         }.onFailure { Log.w(TAG, "兜底任务取消失败", it) }
     }
 
-    private fun isPluggedIn(context: Context): Boolean {
+    internal fun isPluggedIn(context: Context): Boolean {
         val battery = runCatching {
             context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
         }.getOrNull()
@@ -124,11 +125,25 @@ object FastChargeFallback {
     fun applyNow(context: Context) {
         val cfg = TuningPrefs.load(context)
         if (!cfg.brightScreenFastCharge) {
+            FastChargeController.restoreTemperatureNodes()
             FastChargeScheduler.disable(context)
             FastChargeNotifier.cancelLive(context)
             return
         }
         FastChargeScheduler.enable(context)
+
+        // 优先尝试拉起/唤醒常驻前台服务；若常驻服务已存活，严禁在此处越权执行 blockTemperatureNodes()，
+        // 彻底避免周期性 JobService 在高温熔断期间（如 17:05:31）背着常驻服务把温度节点重新锁死为 0000！
+        val startedOrNotified = runCatching {
+            val intent = Intent(context, BrightScreenFastChargeService::class.java)
+                .setAction(BrightScreenFastChargeService.ACTION_START)
+            ContextCompat.startForegroundService(context, intent)
+            true
+        }.getOrDefault(false)
+
+        if (BrightScreenFastChargeService.isServiceAlive || startedOrNotified) {
+            return
+        }
 
         val battery = runCatching {
             context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
@@ -139,50 +154,48 @@ object FastChargeFallback {
         if (plugged <= 0) {
             FastChargeController.restoreTemperatureNodes()
             FastChargeNotifier.cancelLive(context)
+            FastChargeScheduler.armChargingTrigger(context)
             return
         }
 
         val powerManager = context.getSystemService(PowerManager::class.java)
         val screenOn = powerManager?.isInteractive ?: true
 
-        if (screenOn) {
-            FastChargeController.enableSamsungFastChargingSettings()
-            val result = FastChargeController.blockTemperatureNodes()
-            val metrics = FastChargeController.readBatteryMetrics(context)
-            val statusText = if (metrics.currentMa > 0 && metrics.voltageMv > 0) {
-                String.format("电量:%d%% 电流:%dmA 电压:%.2fV 功率:%.1fW", level, metrics.currentMa, metrics.voltageMv / 1000.0, metrics.powerWatts)
-            } else {
-                "电量:$level%"
-            }
-            val tempC = String.format("%.1f°C", metrics.temperatureTenths / 10.0)
-            FastChargeNotifier.postLive(context, statusText, tempC)
-            Log.i(TAG, "兜底路径已下发温控策略 success=${result.success}")
-        } else {
+        if (!screenOn) {
             FastChargeController.restoreTemperatureNodes()
             FastChargeNotifier.postLive(context, "息屏安全充 · 电量:$level%")
+            return
         }
 
-        // 若此刻处于允许启动前台服务的时机（例如开机广播），顺带拉起常驻服务
-        runCatching {
-            val intent = Intent(context, BrightScreenFastChargeService::class.java)
-                .setAction(BrightScreenFastChargeService.ACTION_START)
-            ContextCompat.startForegroundService(context, intent)
+        // 先读取真实温度并执行与常驻服务完全一致的双重高温安全熔断判定
+        val metrics = FastChargeController.readBatteryMetrics(context)
+        BrightScreenFastChargeService.lastKnownMetrics = metrics
+        val overheated = FastChargeController.isOverheated(
+            metrics = metrics,
+            cutoffCelsius = cfg.thermalCutoffCelsius,
+            previouslyOverheated = BrightScreenFastChargeService.isThermalCutoffActive,
+        )
+        BrightScreenFastChargeService.isThermalCutoffActive = overheated
+
+        if (overheated) {
+            FastChargeController.restoreTemperatureNodes()
+            val tempC = String.format("%.1f°C", metrics.temperatureTenths / 10.0)
+            FastChargeNotifier.postLive(context, "高温保护恢复原生温控 · 电量:$level%", tempC)
+            Log.w(TAG, "兜底路径检测到高温 (batt=${metrics.temperatureTenths / 10.0}℃, chip=${metrics.maxChipTempTenths / 10.0}℃)，已恢复官方温控")
+            return
         }
-    }
 
-    private fun formatTemp(tenths: Int): String = String.format("%.1f", tenths / 10.0)
-
-    private fun formatPower(metrics: FastChargeController.BatteryMetrics): String =
-        if (metrics.currentMa > 0 && metrics.voltageMv > 0) {
-            String.format(
-                "%.1fW (%.2fV / %dmA)",
-                metrics.powerWatts,
-                metrics.voltageMv / 1000.0,
-                metrics.currentMa,
-            )
+        FastChargeController.enableSamsungFastChargingSettings()
+        val result = FastChargeController.blockTemperatureNodes()
+        val statusText = if (metrics.currentMa > 0 && metrics.voltageMv > 0) {
+            String.format("电量:%d%% 电流:%dmA 电压:%.2fV 功率:%.1fW", level, metrics.currentMa, metrics.voltageMv / 1000.0, metrics.powerWatts)
         } else {
-            "读取中…"
+            "电量:$level%"
         }
+        val tempC = String.format("%.1f°C", metrics.temperatureTenths / 10.0)
+        FastChargeNotifier.postLive(context, statusText, tempC)
+        Log.i(TAG, "兜底路径已下发温控策略 success=${result.success}")
+    }
 }
 
 /** 仅在充电时运行的周期性兜底任务：进程被回收后仍能被系统拉起 */
@@ -190,15 +203,29 @@ class FastChargeJobService : JobService() {
 
     override fun onStartJob(params: JobParameters): Boolean {
         val context = applicationContext
-        Thread {
+        Thread({
             try {
                 FastChargeFallback.applyNow(context)
             } finally {
                 runCatching { jobFinished(params, false) }
             }
-        }.apply { isDaemon = true }.start()
+        }, "Tuning-FastChargeJob").apply { isDaemon = true }.start()
         return true
     }
 
-    override fun onStopJob(params: JobParameters?): Boolean = true
+    override fun onStopJob(params: JobParameters?): Boolean {
+        // 当用户拔掉充电器导致 requiresCharging 约束失效时，系统会立即回调 onStopJob：
+        // 即使常驻服务已被系统回收，这里也能确保拔线瞬间无条件恢复全部温控节点！
+        val context = applicationContext
+        Thread({
+            runCatching {
+                if (!FastChargeScheduler.isPluggedIn(context)) {
+                    FastChargeController.restoreTemperatureNodes()
+                    FastChargeNotifier.cancelLive(context)
+                    FastChargeScheduler.armChargingTrigger(context)
+                }
+            }
+        }, "Tuning-FastChargeUnplugRestore").apply { isDaemon = true }.start()
+        return true
+    }
 }

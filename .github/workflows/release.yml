@@ -24,30 +24,29 @@ jobs:
 
       - name: Verify APK & Generate SHA-256 Checksum
         run: |
-          test -f releases/WeiTiao-v1.5.3.apk
+          test -f releases/WeiTiao-v1.5.4.apk
           cd releases
-          sha256sum WeiTiao-v1.5.3.apk > WeiTiao-v1.5.3.apk.sha256
-          cat WeiTiao-v1.5.3.apk.sha256
+          sha256sum WeiTiao-v1.5.4.apk > WeiTiao-v1.5.4.apk.sha256
+          cat WeiTiao-v1.5.4.apk.sha256
 
       - name: Create GitHub Release and Upload APK + Checksum
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.5.3
-          name: "微调 WeiTiao v1.5.3 (Google Play 版微信 8.0.79+ 步数修改修复 · 双层计步拦截与主动平滑递增)"
+          tag_name: v1.5.4
+          name: "微调 WeiTiao v1.5.4 (亮屏快充温控安全重构 · 根除 0000 节点残留锁死与 SoC 温控瘫痪隐患)"
           body: |
-            ### 微调 (WeiTiao) v1.5.3
+            ### 微调 (WeiTiao) v1.5.4
 
-            - **全面修复 Google Play 版及国内版微信 8.0.79+ 步数修改失效问题 (`WechatHooks`)**：
-              - **双层计步传感器拦截（彻底免疫 `targetSdk >= 34` Hidden API 限制）**：
-                - 第一层：修复 `mSensorsEvents` 字段查找（遍历父类 `SystemSensorManager$BaseSensorEventQueue`），并移除错误的 `sensor.hashCode()` 伪造 `handle` 回退；
-                - 第二层：在 `SensorManager.registerListener` / `SystemSensorManager.registerListenerImpl` 注册计步器时，基于 100% 公开 Android SDK API（`Sensor.getType()`、`SensorEvent.sensor`、`SensorEvent.values`）动态 Hook 目标 `SensorEventListener.onSensorChanged(SensorEvent)`，彻底绕开 Google Play 版微信 8.0.79 (`targetSdk >= 34`) 触发的隐藏字段反射封锁。
-              - **根除加速度计/陀螺仪高频误判与单帧暴涨防作弊丢弃**：
-                - 彻底移除 `(sensor == null && values[0] > 0f)` 兜底判断，严禁 50Hz 加速度计/陀螺仪事件混入计步引擎导致第一帧与第二帧之间直接冲顶 `50,000` 步被微信判定为异常突跳丢弃；
-                - 新增首帧基准锚点保护（首帧 `0` 突跳建立 `preSensorStep` 基准）与单次事件平滑增量上限（`<= 2000` 步/帧）。
-              - **新增后台平滑主动计步驱动器 (`WeiTiao-StepTicker`)**：
-                - 解决手机静置桌面时硬件 `TYPE_STEP_COUNTER` (`ON_CHANGE` 模式) 不触发第二次事件导致自动步数卡在 `0` 的问题，静置状态下也能平滑、稳定地将微信运动步数推升至设定上限。
-            - **微信进程隔离保护 (`CscSpoof` & `MainHook`)**：
-              - 在全局默认「全部作用域应用」机型伪装模式下默认排除微信 (`com.tencent.mm`)，防止全局伪装为 `iPhone Duo`（`Apple / iPhone19,4`）及 `NativePropCow` 注入干扰微信主进程与 `:push` 进程健康度及计步器权限。
+            - **亮屏快充温控安全架构彻底重构 (`FastChargeController` / `BrightScreenFastChargeService` / `FastChargeWatchdog`)**：
+              - **保留 CPU (`AP`) / 射频 (`PA`) / GPU (`gpu_tmu`) / `thermal` 硬件温控保护**：
+                - 亮屏快充仅屏蔽电源与电池充电限流节点 (`batt_temp`、`chg_temp`、`dchg_temp` 等)，严禁再将 `sec-ap-thermistor`、`sec-pa-thermistor`、`sec-wf-thermistor`、`gpu_tmu` 及 `/sys/class/thermal` 设为 `0000`，并在每次操作时主动恢复这些节点为可读状态，杜绝 SSRM 误判整机 `-88.8°C` (`LowTemp`) 而关闭 CPU/GPU/射频过热降频。
+              - **修复 `17:05:31` 熔断后被后台 JobService 重新锁死为 `0000` 及拔线后残留锁死的 Bug**：
+                - 修复 `FastChargeJobService` (`FastChargeFallback.applyNow`) 在常驻服务已处于高温熔断 (`isOverheated = true`) 状态下越权调用 `blockTemperatureNodes()`，而常驻服务因内存 `appliedBlocked == false` 不再执行恢复的致命竞态；
+                - 常驻服务在熔断、息屏、拔电状态下新增每 15 秒双向硬件权限强校验 (`isAnyTemperatureNodeBlocked`) 与拔线/息屏/包更新/应用启动 (`App.onCreate`) 无条件强制解锁自愈机制；
+                - `FastChargeJobService.onStopJob` 新增拔线即时解锁回调，即使常驻服务被系统强杀，拔掉充电器瞬间也 100% 恢复全部温控节点。
+              - **多路真实温度采样与「电池/中框 + 芯片峰值」双重安全熔断**：
+                - 移除错误的 `batt_temp_raw`（NTC 原始 ADC 值）与 `normalizeTemp` 中的 `abs()`（防止将 `-888` 负温错误码当成正温）；
+                - 采样时通过亚毫秒级瞬时可读探针读取真实 `batt_temp`、`chg_temp`、`dchg_temp`、`sec-cf-thermistor`、`sec-ap-thermistor`、`sec-pa-thermistor`，当电池/中框达到设定阈值或 AP/CHG/PA 芯片达到安全上限（`<= 50°C`）时立即熔断恢复官方温控。
           files: |
-            releases/WeiTiao-v1.5.3.apk
-            releases/WeiTiao-v1.5.3.apk.sha256
+            releases/WeiTiao-v1.5.4.apk
+            releases/WeiTiao-v1.5.4.apk.sha256

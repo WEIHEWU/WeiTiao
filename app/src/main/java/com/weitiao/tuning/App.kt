@@ -4,6 +4,9 @@ import android.app.Application
 import android.content.SharedPreferences
 import android.util.Log
 import com.weitiao.tuning.core.CscConstants
+import com.weitiao.tuning.core.TuningPrefs
+import com.weitiao.tuning.tuning.FastChargeController
+import com.weitiao.tuning.tuning.FastChargeScheduler
 import io.github.libxposed.service.XposedService
 import io.github.libxposed.service.XposedServiceHelper
 
@@ -50,6 +53,20 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
         super.onCreate()
         Log.i(TAG, "App.onCreate: registering XposedService listener")
         XposedServiceHelper.registerListener(this)
+
+        // 启动自愈检查：若当前未开启亮屏快充或未插充电器，或旧版本残留锁死了 AP/PA/WF 等温控节点，
+        // 进程启动时立即在后台检测并恢复权限，彻底消除历史残留 0000 锁死隐患。
+        Thread({
+            runCatching {
+                val cfg = TuningPrefs.load(this)
+                if (!cfg.brightScreenFastCharge || !FastChargeScheduler.isPluggedIn(this)) {
+                    if (FastChargeController.isAnyTemperatureNodeBlocked() == true) {
+                        FastChargeController.restoreTemperatureNodes()
+                        Log.i(TAG, "App.onCreate: 已自动修复残留 0000 温控节点权限")
+                    }
+                }
+            }
+        }, "Tuning-ThermalSelfHeal").apply { isDaemon = true }.start()
     }
 
     override fun onServiceBind(service: XposedService) {

@@ -45,7 +45,8 @@ class BrightScreenFastChargeService : Service() {
 
     private var receiverRegistered = false
     private var foregroundStarted = false
-    private val isApplying = AtomicBoolean(false)
+    private val syncScheduled = AtomicBoolean(false)
+    private val forceRestoreRequested = AtomicBoolean(false)
     private val isReadingMetrics = AtomicBoolean(false)
 
     // ---- 充电/屏幕/温度状态 ----
@@ -57,7 +58,7 @@ class BrightScreenFastChargeService : Service() {
     @Volatile private var currentTempTenths = 320 // 默认 32.0°C 初始安全值
 
     // ---- 温控节点状态机 ----
-    /** 期望状态：true=屏蔽温控节点（快充），false=恢复官方温控 */
+    /** 期望状态：true=屏蔽充电限流温控节点（快充），false=恢复官方温控 */
     @Volatile private var desiredBlocked = false
     /** 已确认落地的状态，null=未知；与期望不一致时触发下发 */
     @Volatile private var appliedBlocked: Boolean? = null
@@ -65,7 +66,7 @@ class BrightScreenFastChargeService : Service() {
     @Volatile private var lastVerifyElapsed = 0L
     @Volatile private var lastTickElapsed = 0L
 
-    @Volatile private var latestMetrics = FastChargeController.BatteryMetrics(0, 0, 0.0, 320)
+    @Volatile private var latestMetrics = FastChargeController.BatteryMetrics(0, 0, 0.0, 320, 0)
     /** 常驻通知当前文案，用于去重，避免每个 tick 都刷新一次通知 */
     private var lastServiceNotificationText: String? = null
     private var lastNotifiedLevel = -1
@@ -100,7 +101,7 @@ class BrightScreenFastChargeService : Service() {
                     updateLiveNotification()
                     handler.postDelayed(this, TICKER_ACTIVE_MS)
                 } else {
-                    // 息屏充电时已交还官方温控，暂停 5s RootShell 采样与通知刷新，亮屏广播会立即恢复
+                    // 息屏充电时强制交还官方温控，暂停 5s 高频采样，亮屏广播会立即恢复
                     refreshServiceNotification()
                 }
             } else {
@@ -116,22 +117,32 @@ class BrightScreenFastChargeService : Service() {
                 Intent.ACTION_BATTERY_CHANGED -> {
                     val plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) > 0
                     if (plugged != isWiredCharging) {
+                        if (!plugged) {
+                            forceRestoreRequested.set(true)
+                        }
+                        lastTickElapsed = 0L
                         handler.removeCallbacks(tickerRunnable)
                         handler.post(tickerRunnable)
                     }
                 }
-                // 插电/亮屏/拔电事件响应
+                // 插电/亮屏事件响应
                 Intent.ACTION_POWER_CONNECTED,
                 Intent.ACTION_SCREEN_ON -> {
+                    lastTickElapsed = 0L
                     handler.removeCallbacks(tickerRunnable)
                     handler.post(tickerRunnable)
                 }
                 Intent.ACTION_POWER_DISCONNECTED -> {
+                    isWiredCharging = false
+                    forceRestoreRequested.set(true)
+                    lastTickElapsed = 0L
                     handler.removeCallbacks(tickerRunnable)
                     handler.post(tickerRunnable)
                 }
                 Intent.ACTION_SCREEN_OFF -> {
                     isScreenOn = false
+                    forceRestoreRequested.set(true)
+                    lastTickElapsed = 0L
                     handler.removeCallbacks(tickerRunnable)
                     handler.post(tickerRunnable)
                 }
@@ -141,6 +152,7 @@ class BrightScreenFastChargeService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        isServiceAlive = true
         FastChargeNotifier.ensureChannels(this)
 
         // 启动即进入前台，保证进程优先级，避免被回收
@@ -175,6 +187,7 @@ class BrightScreenFastChargeService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        isServiceAlive = true
         if (intent?.action == ACTION_RESTORE_AND_STOP) {
             restoreAndStop()
             return START_NOT_STICKY
@@ -196,6 +209,7 @@ class BrightScreenFastChargeService : Service() {
         }
 
         // 立即跑一轮，保证插电/开关切换后马上生效
+        lastTickElapsed = 0L
         handler.removeCallbacks(tickerRunnable)
         handler.post(tickerRunnable)
         return START_STICKY
@@ -211,7 +225,9 @@ class BrightScreenFastChargeService : Service() {
             val plugged = battery.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0)
             isWiredCharging = plugged > 0
             currentLevel = battery.getIntExtra(BatteryManager.EXTRA_LEVEL, currentLevel)
-            val tempExtra = battery.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0)
+            val tempExtra = FastChargeController.normalizeTemp(
+                battery.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0),
+            )
             if (tempExtra > 0) {
                 currentTempTenths = tempExtra
             }
@@ -220,18 +236,39 @@ class BrightScreenFastChargeService : Service() {
         val powerManager = getSystemService(PowerManager::class.java)
         isScreenOn = powerManager?.isInteractive ?: true
 
-        // 高温熔断保护：电池自身温度达到用户设定阈值（默认 44.0℃）暂停屏蔽，降温 3.5℃ 后恢复
+        updateOverheatState(latestMetrics)
+    }
+
+    private fun updateOverheatState(metrics: FastChargeController.BatteryMetrics) {
         val cutoffCelsius = currentConfig().thermalCutoffCelsius.coerceIn(38, 48)
-        val overheatTenths = cutoffCelsius * 10
-        val coolDownTenths = overheatTenths - 35
-        val effectiveTemp = if (latestMetrics.temperatureTenths > 0) latestMetrics.temperatureTenths else currentTempTenths
-        if (effectiveTemp >= overheatTenths && !isOverheated) {
+        val effectiveTemp = if (metrics.temperatureTenths > 0) metrics.temperatureTenths else currentTempTenths
+        val effectiveMetrics = if (metrics.temperatureTenths > 0) {
+            metrics
+        } else {
+            metrics.copy(temperatureTenths = effectiveTemp)
+        }
+
+        val nowOverheated = FastChargeController.isOverheated(
+            metrics = effectiveMetrics,
+            cutoffCelsius = cutoffCelsius,
+            previouslyOverheated = isOverheated,
+        )
+
+        if (nowOverheated && !isOverheated) {
             isOverheated = true
             isThermalCutoffActive = true
-            Log.w(TAG, "电池温度 ${effectiveTemp / 10.0}℃ 触发安全熔断（阈值 ${cutoffCelsius}℃），交还官方温控")
-        } else if (effectiveTemp <= coolDownTenths && isOverheated) {
+            forceRestoreRequested.set(true)
+            Log.w(
+                TAG,
+                "触发高温安全熔断（电池/中框=${effectiveTemp / 10.0}℃, 芯片峰值=${metrics.maxChipTempTenths / 10.0}℃, 阈值=${cutoffCelsius}℃），立即恢复官方温控",
+            )
+        } else if (!nowOverheated && isOverheated) {
             isOverheated = false
             isThermalCutoffActive = false
+            Log.i(
+                TAG,
+                "温度已回落至安全区间（电池/中框=${effectiveTemp / 10.0}℃, 芯片峰值=${metrics.maxChipTempTenths / 10.0}℃），恢复亮屏快充",
+            )
         }
     }
 
@@ -245,6 +282,13 @@ class BrightScreenFastChargeService : Service() {
                     if (metrics.temperatureTenths > 0) {
                         currentTempTenths = metrics.temperatureTenths
                     }
+                    handler.post {
+                        val wasOverheated = isOverheated
+                        updateOverheatState(metrics)
+                        if (isOverheated != wasOverheated || isOverheated) {
+                            evaluatePolicy()
+                        }
+                    }
                 } finally {
                     isReadingMetrics.set(false)
                 }
@@ -252,60 +296,88 @@ class BrightScreenFastChargeService : Service() {
         }
     }
 
-    /** 核心策略：亮屏 + 有线充电 + 未过热 → 屏蔽温控节点，否则恢复官方温控 */
+    /** 核心策略：亮屏 + 有线充电 + 未过热 → 屏蔽充电温控节点，否则无条件恢复官方温控并定期复核 */
     private fun evaluatePolicy() {
         val desired = isWiredCharging && isScreenOn && !isOverheated
         desiredBlocked = desired
 
         val now = SystemClock.elapsedRealtime()
+        val needVerify = now - lastVerifyElapsed >= VERIFY_INTERVAL_MS
+        val forceRestore = !desired && forceRestoreRequested.get()
+
         if (desired) {
-            // 首次下发，或周期性复核（系统温控守护可能把节点权限改回去）
-            val needVerify = now - lastVerifyElapsed >= VERIFY_INTERVAL_MS
             if (appliedBlocked != true || needVerify) {
-                applyBlocked(true)
+                scheduleNodeSync()
             }
-        } else if (appliedBlocked != false) {
-            applyBlocked(false)
+        } else {
+            // 当处于过热熔断、息屏或拔电状态时：
+            // 不仅在 appliedBlocked != false 时恢复，且每 VERIFY_INTERVAL_MS 强校验底层节点权限，
+            // 彻底杜绝任何外部任务或状态不同步导致节点残留 0000 锁死！
+            if (forceRestore || appliedBlocked != false || needVerify) {
+                scheduleNodeSync()
+            }
         }
     }
 
-    private fun applyBlocked(block: Boolean) {
-        if (!isApplying.compareAndSet(false, true)) return
+    /**
+     * 在单线程 rootExecutor 上串行同步温控节点状态。
+     * 不再因前一次检测未完成而丢弃随后的「熔断/拔线/息屏解锁」指令！
+     */
+    private fun scheduleNodeSync() {
+        if (!syncScheduled.compareAndSet(false, true)) return
         postRoot {
             try {
-                if (block) {
-                    // 复核：root 拥有 CAP_DAC_OVERRIDE，必须用权限位判断而非可读性
-                    val blocked = FastChargeController.areTemperatureNodesBlocked()
-                    if (blocked == true) {
-                        appliedBlocked = true
-                        rootSuccessState = true
+                while (true) {
+                    syncScheduled.set(false)
+                    val wantBlock = desiredBlocked && isEnabled() && isWiredCharging && isScreenOn && !isOverheated
+                    val forceUnlock = forceRestoreRequested.getAndSet(false)
+
+                    if (wantBlock && !forceUnlock) {
+                        val blocked = FastChargeController.areTemperatureNodesBlocked()
+                        if (blocked == true) {
+                            appliedBlocked = true
+                            rootSuccessState = true
+                        } else {
+                            val result = FastChargeController.blockTemperatureNodes()
+                            rootSuccessState = result.success
+                            appliedBlocked = if (result.success) true else null
+                            logResult("亮屏启用充电温控优化", result)
+                        }
                     } else {
-                        val result = FastChargeController.blockTemperatureNodes()
-                        rootSuccessState = result.success
-                        appliedBlocked = if (result.success) true else null
-                        logResult("亮屏启用温控优化", result)
+                        val shouldRestore = forceUnlock ||
+                            appliedBlocked != false ||
+                            (FastChargeController.isAnyTemperatureNodeBlocked() != false)
+                        if (shouldRestore) {
+                            val result = FastChargeController.restoreTemperatureNodes()
+                            rootSuccessState = result.success
+                            appliedBlocked = if (result.success) false else null
+                            logResult("恢复官方原生温控", result)
+                        } else {
+                            appliedBlocked = false
+                        }
                     }
-                } else {
-                    val result = FastChargeController.restoreTemperatureNodes()
-                    rootSuccessState = result.success
-                    appliedBlocked = if (result.success) false else null
-                    logResult("恢复官方原生温控", result)
+                    lastVerifyElapsed = SystemClock.elapsedRealtime()
+
+                    // 若在执行 root 命令期间 desiredBlocked 或 forceRestoreRequested 发生了变化，立即再跑一轮
+                    if (!syncScheduled.get() && !forceRestoreRequested.get() && appliedBlocked == (desiredBlocked && isEnabled() && isWiredCharging && isScreenOn && !isOverheated)) {
+                        break
+                    }
                 }
-                lastVerifyElapsed = SystemClock.elapsedRealtime()
             } finally {
-                isApplying.set(false)
+                syncScheduled.set(false)
             }
         }
     }
 
-    /** 拔线/息屏时的待命态：恢复官方温控、隐藏实时通知，但服务保持存活 */
+    /** 拔线时的待命态：无条件强制恢复官方温控、隐藏实时通知，但服务保持存活 */
     private fun enterStandby() {
         val justUnplugged = wasChargingLastTick
         wasChargingLastTick = false
         desiredBlocked = false
-        if (appliedBlocked != false) {
-            applyBlocked(false)
+        if (justUnplugged || appliedBlocked != false) {
+            forceRestoreRequested.set(true)
         }
+        scheduleNodeSync()
         FastChargeNotifier.cancelLive(this)
         lastNotifiedLevel = -1
         lastNotifiedWatts = -1.0
@@ -427,10 +499,16 @@ class BrightScreenFastChargeService : Service() {
     }
 
     override fun onDestroy() {
+        isServiceAlive = false
         handler.removeCallbacks(tickerRunnable)
         if (receiverRegistered) {
             runCatching { unregisterReceiver(chargingReceiver) }
             receiverRegistered = false
+        }
+        runCatching {
+            rootExecutor.execute {
+                FastChargeController.restoreTemperatureNodes()
+            }
         }
         rootExecutor.shutdown()
         super.onDestroy()
@@ -443,12 +521,16 @@ class BrightScreenFastChargeService : Service() {
         const val ACTION_RESTORE_AND_STOP = "com.weitiao.tuning.action.RESTORE_FAST_CHARGE"
 
         @Volatile
-        var lastKnownMetrics: FastChargeController.BatteryMetrics = FastChargeController.BatteryMetrics(0, 0, 0.0, 0)
+        var isServiceAlive: Boolean = false
             private set
 
         @Volatile
+        var lastKnownMetrics: FastChargeController.BatteryMetrics = FastChargeController.BatteryMetrics(0, 0, 0.0, 0, 0)
+            internal set
+
+        @Volatile
         var isThermalCutoffActive: Boolean = false
-            private set
+            internal set
 
         private const val TAG = "TuningFastCharge"
 
@@ -461,6 +543,6 @@ class BrightScreenFastChargeService : Service() {
         private const val TICKER_ACTIVE_MS = 5_000L
         private const val TICKER_IDLE_MS = 30_000L
         private const val MIN_TICK_INTERVAL_MS = 3_000L
-        private const val VERIFY_INTERVAL_MS = 30_000L // 每 30s 复核一次节点权限，防止被系统重置
+        private const val VERIFY_INTERVAL_MS = 15_000L // 每 15s 双向复核一次节点权限，防止被系统重置或异常锁死
     }
 }

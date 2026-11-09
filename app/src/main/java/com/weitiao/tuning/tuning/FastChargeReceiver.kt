@@ -26,7 +26,22 @@ import com.weitiao.tuning.core.TuningPrefs
 class FastChargeReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent?) {
-        if (!TuningPrefs.load(context).brightScreenFastCharge) return
+        val enabled = TuningPrefs.load(context).brightScreenFastCharge
+        if (!enabled || intent?.action == Intent.ACTION_POWER_DISCONNECTED) {
+            val pending = goAsync()
+            Thread({
+                try {
+                    FastChargeController.restoreTemperatureNodes()
+                    if (!enabled) {
+                        FastChargeScheduler.disable(context)
+                        FastChargeNotifier.cancelLive(context)
+                    }
+                } finally {
+                    runCatching { pending.finish() }
+                }
+            }, "Tuning-FastChargeRestore").apply { isDaemon = true }.start()
+            if (!enabled) return
+        }
 
         FastChargeNotifier.ensureChannels(context)
 
