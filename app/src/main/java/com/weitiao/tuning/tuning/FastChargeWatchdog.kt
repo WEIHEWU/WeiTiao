@@ -153,7 +153,7 @@ object FastChargeFallback {
 
         if (plugged <= 0) {
             FastChargeController.restoreTemperatureNodes()
-            FastChargeNotifier.cancelLive(context)
+            FastChargeNotifier.hideNotification(context)
             FastChargeScheduler.armChargingTrigger(context)
             return
         }
@@ -180,18 +180,25 @@ object FastChargeFallback {
         if (overheated) {
             FastChargeController.restoreTemperatureNodes()
             val tempC = String.format("%.1f°C", metrics.temperatureTenths / 10.0)
-            FastChargeNotifier.postLive(context, "高温保护恢复原生温控 · 电量:$level%", tempC)
+            val statusText = FastChargeNotifier.formatChargingStatus(
+                isScreenOn = true,
+                isOverheated = true,
+                level = level,
+                metrics = metrics,
+            )
+            FastChargeNotifier.postLive(context, statusText, tempC)
             Log.w(TAG, "兜底路径检测到高温 (batt=${metrics.temperatureTenths / 10.0}℃, chip=${metrics.maxChipTempTenths / 10.0}℃)，已恢复官方温控")
             return
         }
 
         FastChargeController.enableSamsungFastChargingSettings()
         val result = FastChargeController.blockTemperatureNodes()
-        val statusText = if (metrics.currentMa > 0 && metrics.voltageMv > 0) {
-            String.format("电量:%d%% 电流:%dmA 电压:%.2fV 功率:%.1fW", level, metrics.currentMa, metrics.voltageMv / 1000.0, metrics.powerWatts)
-        } else {
-            "电量:$level%"
-        }
+        val statusText = FastChargeNotifier.formatChargingStatus(
+            isScreenOn = true,
+            isOverheated = false,
+            level = level,
+            metrics = metrics,
+        )
         val tempC = String.format("%.1f°C", metrics.temperatureTenths / 10.0)
         FastChargeNotifier.postLive(context, statusText, tempC)
         Log.i(TAG, "兜底路径已下发温控策略 success=${result.success}")
@@ -214,18 +221,23 @@ class FastChargeJobService : JobService() {
     }
 
     override fun onStopJob(params: JobParameters?): Boolean {
-        // 当用户拔掉充电器导致 requiresCharging 约束失效时，系统会立即回调 onStopJob：
-        // 即使常驻服务已被系统回收，这里也能确保拔线瞬间无条件恢复全部温控节点！
+        // 当用户拔掉充电器导致 requiresCharging 约束失效，或任务被取消时，系统会立即回调 onStopJob：
+        // 即使常驻服务已被系统回收，这里也能在后台线程确保拔线瞬间无条件恢复全部温控节点！
         val context = applicationContext
+        val enabled = TuningPrefs.load(context).brightScreenFastCharge
         Thread({
             runCatching {
-                if (!FastChargeScheduler.isPluggedIn(context)) {
+                if (!enabled) {
                     FastChargeController.restoreTemperatureNodes()
+                    FastChargeScheduler.disable(context)
                     FastChargeNotifier.cancelLive(context)
+                } else if (!FastChargeScheduler.isPluggedIn(context)) {
+                    FastChargeController.restoreTemperatureNodes()
+                    FastChargeNotifier.hideNotification(context)
                     FastChargeScheduler.armChargingTrigger(context)
                 }
             }
         }, "Tuning-FastChargeUnplugRestore").apply { isDaemon = true }.start()
-        return true
+        return enabled
     }
 }

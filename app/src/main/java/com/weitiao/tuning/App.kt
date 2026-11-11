@@ -6,6 +6,7 @@ import android.util.Log
 import com.weitiao.tuning.core.CscConstants
 import com.weitiao.tuning.core.TuningPrefs
 import com.weitiao.tuning.tuning.FastChargeController
+import com.weitiao.tuning.tuning.FastChargeNotifier
 import com.weitiao.tuning.tuning.FastChargeScheduler
 import io.github.libxposed.service.XposedService
 import io.github.libxposed.service.XposedServiceHelper
@@ -54,11 +55,17 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
         Log.i(TAG, "App.onCreate: registering XposedService listener")
         XposedServiceHelper.registerListener(this)
 
-        // 启动自愈检查：若当前未开启亮屏快充或未插充电器，或旧版本残留锁死了 AP/PA/WF 等温控节点，
-        // 进程启动时立即在后台检测并恢复权限，彻底消除历史残留 0000 锁死隐患。
+        // 启动自愈检查（全量在后台线程执行，不阻塞冷启动主线程）：
+        // 1. 仅在覆盖安装后执行一次旧版 19076 常驻通知与旧渠道清理，不为未启用快充的用户创建渠道或发通知；
+        // 2. 若当前未开启亮屏快充或未插充电器，检测并恢复可能残留的 0000 温控节点权限；
+        // 3. 不在 App.onCreate 中调用 hideNotification，避免覆盖正在运行的常驻服务已发布的充电实时通知。
         Thread({
             runCatching {
+                FastChargeNotifier.cleanupLegacyIfNeeded(this)
                 val cfg = TuningPrefs.load(this)
+                if (!cfg.brightScreenFastCharge) {
+                    FastChargeNotifier.cancelLive(this)
+                }
                 if (!cfg.brightScreenFastCharge || !FastChargeScheduler.isPluggedIn(this)) {
                     if (FastChargeController.isAnyTemperatureNodeBlocked() == true) {
                         FastChargeController.restoreTemperatureNodes()

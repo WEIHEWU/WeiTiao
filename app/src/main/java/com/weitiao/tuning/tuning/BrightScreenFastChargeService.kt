@@ -67,11 +67,11 @@ class BrightScreenFastChargeService : Service() {
     @Volatile private var lastTickElapsed = 0L
 
     @Volatile private var latestMetrics = FastChargeController.BatteryMetrics(0, 0, 0.0, 320, 0)
-    /** 常驻通知当前文案，用于去重，避免每个 tick 都刷新一次通知 */
-    private var lastServiceNotificationText: String? = null
     private var lastNotifiedLevel = -1
     private var lastNotifiedWatts = -1.0
     private var lastNotifyTime = 0L
+    private var lastNotifiedScreenOn: Boolean? = null
+    private var lastNotifiedOverheated: Boolean? = null
 
     private val tickerRunnable: Runnable = object : Runnable {
         override fun run() {
@@ -101,8 +101,9 @@ class BrightScreenFastChargeService : Service() {
                     updateLiveNotification()
                     handler.postDelayed(this, TICKER_ACTIVE_MS)
                 } else {
-                    // 息屏充电时强制交还官方温控，暂停 5s 高频采样，亮屏广播会立即恢复
-                    refreshServiceNotification()
+                    // 息屏充电时强制交还官方温控，暂停 5s 高频采样，亮屏广播会立即恢复。
+                    // 仍处于充电状态，因此保留同一条实时通知，但不做高频采样。
+                    updateLiveNotification()
                 }
             } else {
                 enterStandby()
@@ -155,12 +156,10 @@ class BrightScreenFastChargeService : Service() {
         isServiceAlive = true
         FastChargeNotifier.ensureChannels(this)
 
-        // 启动即进入前台，保证进程优先级，避免被回收
-        runCatching {
-            startForeground(SERVICE_NOTIFICATION_ID, FastChargeNotifier.buildServiceNotification(this, SERVICE_IDLE_TEXT))
-            foregroundStarted = true
-        }.onFailure {
-            Log.e(TAG, "前台服务启动失败（可能受后台启动限制）", it)
+        // 启动即进入前台（绑定隐藏渠道通知），保证进程优先级，避免被回收
+        foregroundStarted = FastChargeNotifier.bindForegroundService(this)
+        if (!foregroundStarted) {
+            Log.e(TAG, "前台服务启动失败（可能受后台启动限制）")
         }
 
         val powerManager = getSystemService(PowerManager::class.java)
@@ -197,12 +196,9 @@ class BrightScreenFastChargeService : Service() {
             return START_NOT_STICKY
         }
 
-        runCatching {
-            if (!foregroundStarted) {
-                startForeground(SERVICE_NOTIFICATION_ID, FastChargeNotifier.buildServiceNotification(this, SERVICE_IDLE_TEXT))
-                foregroundStarted = true
-            }
-        }
+        // 每次 ContextCompat.startForegroundService 触发 onStartCommand 时均需满足系统的 startForeground 要求；
+        // bindForegroundService 会复用当前充电实时通知或隐藏通知，不闪烁、不新增通知。
+        foregroundStarted = FastChargeNotifier.bindForegroundService(this) || foregroundStarted
         FastChargeScheduler.enable(this)
         postRoot {
             logResult("启用三星快充系统设置", FastChargeController.enableSamsungFastChargingSettings())
@@ -287,6 +283,9 @@ class BrightScreenFastChargeService : Service() {
                         updateOverheatState(metrics)
                         if (isOverheated != wasOverheated || isOverheated) {
                             evaluatePolicy()
+                        }
+                        if (isWiredCharging) {
+                            updateLiveNotification()
                         }
                     }
                 } finally {
@@ -378,34 +377,37 @@ class BrightScreenFastChargeService : Service() {
             forceRestoreRequested.set(true)
         }
         scheduleNodeSync()
-        FastChargeNotifier.cancelLive(this)
+        hideServiceNotification()
         lastNotifiedLevel = -1
         lastNotifiedWatts = -1.0
         lastNotifyTime = 0L
+        lastNotifiedScreenOn = null
+        lastNotifiedOverheated = null
         // 仅在拔线瞬间重新布防「插电触发器」，避免待命态每次轮询都重复操作 JobScheduler
         if (justUnplugged) {
             FastChargeScheduler.armChargingTrigger(this)
         }
-        refreshServiceNotification()
     }
 
-    private fun refreshServiceNotification() {
-        if (!foregroundStarted) return
-        // 待命态每 10 秒一次 tick，文案没变就别重复 startForeground
-        val text = if (isWiredCharging) SERVICE_ACTIVE_TEXT else SERVICE_IDLE_TEXT
-        if (text == lastServiceNotificationText) return
-        lastServiceNotificationText = text
-        runCatching {
-            startForeground(SERVICE_NOTIFICATION_ID, FastChargeNotifier.buildServiceNotification(this, text))
-        }
+    /**
+     * 用同一个通知 ID 把可见实时通知原地替换成隐藏的前台服务通知。
+     * 前台服务仍然保持前台优先级，但通知栏不会出现常驻条目。
+     */
+    private fun hideServiceNotification() {
+        FastChargeNotifier.hideNotification(
+            context = this,
+            service = if (foregroundStarted) this else null,
+        )
     }
 
     private fun updateLiveNotification() {
         if (!isWiredCharging) {
-            FastChargeNotifier.cancelLive(this)
+            hideServiceNotification()
             lastNotifiedLevel = -1
             lastNotifiedWatts = -1.0
             lastNotifyTime = 0L
+            lastNotifiedScreenOn = null
+            lastNotifiedOverheated = null
             return
         }
         val metrics = latestMetrics
@@ -413,26 +415,36 @@ class BrightScreenFastChargeService : Service() {
         val tempC = String.format("%.1f°C", effectiveTemp / 10.0)
 
         val now = SystemClock.elapsedRealtime()
-        // 节流机制：若距离上次更新未满 5 秒，且电量未变、功率波动小于 0.8W，跳过重复更新，防止触发 SystemUI 120Hz 布局死循环与发热
+        val stateChanged = lastNotifiedScreenOn != isScreenOn ||
+            lastNotifiedOverheated != isOverheated ||
+            (lastNotifiedWatts <= 0.0 && metrics.powerWatts > 0.0)
+        // 节流机制：状态未发生切换、距离上次更新未满 5 秒，且电量未变、功率波动小于 0.8W，跳过重复更新，防止触发 SystemUI 120Hz 布局死循环与发热
         val wattsDiff = Math.abs(metrics.powerWatts - lastNotifiedWatts)
-        if (lastNotifyTime > 0L && now - lastNotifyTime < 5_000L && currentLevel == lastNotifiedLevel && wattsDiff < 0.8) {
-            refreshServiceNotification()
+        if (!stateChanged && lastNotifyTime > 0L && now - lastNotifyTime < 5_000L && currentLevel == lastNotifiedLevel && wattsDiff < 0.8) {
             return
         }
 
         lastNotifiedLevel = currentLevel
         lastNotifiedWatts = metrics.powerWatts
         lastNotifyTime = now
+        lastNotifiedScreenOn = isScreenOn
+        lastNotifiedOverheated = isOverheated
 
-        val statusText = if (metrics.currentMa > 0 && metrics.voltageMv > 0) {
-            String.format("电量:%d%% 电流:%dmA 电压:%.2fV 功率:%.1fW", currentLevel, metrics.currentMa, metrics.voltageMv / 1000.0, metrics.powerWatts)
-        } else if (metrics.voltageMv > 0) {
-            String.format("电量:%d%% 电流:读取中 电压:%.2fV", currentLevel, metrics.voltageMv / 1000.0)
-        } else {
-            String.format("电量:%d%%", currentLevel)
+        val statusText = FastChargeNotifier.formatChargingStatus(
+            isScreenOn = isScreenOn,
+            isOverheated = isOverheated,
+            level = currentLevel,
+            metrics = metrics,
+        )
+        val posted = FastChargeNotifier.postLive(
+            context = this,
+            status = statusText,
+            subText = tempC,
+            service = if (foregroundStarted) this else null,
+        )
+        if (!posted) {
+            hideServiceNotification()
         }
-        FastChargeNotifier.postLive(this, statusText, tempC)
-        refreshServiceNotification()
     }
 
     private fun restoreAndStop() {
@@ -454,6 +466,8 @@ class BrightScreenFastChargeService : Service() {
                 lastNotifiedLevel = -1
                 lastNotifiedWatts = -1.0
                 lastNotifyTime = 0L
+                lastNotifiedScreenOn = null
+                lastNotifiedOverheated = null
                 runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
                 foregroundStarted = false
                 stopSelf()
@@ -533,12 +547,6 @@ class BrightScreenFastChargeService : Service() {
             internal set
 
         private const val TAG = "TuningFastCharge"
-
-        /** 承载前台服务的静默通知 ID（不要与实时通知 ID 冲突） */
-        private const val SERVICE_NOTIFICATION_ID = 19076
-
-        private const val SERVICE_IDLE_TEXT = "待命中 · 接入充电器后自动生效"
-        private const val SERVICE_ACTIVE_TEXT = "充电监控中 · 亮屏自动解除温控限流"
 
         private const val TICKER_ACTIVE_MS = 5_000L
         private const val TICKER_IDLE_MS = 30_000L

@@ -24,27 +24,23 @@ jobs:
 
       - name: Verify APK & Generate SHA-256 Checksum
         run: |
-          test -f releases/WeiTiao-v1.5.5.apk
+          test -f releases/WeiTiao-v1.5.6.apk
           cd releases
-          sha256sum WeiTiao-v1.5.5.apk > WeiTiao-v1.5.5.apk.sha256
-          cat WeiTiao-v1.5.5.apk.sha256
+          sha256sum WeiTiao-v1.5.6.apk > WeiTiao-v1.5.6.apk.sha256
+          cat WeiTiao-v1.5.6.apk.sha256
 
       - name: Create GitHub Release and Upload APK + Checksum
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.5.5
-          name: "微调 WeiTiao v1.5.5 (极简三栏交互架构重构 · 两步分应用机型配置与渐进式高级设置)"
+          tag_name: v1.5.6
+          name: "微调 WeiTiao v1.5.6 (亮屏快充单通知状态机重构 · 根除待命常驻与双通知并存问题)"
           body: |
-            ### 微调 (WeiTiao) v1.5.5
+            ### 微调 (WeiTiao) v1.5.6
 
-            - **全新三栏极简信息架构与渐进式披露 (`DashboardScreen` / `FeatureScreens` / `SettingsScreen`)**：
-              - **首页（状态总览 + 4 大常用功能直达）**：首屏精简为环境状态总览与「商店跨区、机型伪装、微信增强、充电优化」4 大高频功能卡片；缺失 LSPosed 激活或 Root 权限时直接提供可执行引导动作（查看激活步骤 / 立即请求 Root 授权）。
-              - **功能页（按用户心智分类）**：清晰划分为「区域与机型」「微信增强」「充电与供电」「One UI 增强」四大分类，彻底移除跨页面重复入口与底层技术术语堆砌。
-              - **设置页（诊断与高级信息默认收起）**：整合环境与伪装自检、LSPosed 推荐作用域说明与 Root 状态诊断，底层宿主进程心跳等高级信息默认折叠。
-            - **高频任务操作路径大幅缩短 (`RegionAndDeviceScreens` / `SystemAndWechatScreens`)**：
-              - **一键预设直启**：商店跨区、全局机型伪装、微信步数修改在主开关关闭状态下仍可直接点击常用预设磁贴，一步完成「开启功能 + 套用预设」。
-              - **分应用独立机型 2 步配置**：独立拆分全局目标范围选择器与分应用机型选择器，通过「点选应用 → 选择专属机型」两步即存并自动同步 LSPosed 作用域，修复修改单应用机型时误改动全局白名单过滤开关的问题。
-              - **未保存更改与前置条件精准保护**：为高级自定义地区参数、自定义 `CscFeature` / `SystemProperties`（含 JSON 源码编辑框）补齐返回拦截与保存确认；充电与供电详情页新增硬件 `sysfs` 节点局部支持探测与 Android 13+ 通知权限自动申请。
+            - **亮屏快充通知架构合并与统一状态机 (`FastChargeNotifier` / `BrightScreenFastChargeService`)**：
+              - **单通知 ID 原地切换 (`NOTIFICATION_ID = 19077`)**：彻底废弃旧版 `19076` 常驻服务通知 ID，前台服务保活与充电实时数据合并共用唯一 ID `19077`；未插电待命态绑定 `IMPORTANCE_NONE` 隐藏渠道使通知栏完全不显示「亮屏快充」条目，插电充电态（含亮屏快充、息屏安全充电、高温保护恢复原生温控）在同一通知 ID 上原地刷新。
+              - **覆盖安装自动清理旧版残留与防渠道篡改保护**：新增带版本号的 `cleanupLegacyIfNeeded` 一次性自动清理旧版 `19076` 残留通知与旧渠道；当后台隐藏渠道重要性被外部误改时，采用「先新建隐藏渠道并切换前台通知绑定、再删除旧渠道」的无感轮转保护（上限 3 次），同时 100% 尊重用户对「亮屏快充」可见通知类别的开关设置。
+              - **全链路拔线兜底一致性 (`FastChargeReceiver` / `FastChargeWatchdog`)**：统一常驻服务、静态广播与 `JobService.onStopJob` 拔线恢复路径，拔线瞬间立即切回隐藏态、恢复官方温控节点并重新布防插电触发器。
           files: |
-            releases/WeiTiao-v1.5.5.apk
-            releases/WeiTiao-v1.5.5.apk.sha256
+            releases/WeiTiao-v1.5.6.apk
+            releases/WeiTiao-v1.5.6.apk.sha256

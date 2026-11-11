@@ -380,7 +380,7 @@ class PassThroughService : Service() {
         private const val TAG = "TuningPassThrough"
         private const val CHANNEL_ID = "usb_pd_pass_through"
         private const val CHANNEL_SILENT = "usb_pd_pass_through_silent"
-        // 注意：不能与 FastChargeNotifier.LIVE_NOTIFICATION_ID(19077) 撞号。
+        // 注意：不能与 FastChargeNotifier.NOTIFICATION_ID(19077) 撞号。
         // 两个服务同属一个包，id 相同会互相覆盖通知——同时开启亮屏快充和旁路供电时
         // 用户只会看到其中一个，且实时电流信息会闪来闪去。
         private const val NOTIFICATION_ID = 19078
