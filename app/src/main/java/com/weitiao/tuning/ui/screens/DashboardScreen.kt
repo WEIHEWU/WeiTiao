@@ -10,336 +10,164 @@ import android.os.BatteryManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DirectionsRun
-import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.BatteryAlert
-import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.CleaningServices
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Power
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Smartphone
-import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.state.ToggleableState
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import androidx.core.graphics.drawable.toBitmap
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.weitiao.tuning.App
 import com.weitiao.tuning.BuildConfig
 import com.weitiao.tuning.R
 import com.weitiao.tuning.core.CscConfig
 import com.weitiao.tuning.core.CscPrefs
-import com.weitiao.tuning.core.HookLiveness
 import com.weitiao.tuning.core.LsposedScopeHelper
 import com.weitiao.tuning.core.RegionApplyState
 import com.weitiao.tuning.core.RootShell
 import com.weitiao.tuning.core.StoreCleaner
 import com.weitiao.tuning.core.TuningConfig
 import com.weitiao.tuning.core.TuningPrefs
-import com.weitiao.tuning.data.CscEntry
+import com.weitiao.tuning.ui.components.ActivationGuideDialog
+import com.weitiao.tuning.ui.components.ConfirmRestartAppsDialog
 import com.weitiao.tuning.ui.components.IosGlassTokens
 import com.weitiao.tuning.ui.components.MiuixHeroStatusCard
-import com.weitiao.tuning.ui.components.MiuixMetricCard
 import com.weitiao.tuning.ui.components.MiuixPageScaffold
-import com.weitiao.tuning.ui.components.MiuixQuickTile
-import com.weitiao.tuning.ui.components.OneUiIslandCard
-import com.weitiao.tuning.ui.components.OneUiItemRow
+import com.weitiao.tuning.ui.components.MiuixSectionTitle
+import com.weitiao.tuning.ui.components.OneUiHomeFeatureCard
 import com.weitiao.tuning.ui.components.OneUiNoticeBanner
-import com.weitiao.tuning.ui.components.OneUiSegmentedControl
-import com.weitiao.tuning.ui.components.rememberOneUiHaptics
-import com.weitiao.tuning.ui.theme.OneUiTokens
-import com.weitiao.tuning.tuning.FastChargeController
-import java.text.NumberFormat
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import top.yukonga.miuix.kmp.basic.ButtonDefaults
-import top.yukonga.miuix.kmp.basic.Checkbox
-import top.yukonga.miuix.kmp.basic.HorizontalDivider
-import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.IconButton
-import top.yukonga.miuix.kmp.basic.Slider
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
-import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.basic.TextField
-import top.yukonga.miuix.kmp.extra.WindowBottomSheet
-import top.yukonga.miuix.kmp.extra.WindowDialog
-import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.utils.overScrollVertical
 
-private enum class ModuleState { NOT_CONNECTED, NO_SCOPE, ACTIVE }
-
-private const val PANEL_SPOOF = 0
-private const val PANEL_STEPS = 1
-private const val PANEL_POWER = 2
-
-private data class CompactPreset(
-    val labelZh: String,
-    val labelEn: String,
-    val nameRes: Int,
-    val salesCode: String,
-    val simMcc: String,
-    val countryCode: String,
-    val numeric: String,
-    val operator: String,
-    val mnc: String,
-)
-
-private val QUICK_REGION_PRESETS = listOf(
-    CompactPreset("香港", "HK", R.string.preset_hk_name, "TGY", "454", "HK", "45406", "SmarTone", "06"),
-    CompactPreset("美国", "US", R.string.preset_us_name, "XAA", "310", "US", "310260", "T-Mobile", "260"),
-    CompactPreset("欧洲", "EU", R.string.preset_eu_name, "EUX", "262", "DE", "26201", "T-Mobile", "01"),
-    CompactPreset("台湾", "TW", R.string.preset_tw_name, "BRI", "466", "TW", "46688", "Telecom", "88"),
-    CompactPreset("韩国", "KR", R.string.preset_kr_name, "KOO", "450", "KR", "45005", "SKT", "05"),
-    CompactPreset("大陆", "CN", R.string.preset_cn_name, "CHC", "460", "CN", "46000", "CHINA MOBILE", "00"),
-)
-
-private data class StepTierPreset(
-    val multiplier: Int,
-    val recommendedCap: Int,
-    val titleZh: String,
-    val titleEn: String,
-)
-
-private val STEP_TIER_PRESETS = listOf(
-    StepTierPreset(multiplier = 3, recommendedCap = 28000, titleZh = "3x 轻度", titleEn = "3x Light"),
-    StepTierPreset(multiplier = 10, recommendedCap = 50000, titleZh = "10x 日常", titleEn = "10x Daily"),
-    StepTierPreset(multiplier = 25, recommendedCap = 68000, titleZh = "25x 进阶", titleEn = "25x Boost"),
-    StepTierPreset(multiplier = 50, recommendedCap = 88888, titleZh = "50x 极速", titleEn = "50x Max"),
-)
-
-private data class LaunchableAppEntry(
-    val packageName: String,
-    val label: String,
-    val icon: android.graphics.drawable.Drawable?,
-)
-
+/**
+ * 首页：仅承担「查看环境状态」与「使用 4 项最常用功能」
+ * - 单个紧凑的环境状态卡 + 按需下一步操作引导（不重复堆叠相同状态卡）
+ * - 4 张纵向常用功能卡片（商店跨区、机型伪装、微信增强、充电优化）
+ */
 @Composable
 fun DashboardScreen(
     refreshTrigger: Int = 0,
-    pendingSelection: CscEntry? = null,
-    onConsumeSelection: () -> Unit = {},
-    onOpenSearch: () -> Unit = {},
-    onOpenSettings: () -> Unit = {},
+    bottomBar: (@Composable () -> Unit)? = null,
+    onOpenFeature: (FeaturePageId) -> Unit,
+    onOpenSettings: () -> Unit,
     onConfigChanged: () -> Unit = {},
 ) {
     val context = LocalContext.current
-    val haptics = rememberOneUiHaptics()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val isZh = remember { Locale.getDefault().language.startsWith("zh") }
-    val numFmt = remember { NumberFormat.getIntegerInstance(Locale.US) }
 
     var csc by remember { mutableStateOf(CscPrefs.load(context)) }
     var tuning by remember { mutableStateOf(TuningPrefs.load(context)) }
-
-    // 下方参数面板分段切换（避免把所有卡片同时堆叠在一个长页面）
-    var activePanel by rememberSaveable { mutableIntStateOf(PANEL_SPOOF) }
-
-    var multiplier by remember(tuning.stepMultiplier) { mutableStateOf(tuning.stepMultiplier.toString()) }
-    var maximum by remember(tuning.stepMaximum) { mutableStateOf(tuning.stepMaximum.toString()) }
-    var endHour by remember(tuning.stepEndHour) { mutableStateOf(tuning.stepEndHour.toString()) }
-    var passThroughSlider by remember(tuning.passThroughLimit) {
-        mutableFloatStateOf(tuning.passThroughLimit.toFloat())
-    }
-    var thermalCutoffSlider by remember(tuning.thermalCutoffCelsius) {
-        mutableFloatStateOf(tuning.thermalCutoffCelsius.toFloat())
-    }
     var selectedPassApps by remember { mutableStateOf(TuningPrefs.selectedApps(context)) }
-
-    var showDeviceModelPicker by remember { mutableStateOf(false) }
-    var showDeviceTargetPicker by remember { mutableStateOf(false) }
-    var showPassAppPicker by remember { mutableStateOf(false) }
-    var showPresetConfirmDialog by remember { mutableStateOf<CompactPreset?>(null) }
-    var lastConfirmPreset by remember { mutableStateOf(QUICK_REGION_PRESETS.first()) }
-    showPresetConfirmDialog?.let { lastConfirmPreset = it }
-
-    val initialConnected = App.getXposedService() != null || App.getRemotePrefs() != null
-    var moduleState by remember {
-        mutableStateOf(if (initialConnected) ModuleState.ACTIVE else ModuleState.NOT_CONNECTED)
-    }
-    var liveness by remember { mutableStateOf<Set<String>?>(null) }
-    var hasRoot by remember { mutableStateOf(false) }
     var regionCleanupPending by remember { mutableStateOf(RegionApplyState.isPending(context)) }
 
-    // 实时电池温度与充电状态监听
-    var batteryTemp by remember { mutableFloatStateOf(34.5f) }
-    var batteryLevel by remember { mutableIntStateOf(80) }
-    var isPlugged by remember { mutableStateOf(false) }
-    var batteryCurrentMa by remember { mutableIntStateOf(0) }
-    var batteryVoltageMv by remember { mutableIntStateOf(0) }
-    var batteryWatts by remember { mutableFloatStateOf(0f) }
+    var xposedReady by remember {
+        mutableStateOf(App.getXposedService() != null || App.getRemotePrefs() != null)
+    }
+    var hasRoot by remember { mutableStateOf(false) }
+    var batteryRestricted by remember {
+        mutableStateOf(TuningPrefs.isBatteryOptimizationRestricted(context))
+    }
+    var batteryTempTenths by remember { mutableIntStateOf(0) }
 
-    fun applyHardwareMetrics(metrics: FastChargeController.BatteryMetrics) {
-        if (metrics.temperatureTenths > 0) {
-            batteryTemp = metrics.temperatureTenths / 10f
+    var showActivationGuide by rememberSaveable { mutableStateOf(false) }
+    var showClearStoreConfirm by remember { mutableStateOf(false) }
+
+    val notifPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { _ -> }
+
+    fun ensureNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val granted = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
         }
-        batteryCurrentMa = metrics.currentMa
-        batteryVoltageMv = metrics.voltageMv
-        batteryWatts = metrics.powerWatts.toFloat()
     }
 
-    fun refreshHardwareMetrics() {
-        scope.launch(Dispatchers.IO) {
-            val metrics = FastChargeController.readBatteryMetrics(context)
-            applyHardwareMetrics(metrics)
+    fun recheckEnvironment(showToast: Boolean = false) {
+        scope.launch {
+            val rootOk = withContext(Dispatchers.IO) { RootShell.hasRoot(forceRefresh = true) }
+            val xpOk = App.getXposedService() != null || App.getRemotePrefs() != null
+            hasRoot = rootOk
+            xposedReady = xpOk
+            batteryRestricted = TuningPrefs.isBatteryOptimizationRestricted(context)
+            if (showToast) {
+                val msg = if (isZh) {
+                    "环境已刷新：LSPosed ${if (xpOk) "已激活" else "未激活"} · Root ${if (rootOk) "已授权" else "未授权"}"
+                } else {
+                    "Status updated: LSPosed ${if (xpOk) "Active" else "Inactive"} · Root ${if (rootOk) "Granted" else "Unavailable"}"
+                }
+                snackbar.showSnackbar(msg)
+            }
+        }
+    }
+
+    LaunchedEffect(refreshTrigger) {
+        csc = CscPrefs.load(context)
+        tuning = TuningPrefs.load(context)
+        selectedPassApps = TuningPrefs.selectedApps(context)
+        regionCleanupPending = RegionApplyState.isPending(context)
+        xposedReady = App.getXposedService() != null || App.getRemotePrefs() != null
+        batteryRestricted = TuningPrefs.isBatteryOptimizationRestricted(context)
+        hasRoot = withContext(Dispatchers.IO) { RootShell.hasRoot() }
+    }
+
+    LaunchedEffect(Unit) {
+        while (isActive) {
+            delay(2500L)
+            xposedReady = App.getXposedService() != null || App.getRemotePrefs() != null
+            batteryRestricted = TuningPrefs.isBatteryOptimizationRestricted(context)
         }
     }
 
     DisposableEffect(context) {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context?, intent: Intent?) {
-                intent ?: return
-                val tempTenths = intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0)
-                if (tempTenths > 0) {
-                    batteryTemp = tempTenths / 10f
-                } else {
-                    refreshHardwareMetrics()
+                if (intent != null) {
+                    batteryTempTenths = intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0)
                 }
-                val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, 80)
-                val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1)
-                batteryLevel = (level * 100) / scale
-                val plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0)
-                isPlugged = plugged != 0
             }
         }
         val sticky = context.registerReceiver(receiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
         if (sticky != null) {
-            val initTemp = sticky.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0)
-            if (initTemp > 0) {
-                batteryTemp = initTemp / 10f
-            } else {
-                refreshHardwareMetrics()
-            }
-            val level = sticky.getIntExtra(BatteryManager.EXTRA_LEVEL, 80)
-            val scale = sticky.getIntExtra(BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1)
-            batteryLevel = (level * 100) / scale
-            isPlugged = sticky.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
+            batteryTempTenths = sticky.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0)
         }
         onDispose {
             runCatching { context.unregisterReceiver(receiver) }
         }
-    }
-
-    val notificationLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission(),
-        onResult = {},
-    )
-
-    fun requestNotificationPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT >= 33 &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
-    }
-
-    val lifecycleOwner = LocalLifecycleOwner.current
-    var resumeTick by remember { mutableIntStateOf(0) }
-    var isResumed by remember { mutableStateOf(true) }
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_RESUME -> {
-                    isResumed = true
-                    resumeTick++
-                }
-                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
-                    isResumed = false
-                }
-                else -> {}
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-    val batteryRestricted by remember(resumeTick) {
-        mutableStateOf(TuningPrefs.isBatteryOptimizationRestricted(context))
-    }
-
-    LaunchedEffect(isResumed, isPlugged) {
-        if (!isResumed) return@LaunchedEffect
-        val initial = withContext(Dispatchers.IO) { FastChargeController.readBatteryMetrics(context) }
-        applyHardwareMetrics(initial)
-        while (isActive && isResumed && isPlugged) {
-            delay(4000)
-            val metrics = withContext(Dispatchers.IO) { FastChargeController.readBatteryMetrics(context) }
-            applyHardwareMetrics(metrics)
-        }
-    }
-
-    fun refreshModuleState() {
-        if (App.getXposedService() == null && App.getRemotePrefs() == null) {
-            moduleState = ModuleState.NOT_CONNECTED
-            return
-        }
-        val pkgs = liveness
-        moduleState = if (pkgs != null && pkgs.isEmpty()) ModuleState.NO_SCOPE else ModuleState.ACTIVE
-    }
-
-    fun refreshState() {
-        csc = CscPrefs.load(context)
-        tuning = TuningPrefs.load(context)
-        selectedPassApps = TuningPrefs.selectedApps(context)
-        regionCleanupPending = RegionApplyState.isPending(context)
-        refreshModuleState()
-    }
-
-    fun updateTuning(block: (TuningConfig) -> TuningConfig) {
-        val next = block(tuning)
-        tuning = next
-        TuningPrefs.save(context, next)
-        onConfigChanged()
     }
 
     fun updateCsc(toastMessage: String? = null, block: (CscConfig) -> CscConfig) {
@@ -355,88 +183,48 @@ fun DashboardScreen(
         toastMessage?.let { msg -> scope.launch { snackbar.showSnackbar(msg) } }
     }
 
-    LaunchedEffect(refreshTrigger) {
-        refreshState()
+    fun updateTuning(toastMessage: String? = null, block: (TuningConfig) -> TuningConfig) {
+        val next = block(tuning)
+        tuning = next
+        TuningPrefs.save(context, next)
+        onConfigChanged()
+        toastMessage?.let { msg -> scope.launch { snackbar.showSnackbar(msg) } }
     }
 
-    LaunchedEffect(Unit) {
-        hasRoot = RootShell.hasRoot()
-        withContext(Dispatchers.IO) {
-            val pkgs = HookLiveness.recentHookedPackages()
-            withContext(Dispatchers.Main) {
-                liveness = pkgs
-                refreshModuleState()
-            }
-        }
+    val storeActive = csc.enabled && csc.salesCode.isNotBlank()
+    val deviceActive = csc.spoofDevice && (csc.deviceName.isNotBlank() || csc.perAppDeviceModels.isNotEmpty())
+    val wechatActive = tuning.stepEnabled || tuning.antiRecall
+    val powerActive = tuning.brightScreenFastCharge || tuning.passThrough
+
+    val activeFeatureCount = listOf(storeActive, deviceActive, wechatActive, powerActive).count { it }
+
+    val heroTitle = when {
+        xposedReady && hasRoot -> if (isZh) "运行环境已就绪" else "Environment Ready"
+        xposedReady -> if (isZh) "模块已激活（无 Root）" else "Module Active (No Root)"
+        hasRoot -> if (isZh) "模块尚未在 LSPosed 激活" else "LSPosed Module Inactive"
+        else -> if (isZh) "需要完成初始环境激活" else "Setup Required"
     }
 
-    // 从全球 80 国检索库返回后自动应用并清理商店
-    LaunchedEffect(pendingSelection) {
-        pendingSelection?.let { entry ->
-            activePanel = PANEL_SPOOF
-            updateCsc(context.getString(R.string.preset_applied_toast, "${entry.country} (${entry.code})")) {
-                it.copy(
-                    enabled = true,
-                    salesCode = entry.code,
-                    countryCode = entry.countryCode,
-                    simMcc = entry.mcc,
-                    simMnc = if (entry.numeric.length > 3) entry.numeric.drop(3) else "01",
-                    simNumeric = entry.numeric,
-                    simOperatorName = entry.operator,
-                    simCountryIso = entry.countryCode.lowercase(),
-                    marketUnlockRaw = "${entry.numeric},${entry.operator},${entry.countryCode.lowercase()},${entry.country}",
-                    spoofSimInfo = true,
-                    spoofSalesCode = true,
-                    spoofCountryCode = true,
-                    spoofRilSalesCode = true,
-                    spoofOmcCodes = true,
-                    spoofSemCscFeature = true,
-                )
-            }
-            val cleaned = withContext(Dispatchers.IO) { StoreCleaner.clearStoreDataRoot() }
-            if (cleaned) {
-                RegionApplyState.markApplied(context)
-                regionCleanupPending = false
-            }
-            onConsumeSelection()
-        }
+    val heroLine1 = if (isZh) {
+        "LSPosed 模块：${if (xposedReady) "已激活" else "未激活"}  ·  Root 权限：${if (hasRoot) "已授权" else "未授权"}"
+    } else {
+        "LSPosed: ${if (xposedReady) "Active" else "Inactive"}  ·  Root: ${if (hasRoot) "Granted" else "Unavailable"}"
     }
 
-    val isServiceReady = moduleState == ModuleState.ACTIVE || hasRoot
-    val enabledText = if (isZh) "已启用" else "On"
-    val disabledText = if (isZh) "未启用" else "Off"
-
-    fun checkLspPrerequisite(featureOn: Boolean) {
-        if (featureOn && moduleState == ModuleState.NOT_CONNECTED) {
-            scope.launch { snackbar.showSnackbar(context.getString(R.string.prereq_lsposed_warning)) }
-        }
-    }
-
-    fun checkRootPrerequisite(featureOn: Boolean) {
-        if (featureOn && !hasRoot) {
-            scope.launch { snackbar.showSnackbar(context.getString(R.string.prereq_root_warning)) }
-        }
+    val heroLine2 = if (isZh) {
+        if (activeFeatureCount > 0) "已启用 $activeFeatureCount 项常用功能 · 点击本卡片可查看环境指引"
+        else "当前暂未启用功能 · 点击下方卡片即可一键开启或配置"
+    } else {
+        if (activeFeatureCount > 0) "$activeFeatureCount core feature(s) active · Tap for setup guide"
+        else "No features active yet · Tap any card below to configure"
     }
 
     MiuixPageScaffold(
-        title = stringResource(R.string.topbar_title),
+        title = stringResource(R.string.app_name),
+        subtitle = if (isZh) "三星 One UI 跨区、机型伪装与系统增强工具" else "Samsung One UI Region, Model & System Enhancer",
+        bottomBar = bottomBar,
         snackbarHostState = snackbar,
-        actions = {
-            IconButton(
-                onClick = {
-                    haptics.tap()
-                    onOpenSettings()
-                },
-                modifier = Modifier.size(34.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Tune,
-                    contentDescription = stringResource(R.string.settings_title),
-                    tint = MiuixTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(19.dp),
-                )
-            }
-        },
+        bottomNavigationPadding = 24.dp,
     ) {
         Column(
             modifier = Modifier
@@ -444,1040 +232,311 @@ fun DashboardScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            if (regionCleanupPending) {
-                OneUiNoticeBanner(
-                    text = stringResource(R.string.region_changed_banner),
-                    icon = Icons.Default.CleaningServices,
-                    containerColor = OneUiTokens.WarningAmberContainerLight,
-                    contentColor = IosGlassTokens.IosAmber,
-                    actionText = stringResource(R.string.action_clear_now),
-                    onActionClick = {
-                        haptics.confirm()
-                        scope.launch {
-                            val success = withContext(Dispatchers.IO) { StoreCleaner.clearStoreDataRoot() }
-                            if (success) {
-                                RegionApplyState.markApplied(context)
-                                regionCleanupPending = false
-                                snackbar.showSnackbar(context.getString(R.string.clear_store_success))
-                            } else {
-                                snackbar.showSnackbar(context.getString(R.string.clear_store_fail))
-                            }
-                        }
-                    },
-                )
-            }
-
-            if ((tuning.brightScreenFastCharge || tuning.passThrough) && batteryRestricted) {
-                OneUiNoticeBanner(
-                    text = stringResource(R.string.battery_optimization_warning),
-                    icon = Icons.Default.BatteryAlert,
-                    containerColor = OneUiTokens.WarningAmberContainerLight,
-                    contentColor = IosGlassTokens.IosAmber,
-                    actionText = stringResource(R.string.battery_optimization_action),
-                    onActionClick = {
-                        haptics.confirm()
-                        TuningPrefs.requestIgnoreBatteryOptimization(context)
-                    },
-                )
-            }
-
-            // 第一层：顶部紧凑状态大卡（融合实时温度与电量）
-            val modeLabel = if (moduleState == ModuleState.ACTIVE) {
-                if (isZh) "LSPosed 推荐模式" else "LSPosed Mode"
-            } else {
-                if (isZh) "Root 硬件直控" else "Root Mode"
-            }
-            val powerTag = if (isPlugged) {
-                val wattsPart = if (batteryWatts >= 0.5f) "⚡ ${String.format(Locale.US, "%.1f", batteryWatts)}W · " else ""
-                if (isZh) "${wattsPart}充电中 $batteryLevel%" else "${wattsPart}Charging $batteryLevel%"
-            } else {
-                if (isZh) "电量 $batteryLevel%" else "Battery $batteryLevel%"
-            }
+            // 1. 简洁的环境状态区域（单一卡片，不重复堆叠）
             MiuixHeroStatusCard(
-                statusTitle = when {
-                    moduleState == ModuleState.ACTIVE -> if (isZh) "运行中" else "Active"
-                    hasRoot -> if (isZh) "Root 就绪" else "Root Ready"
-                    else -> if (isZh) "待激活" else "Standby"
-                },
+                statusTitle = heroTitle,
                 pillText = "v${BuildConfig.VERSION_NAME}",
-                line1Text = "$modeLabel · ${String.format(Locale.US, "%.1f", batteryTemp)}°C · $powerTag",
-                line2Text = if (isZh) {
-                    "物理 SIM 与基带 100% 原生免注入"
-                } else {
-                    "Physical SIM & baseband 100% native"
-                },
-                isWarning = !isServiceReady,
-                onClick = onOpenSettings,
+                line1Text = heroLine1,
+                line2Text = heroLine2,
+                isWarning = !xposedReady || !hasRoot,
+                onClick = { showActivationGuide = true },
             )
 
-            // 第二层：全应用唯一的 3×2 功能总开关磁贴（点击切换开关，并自动联动下方配置面板）
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    MiuixQuickTile(
-                        label = if (isZh) "商店跨区" else "Store",
-                        statusText = if (csc.enabled && csc.salesCode.isNotBlank()) {
-                            "$enabledText · ${csc.salesCode}"
-                        } else {
-                            disabledText
-                        },
-                        icon = Icons.Default.Public,
-                        active = csc.enabled && csc.salesCode.isNotBlank(),
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            activePanel = PANEL_SPOOF
-                            if (csc.salesCode.isNotBlank()) {
-                                val next = !csc.enabled
-                                updateCsc { it.copy(enabled = next) }
-                                checkLspPrerequisite(next)
-                            } else {
-                                onOpenSearch()
-                            }
-                        },
-                    )
-                    MiuixQuickTile(
-                        label = if (isZh) "机型伪装" else "Model",
-                        statusText = if (csc.spoofDevice) enabledText else disabledText,
-                        icon = Icons.Default.Smartphone,
-                        active = csc.spoofDevice,
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            activePanel = PANEL_SPOOF
-                            if (csc.deviceName.isNotBlank() || csc.perAppDeviceModels.isNotEmpty()) {
-                                val next = !csc.spoofDevice
-                                updateCsc { it.copy(spoofDevice = next) }
-                                checkLspPrerequisite(next)
-                            } else {
-                                showDeviceModelPicker = true
-                            }
-                        },
-                    )
-                    MiuixQuickTile(
-                        label = if (isZh) "微信计步" else "Steps",
-                        statusText = if (tuning.stepEnabled) {
-                            "$enabledText · ${tuning.stepMultiplier}x"
-                        } else {
-                            disabledText
-                        },
-                        icon = Icons.AutoMirrored.Filled.DirectionsRun,
-                        active = tuning.stepEnabled,
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            activePanel = PANEL_STEPS
-                            val next = !tuning.stepEnabled
-                            updateTuning { it.copy(stepEnabled = next) }
-                            checkLspPrerequisite(next)
-                        },
-                    )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    MiuixQuickTile(
-                        label = if (isZh) "防撤回" else "Recall",
-                        statusText = if (tuning.antiRecall) enabledText else disabledText,
-                        icon = Icons.Default.Shield,
-                        active = tuning.antiRecall,
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            activePanel = PANEL_STEPS
-                            val next = !tuning.antiRecall
-                            updateTuning { it.copy(antiRecall = next) }
-                            checkLspPrerequisite(next)
-                        },
-                    )
-                    MiuixQuickTile(
-                        label = if (isZh) "亮屏快充" else "Charge",
-                        statusText = if (tuning.brightScreenFastCharge) enabledText else disabledText,
-                        icon = Icons.Default.Bolt,
-                        active = tuning.brightScreenFastCharge,
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            activePanel = PANEL_POWER
-                            val next = !tuning.brightScreenFastCharge
-                            updateTuning { it.copy(brightScreenFastCharge = next) }
-                            if (next) requestNotificationPermissionIfNeeded()
-                            checkRootPrerequisite(next)
-                        },
-                    )
-                    MiuixQuickTile(
-                        label = if (isZh) "旁路供电" else "Bypass",
-                        statusText = if (tuning.passThrough) {
-                            "$enabledText · ${tuning.passThroughLimit}%"
-                        } else {
-                            disabledText
-                        },
-                        icon = Icons.Default.Power,
-                        active = tuning.passThrough,
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            activePanel = PANEL_POWER
-                            val next = !tuning.passThrough
-                            updateTuning { it.copy(passThrough = next) }
-                            if (next) requestNotificationPermissionIfNeeded()
-                            checkRootPrerequisite(next)
-                        },
-                    )
-                }
-            }
-
-            // 第三层：轻量三段式面板切换器（每次仅展示 1 张参数卡片，彻底告别超长堆叠页面）
-            OneUiSegmentedControl(
-                items = listOf(PANEL_SPOOF, PANEL_STEPS, PANEL_POWER),
-                selectedItem = activePanel,
-                onSelect = { activePanel = it },
-                label = { panel ->
-                    when (panel) {
-                        PANEL_SPOOF -> if (isZh) "区域与机型" else "Region & Model"
-                        PANEL_STEPS -> context.getString(R.string.wechat_panel_title)
-                        else -> if (isZh) "供电与维护" else "Power & Tools"
-                    }
-                },
-            )
-
-            // 根据当前选中的分段展示对应单张参数卡（一屏到底，清爽不堆叠）
-            when (activePanel) {
-                PANEL_SPOOF -> {
-                    val regionStatus = if (csc.enabled && csc.salesCode.isNotBlank()) {
-                        if (isZh) "区域: ${csc.salesCode} (${csc.countryCode})"
-                        else "Region: ${csc.salesCode} (${csc.countryCode})"
-                    } else {
-                        if (isZh) "区域: 原生直通" else "Region: Native"
-                    }
-                    val modelStatus = if (csc.spoofDevice && (csc.deviceName.isNotBlank() || csc.perAppDeviceModels.isNotEmpty())) {
-                        val customCount = csc.perAppDeviceModels.size
-                        val baseLabel = csc.deviceName.ifBlank { if (isZh) "仅分应用独立伪装" else "Per-app only" }
-                        val suffix = if (customCount > 0) (if (isZh) " (+$customCount 独立)" else " (+$customCount custom)") else ""
-                        if (isZh) "机型: $baseLabel$suffix" else "Model: $baseLabel$suffix"
-                    } else {
-                        if (isZh) "机型: 原生 (${Build.MODEL})" else "Model: Native (${Build.MODEL})"
-                    }
-                    OneUiIslandCard(
-                        title = if (isZh) "区域与机型参数" else "Region & Model Parameters",
-                        subtitle = "$regionStatus · $modelStatus",
-                    ) {
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            QUICK_REGION_PRESETS.chunked(3).forEach { rowPresets ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                ) {
-                                    rowPresets.forEach { preset ->
-                                        val isCurrent = csc.enabled && csc.salesCode.equals(preset.salesCode, ignoreCase = true)
-                                        val bgColor = if (isCurrent) {
-                                            IosGlassTokens.activeTileBg()
-                                        } else {
-                                            MiuixTheme.colorScheme.secondaryContainer.copy(alpha = 0.65f)
-                                        }
-                                        val fgColor = if (isCurrent) {
-                                            IosGlassTokens.activeTileFg()
-                                        } else {
-                                            MiuixTheme.colorScheme.onSurface
-                                        }
-                                        Column(
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .clip(RoundedCornerShape(12.dp))
-                                                .background(bgColor)
-                                                .clickable {
-                                                    haptics.tap()
-                                                    showPresetConfirmDialog = preset
-                                                }
-                                                .padding(horizontal = 8.dp, vertical = 7.dp),
-                                            horizontalAlignment = Alignment.CenterHorizontally,
-                                            verticalArrangement = Arrangement.spacedBy(1.dp),
-                                        ) {
-                                            Text(
-                                                text = if (isZh) preset.labelZh else preset.labelEn,
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Medium,
-                                                color = fgColor,
-                                                maxLines = 1,
-                                            )
-                                            Text(
-                                                text = "${preset.salesCode} · ${preset.simMcc}",
-                                                fontSize = 10.sp,
-                                                color = fgColor.copy(alpha = 0.78f),
-                                                maxLines = 1,
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
-
-                        OneUiItemRow(
-                            title = stringResource(R.string.search_all_csc_btn),
-                            subtitle = stringResource(R.string.search_all_csc_desc),
-                            icon = Icons.Default.Search,
-                            iconTint = IosGlassTokens.IosPurple,
-                            trailingValue = csc.salesCode.ifBlank { if (isZh) "未配置" else "Not set" },
-                            showChevron = true,
-                            onClick = onOpenSearch,
-                        )
-
-                        if (csc.enabled) {
-                            OneUiItemRow(
-                                title = stringResource(R.string.action_disable_spoofing),
-                                subtitle = stringResource(R.string.disable_spoofing_desc),
-                                icon = Icons.Default.Close,
-                                iconTint = IosGlassTokens.IosRed,
-                                showChevron = false,
-                                onClick = {
-                                    haptics.confirm()
-                                    StoreCleaner.restoreNativeTelephonyProps()
-                                    updateCsc(context.getString(R.string.disable_spoofing_success)) {
-                                        it.copy(
-                                            enabled = false,
-                                            salesCode = "",
-                                            countryCode = "",
-                                            simMcc = "",
-                                            simMnc = "",
-                                            simNumeric = "",
-                                            simOperatorName = "",
-                                            simCountryIso = "",
-                                            marketUnlockRaw = "",
-                                            spoofSimInfo = false,
-                                        )
-                                    }
-                                },
-                            )
-                        }
-
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
-
-                        OneUiItemRow(
-                            title = if (isZh) "选择伪装机型 (${com.weitiao.tuning.core.DeviceModels.ALL.size}款)" else "Target Device Model (${com.weitiao.tuning.core.DeviceModels.ALL.size})",
-                            subtitle = if (isZh) "修改 Build.MODEL / DEVICE / PRODUCT" else "Spoof Build.MODEL / DEVICE / PRODUCT",
-                            icon = Icons.Default.Smartphone,
-                            iconTint = IosGlassTokens.IosBlue,
-                            trailingValue = csc.deviceName.ifBlank { Build.MODEL },
-                            showChevron = true,
-                            onClick = { showDeviceModelPicker = true },
-                        )
-
-                        val customModelCount = csc.perAppDeviceModels.count { it.key in csc.deviceTargetPackages }
-                        OneUiItemRow(
-                            title = if (isZh) "机型伪装生效应用" else "Model Spoof Target Apps",
-                            subtitle = if (csc.deviceTargetFilterEnabled && csc.deviceTargetPackages.isNotEmpty()) {
-                                val base = stringResource(R.string.apps_count_applied, csc.deviceTargetPackages.size)
-                                if (customModelCount > 0) {
-                                    if (isZh) "$base · 含 $customModelCount 个独立机型" else "$base · $customModelCount per-app models"
-                                } else base
-                            } else {
-                                stringResource(R.string.all_scopes_applied)
-                            },
-                            icon = Icons.Default.Apps,
-                            iconTint = IosGlassTokens.IosTeal,
-                            trailingValue = if (csc.deviceTargetFilterEnabled && csc.deviceTargetPackages.isNotEmpty()) {
-                                if (isZh) "${csc.deviceTargetPackages.size} 个应用" else "${csc.deviceTargetPackages.size} Apps"
-                            } else {
-                                if (isZh) "全部应用" else "All Apps"
-                            },
-                            showChevron = true,
-                            onClick = { showDeviceTargetPicker = true },
-                        )
-
-                        if (csc.spoofDevice && (csc.deviceName.isNotBlank() || csc.perAppDeviceModels.isNotEmpty())) {
-                            OneUiItemRow(
-                                title = stringResource(R.string.action_restart_device_targets),
-                                subtitle = stringResource(R.string.action_restart_device_targets_desc),
-                                icon = Icons.Default.Refresh,
-                                iconTint = IosGlassTokens.IosGreen,
-                                showChevron = false,
-                                onClick = {
-                                    haptics.confirm()
-                                    val explicitTargets = csc.deviceTargetPackages
-                                    scope.launch {
-                                        val count = withContext(Dispatchers.IO) {
-                                            val toRestart = LsposedScopeHelper.resolveRestartableTargetPackages(explicitTargets)
-                                            StoreCleaner.forceStopPackages(toRestart)
-                                        }
-                                        val msg = if (count > 0) {
-                                            context.getString(R.string.toast_device_targets_restarted, count)
-                                        } else {
-                                            context.getString(R.string.prereq_root_warning)
-                                        }
-                                        snackbar.showSnackbar(msg)
-                                    }
-                                },
-                            )
-                        }
-                    }
-                }
-
-                PANEL_STEPS -> {
-                    val currentMult = tuning.stepMultiplier.coerceIn(1, 1000)
-                    val currentCap = tuning.stepMaximum.coerceIn(1, 1_000_000)
-                    val calc1k = (1000 * currentMult).coerceAtMost(currentCap)
-                    val calc3k = (3000 * currentMult).coerceAtMost(currentCap)
-                    val calc5k = (5000 * currentMult).coerceAtMost(currentCap)
-
-                    OneUiIslandCard(
-                        title = stringResource(R.string.step_simulator_title),
-                        subtitle = if (tuning.stepEnabled) {
-                            stringResource(R.string.step_auto_mode_desc)
-                        } else {
-                            stringResource(R.string.wechat_steps_off_hint)
-                        },
-                    ) {
-                        OneUiNoticeBanner(
-                            text = if (tuning.antiRecall) {
-                                stringResource(R.string.anti_recall_active_banner)
-                            } else {
-                                stringResource(R.string.anti_recall_off_banner)
-                            },
-                            icon = Icons.Default.Shield,
-                            contentColor = if (tuning.antiRecall) IosGlassTokens.IosGreen else MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        )
-
-                        // 模式切换：固定倍率 vs 自动递增
-                        OneUiSegmentedControl(
-                            items = listOf(false, true),
-                            selectedItem = tuning.stepAuto,
-                            onSelect = { auto ->
-                                updateTuning { it.copy(stepAuto = auto) }
-                            },
-                            label = { auto ->
-                                if (auto) {
-                                    if (isZh) "自动递增模式" else "Auto Increment"
-                                } else {
-                                    if (isZh) "固定倍率模式" else "Fixed Multiplier"
-                                }
-                            },
-                        )
-
-                        // 4 档常用倍率快捷选择（点击即切换倍率并实时刷新下方步数换算）
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            STEP_TIER_PRESETS.forEach { tier ->
-                                val isSelected = currentMult == tier.multiplier
-                                val bgColor = if (isSelected) {
-                                    IosGlassTokens.activeTileBg()
-                                } else {
-                                    MiuixTheme.colorScheme.secondaryContainer.copy(alpha = 0.65f)
-                                }
-                                val fgColor = if (isSelected) {
-                                    IosGlassTokens.activeTileFg()
-                                } else {
-                                    MiuixTheme.colorScheme.onSurface
-                                }
-                                Column(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(bgColor)
-                                        .clickable {
-                                            haptics.tap()
-                                            multiplier = tier.multiplier.toString()
-                                            maximum = tier.recommendedCap.toString()
-                                            updateTuning {
-                                                it.copy(
-                                                    stepEnabled = true,
-                                                    stepMultiplier = tier.multiplier,
-                                                    stepMaximum = tier.recommendedCap,
-                                                )
-                                            }
-                                        }
-                                        .padding(vertical = 7.dp, horizontal = 4.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(1.dp),
-                                ) {
-                                    Text(
-                                        text = if (isZh) tier.titleZh else tier.titleEn,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = fgColor,
-                                        maxLines = 1,
-                                    )
-                                    Text(
-                                        text = if (tuning.stepAuto) {
-                                            "+${tier.multiplier}/${if (isZh) "次" else "ev"}"
-                                        } else {
-                                            "1k→${(tier.multiplier).coerceAtMost(tier.recommendedCap / 1000)}k"
-                                        },
-                                        fontSize = 9.5.sp,
-                                        color = fgColor.copy(alpha = 0.80f),
-                                        maxLines = 1,
-                                    )
-                                }
-                            }
-                        }
-
-                        // 实时步数换算预览卡（展示不同档位/实际步数对应的微信步数结果）
-                        val primaryCalcText = if (tuning.stepAuto) {
-                            stringResource(R.string.step_simulator_auto_calc, currentMult, currentCap)
-                        } else {
-                            stringResource(R.string.step_simulator_calc, calc1k)
-                        }
-                        val multiTierCalcText = if (tuning.stepAuto) {
-                            val eventsFor10k = (10000 / currentMult).coerceAtLeast(1)
-                            val eventsForCap = (currentCap / currentMult).coerceAtLeast(1)
-                            if (isZh) {
-                                "$primaryCalcText\n· 累计触发 ${numFmt.format(eventsFor10k)} 次 ≈ 10,000 步 ｜ 触发 ${numFmt.format(eventsForCap)} 次达封顶 ${numFmt.format(currentCap)} 步"
-                            } else {
-                                "$primaryCalcText\n· ${numFmt.format(eventsFor10k)} events ≈ 10k steps | ${numFmt.format(eventsForCap)} events hits cap ${numFmt.format(currentCap)}"
-                            }
-                        } else {
-                            if (isZh) {
-                                "$primaryCalcText\n· 实走 3,000 步 ≈ ${numFmt.format(calc3k)} 步 ｜ 实走 5,000 步 ≈ ${numFmt.format(calc5k)} 步（上限 ${numFmt.format(currentCap)}）"
-                            } else {
-                                "$primaryCalcText\n· Walk 3k ≈ ${numFmt.format(calc3k)} | Walk 5k ≈ ${numFmt.format(calc5k)} (Cap ${numFmt.format(currentCap)})"
-                            }
-                        }
-                        OneUiNoticeBanner(
-                            text = multiTierCalcText,
-                            contentColor = IosGlassTokens.IosBlue,
-                        )
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            TextField(
-                                value = multiplier,
-                                onValueChange = { raw ->
-                                    val digits = raw.filter(Char::isDigit).take(4)
-                                    multiplier = digits
-                                    digits.toIntOrNull()?.let { v ->
-                                        updateTuning { it.copy(stepMultiplier = v.coerceIn(1, 1000)) }
-                                    }
-                                },
-                                label = stringResource(R.string.step_multiplier),
-                                singleLine = true,
-                                insideMargin = DpSize(10.dp, 10.dp),
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                modifier = Modifier.weight(1f),
-                            )
-
-                            TextField(
-                                value = endHour,
-                                onValueChange = { raw ->
-                                    val digits = raw.filter(Char::isDigit).take(2)
-                                    endHour = digits
-                                    digits.toIntOrNull()?.let { v ->
-                                        updateTuning { it.copy(stepEndHour = v.coerceIn(0, 24)) }
-                                    }
-                                },
-                                label = if (isZh) "截止时间(0-24点)" else "Stop Hour(0-24)",
-                                singleLine = true,
-                                insideMargin = DpSize(10.dp, 10.dp),
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-
-                        TextField(
-                            value = maximum,
-                            onValueChange = { raw ->
-                                val digits = raw.filter(Char::isDigit).take(7)
-                                maximum = digits
-                                digits.toIntOrNull()?.let { v ->
-                                    updateTuning { it.copy(stepMaximum = v.coerceIn(1, 1_000_000)) }
-                                }
-                            },
-                            label = stringResource(R.string.step_maximum),
-                            singleLine = true,
-                            insideMargin = DpSize(10.dp, 10.dp),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-
-                        OneUiNoticeBanner(
-                            text = stringResource(R.string.step_cap_desc),
-                            contentColor = IosGlassTokens.IosGreen,
-                        )
-                    }
-                }
-
-                PANEL_POWER -> {
-                    val cutoffVal = thermalCutoffSlider.toInt()
-                    OneUiIslandCard(
-                        title = if (isZh) "供电参数与快捷维护" else "Power & Quick Maintenance",
-                        subtitle = if (isZh) "亮屏快充超过 ${cutoffVal}.0°C 自动恢复原厂温控 · 旁路供电绕过电池直供主板"
-                        else "Fast charge ${cutoffVal}.0°C safety cutoff · Bypass power feeds board directly",
-                    ) {
-                        if (isPlugged && batteryVoltageMv > 0) {
-                            OneUiNoticeBanner(
-                                text = stringResource(
-                                    R.string.power_live_metrics_fmt,
-                                    batteryWatts,
-                                    batteryCurrentMa,
-                                    batteryVoltageMv / 1000f,
-                                ),
-                                icon = Icons.Default.Bolt,
-                                contentColor = IosGlassTokens.IosGreen,
-                            )
-                        }
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = stringResource(R.string.thermal_cutoff_label, cutoffVal),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = MiuixTheme.colorScheme.onSurface,
-                            )
-                            Text(
-                                text = "${cutoffVal}°C",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = IosGlassTokens.IosAmber,
-                            )
-                        }
-
-                        Slider(
-                            value = thermalCutoffSlider,
-                            onValueChange = { thermalCutoffSlider = it },
-                            onValueChangeFinished = {
-                                val c = thermalCutoffSlider.toInt().coerceIn(38, 48)
-                                updateTuning { it.copy(thermalCutoffCelsius = c) }
-                            },
-                            valueRange = 38f..48f,
-                            steps = 9,
-                            showKeyPoints = true,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 4.dp),
-                        )
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = stringResource(R.string.pass_through_threshold_desc, passThroughSlider.toInt()),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = MiuixTheme.colorScheme.onSurface,
-                            )
-                            Text(
-                                text = "${passThroughSlider.toInt()}%",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = IosGlassTokens.IosBlue,
-                            )
-                        }
-
-                        Slider(
-                            value = passThroughSlider,
-                            onValueChange = { passThroughSlider = it },
-                            onValueChangeFinished = {
-                                val limit = passThroughSlider.toInt().coerceIn(0, 100)
-                                updateTuning { it.copy(passThroughLimit = limit) }
-                            },
-                            valueRange = 0f..100f,
-                            steps = 19,
-                            showKeyPoints = true,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 4.dp),
-                        )
-
-                        OneUiItemRow(
-                            title = stringResource(R.string.choose_pass_through_apps),
-                            subtitle = if (selectedPassApps.isEmpty()) stringResource(R.string.choose_apps_none)
-                            else stringResource(R.string.choose_apps_count, selectedPassApps.size),
-                            icon = Icons.Default.BatteryChargingFull,
-                            iconTint = IosGlassTokens.IosGreen,
-                            trailingValue = if (selectedPassApps.isEmpty()) {
-                                if (isZh) "未选择" else "None"
-                            } else {
-                                if (isZh) "${selectedPassApps.size} 个应用" else "${selectedPassApps.size} Apps"
-                            },
-                            showChevron = true,
-                            onClick = { showPassAppPicker = true },
-                        )
-
-                        if (tuning.brightScreenFastCharge) {
-                            OneUiNoticeBanner(
-                                text = stringResource(R.string.fast_charge_warning),
-                                containerColor = OneUiTokens.WarningAmberContainerLight,
-                                contentColor = IosGlassTokens.IosAmber,
-                            )
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        MiuixMetricCard(
-                            valueText = if (isZh) "重置商店" else "Reset Store",
-                            labelText = if (isZh) "清理缓存重判区" else "Clear store cache",
-                            icon = Icons.Default.CleaningServices,
-                            accentColor = IosGlassTokens.IosPurple,
-                            modifier = Modifier.weight(1f),
-                            onClick = {
-                                haptics.confirm()
-                                scope.launch {
-                                    val ok = withContext(Dispatchers.IO) { StoreCleaner.clearStoreDataRoot() }
-                                    if (ok) {
-                                        RegionApplyState.markApplied(context)
-                                        regionCleanupPending = false
-                                        snackbar.showSnackbar(context.getString(R.string.clear_store_success))
-                                    } else {
-                                        snackbar.showSnackbar(context.getString(R.string.clear_store_fail))
-                                    }
-                                }
-                            },
-                        )
-
-                        MiuixMetricCard(
-                            valueText = if (isZh) "重启微信" else "Restart WeChat",
-                            labelText = if (isZh) "强停并重新拉起" else "Force stop & launch",
-                            icon = Icons.Default.Refresh,
-                            accentColor = IosGlassTokens.IosTeal,
-                            modifier = Modifier.weight(1f),
-                            onClick = {
-                                haptics.confirm()
-                                scope.launch {
-                                    val code = withContext(Dispatchers.IO) {
-                                        RootShell.exec(
-                                            "am force-stop com.tencent.mm && monkey -p com.tencent.mm -c android.intent.category.LAUNCHER 1"
-                                        ).first
-                                    }
-                                    val msg = if (code == 0) {
-                                        context.getString(R.string.restart_wechat_done)
-                                    } else {
-                                        context.getString(R.string.restart_wechat_failed)
-                                    }
-                                    snackbar.showSnackbar(msg)
-                                }
-                            },
-                        )
-                    }
-                }
-            }
-        }
-    }
-
-    // 地区预设切换确认弹窗
-    val preset = showPresetConfirmDialog ?: lastConfirmPreset
-    val presetName = stringResource(preset.nameRes)
-    WindowDialog(
-        show = showPresetConfirmDialog != null,
-        title = stringResource(R.string.preset_confirm_title, presetName),
-        onDismissRequest = { showPresetConfirmDialog = null },
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            OneUiNoticeBanner(
-                text = stringResource(
-                    R.string.preset_confirm_auto,
-                    preset.salesCode,
-                    preset.simMcc,
-                    preset.countryCode,
-                ),
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                TextButton(
-                    text = stringResource(R.string.cancel),
-                    onClick = { showPresetConfirmDialog = null },
-                    modifier = Modifier.weight(1f),
+            // 2. 未满足条件或待生效操作的明确引导（仅在需要用户处理时展示）
+            if (!xposedReady) {
+                OneUiNoticeBanner(
+                    text = if (isZh) "模块尚未激活：商店跨区、机型伪装和微信增强需在 LSPosed 中启用本模块"
+                    else "Module not active: enable WeiTiao in LSPosed to use region, model & WeChat features",
+                    icon = Icons.Default.Warning,
+                    contentColor = IosGlassTokens.IosAmber,
+                    actionText = if (isZh) "查看激活步骤" else "Activation Guide",
+                    onActionClick = { showActivationGuide = true },
                 )
-                TextButton(
-                    text = stringResource(R.string.action_apply_and_clear),
-                    colors = ButtonDefaults.textButtonColorsPrimary(),
-                    onClick = {
-                        haptics.confirm()
-                        updateCsc(context.getString(R.string.preset_applied_toast, presetName)) {
-                            it.copy(
-                                enabled = true,
-                                salesCode = preset.salesCode,
-                                countryCode = preset.countryCode,
-                                simMcc = preset.simMcc,
-                                simMnc = preset.mnc,
-                                simNumeric = preset.numeric,
-                                simOperatorName = preset.operator,
-                                simCountryIso = preset.countryCode.lowercase(),
-                                marketUnlockRaw = "${preset.numeric},${preset.operator},${preset.countryCode.lowercase()},${presetName}",
-                                spoofSimInfo = true,
-                                spoofSalesCode = true,
-                                spoofCountryCode = true,
-                                spoofRilSalesCode = true,
-                                spoofOmcCodes = true,
-                                spoofSemCscFeature = true,
-                            )
-                        }
-                        scope.launch {
-                            val cleaned = withContext(Dispatchers.IO) { StoreCleaner.clearStoreDataRoot() }
-                            if (cleaned) {
-                                RegionApplyState.markApplied(context)
-                                regionCleanupPending = false
-                                snackbar.showSnackbar(context.getString(R.string.clear_store_success))
-                            } else {
-                                snackbar.showSnackbar(context.getString(R.string.clear_store_fail))
-                            }
-                        }
-                        showPresetConfirmDialog = null
+            }
+
+            if (powerActive && !hasRoot) {
+                OneUiNoticeBanner(
+                    text = if (isZh) "充电优化需要 Root 权限才能控制充电节点，请授权后重新检测"
+                    else "Charging optimization requires Root access to control power nodes",
+                    icon = Icons.Default.Warning,
+                    contentColor = IosGlassTokens.IosRed,
+                    actionText = if (isZh) "去授权" else "Grant Root",
+                    onActionClick = { recheckEnvironment(showToast = true) },
+                )
+            }
+
+            if (storeActive && regionCleanupPending && hasRoot) {
+                OneUiNoticeBanner(
+                    text = if (isZh) "商店地区已改为 ${formatRegionDisplayName(csc, true)}，刷新商店缓存后立即生效"
+                    else "Store region changed to ${formatRegionDisplayName(csc, false)}. Refresh store to apply.",
+                    icon = Icons.Default.Refresh,
+                    contentColor = IosGlassTokens.IosBlue,
+                    actionText = if (isZh) "立即刷新商店" else "Refresh Store",
+                    onActionClick = { showClearStoreConfirm = true },
+                )
+            }
+
+            if (powerActive && batteryRestricted) {
+                OneUiNoticeBanner(
+                    text = if (isZh) "已开启充电优化，建议将电池权限设为「不受限制」以防后台温控服务被系统休眠"
+                    else "Set battery usage to Unrestricted to keep charging protection active in background",
+                    icon = Icons.Default.BatteryAlert,
+                    contentColor = IosGlassTokens.IosAmber,
+                    actionText = if (isZh) "去设置" else "Configure",
+                    onActionClick = {
+                        TuningPrefs.requestIgnoreBatteryOptimization(context)
+                        batteryRestricted = TuningPrefs.isBatteryOptimizationRestricted(context)
                     },
-                    modifier = Modifier.weight(1f),
                 )
             }
-        }
-    }
 
-    // 126 款机型选择半屏抽屉
-    DeviceModelPicker(
-        show = showDeviceModelPicker,
-        initialSelection = csc.deviceName,
-        onDismiss = { showDeviceModelPicker = false },
-        onSelect = { selected ->
-            // 选择全局机型时清空旧的分应用独立机型覆盖，防止历史分应用残留导致新选全局机型不生效
-            updateCsc(selected) {
-                it.copy(
-                    spoofDevice = true,
-                    deviceName = selected,
-                    perAppDeviceModels = emptyMap(),
-                )
-            }
-            showDeviceModelPicker = false
-            val explicitTargets = csc.deviceTargetPackages
-            scope.launch {
-                val count = withContext(Dispatchers.IO) {
-                    if (explicitTargets.isNotEmpty()) {
-                        val synced = LsposedScopeHelper.syncScopesWithRoot(context, explicitTargets)
-                        if (!synced) {
-                            LsposedScopeHelper.requestScopesViaService(explicitTargets)
-                        }
-                    }
-                    val toRestart = LsposedScopeHelper.resolveRestartableTargetPackages(explicitTargets)
-                    StoreCleaner.forceStopPackages(toRestart)
-                }
-                if (count > 0) {
-                    snackbar.showSnackbar(context.getString(R.string.toast_device_targets_restarted, count))
-                }
-            }
-        },
-    )
-
-    // 机型伪装生效应用选择半屏抽屉
-    DeviceTargetPicker(
-        show = showDeviceTargetPicker,
-        initialSelection = csc.deviceTargetPackages,
-        initialPerAppModels = csc.perAppDeviceModels,
-        globalDefaultModel = csc.deviceName,
-        onDismiss = { showDeviceTargetPicker = false },
-        onSave = { updated, updatedPerApp ->
-            val prevTargets = csc.deviceTargetPackages
-            updateCsc {
-                val shouldEnableSpoof = it.spoofDevice ||
-                    (updated.isNotEmpty() && (it.deviceName.isNotBlank() || updatedPerApp.isNotEmpty()))
-                it.copy(
-                    spoofDevice = shouldEnableSpoof,
-                    deviceTargetFilterEnabled = updated.isNotEmpty(),
-                    deviceTargetPackages = updated,
-                    perAppDeviceModels = updatedPerApp,
-                )
-            }
-            showDeviceTargetPicker = false
-
-            scope.launch(Dispatchers.IO) {
-                val synced = if (updated.isNotEmpty()) {
-                    LsposedScopeHelper.syncScopesWithRoot(context, updated)
-                } else false
-                if (!synced) {
-                    val newlyAdded = updated - prevTargets
-                    if (newlyAdded.isNotEmpty()) {
-                        LsposedScopeHelper.requestScopesViaService(newlyAdded)
-                    }
-                    StoreCleaner.forceStopPackages(updated.filter { it != "com.tencent.mm" })
-                }
-                val launched = if (!synced && updated.isNotEmpty()) {
-                    LsposedScopeHelper.launchLsposedManager(context)
-                } else false
-                val msg = when {
-                    synced -> if (isZh) "已通过 Root 自动同步作用域并重启目标应用使其生效" else "Synced scope & restarted target apps via Root"
-                    launched -> if (isZh) "已保存目标应用，已调出 LSPosed 请确认勾选作用域" else "Saved target apps, opened LSPosed to verify scope"
-                    else -> if (isZh) "已保存目标应用与独立机型配置" else "Saved target apps & per-app model settings"
-                }
-                snackbar.showSnackbar(msg)
-            }
-        },
-    )
-
-    // 旁路供电生效游戏选择半屏抽屉
-    PassThroughAppPickerSheet(
-        show = showPassAppPicker,
-        initial = selectedPassApps,
-        onDismiss = { showPassAppPicker = false },
-        onSave = { updated ->
-            selectedPassApps = updated
-            TuningPrefs.saveSelectedApps(context, updated)
-            TuningPrefs.save(context, tuning)
-            onConfigChanged()
-            scope.launch { snackbar.showSnackbar(context.getString(R.string.saved_toast)) }
-            showPassAppPicker = false
-        },
-    )
-}
-
-@Composable
-private fun PassThroughAppPickerSheet(
-    show: Boolean,
-    initial: Set<String>,
-    onDismiss: () -> Unit,
-    onSave: (Set<String>) -> Unit,
-) {
-    val context = LocalContext.current
-    var searchQuery by remember { mutableStateOf("") }
-    val apps = remember {
-        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        val pm = context.packageManager
-        pm.queryIntentActivities(intent, PackageManager.MATCH_ALL)
-            .map {
-                LaunchableAppEntry(
-                    packageName = it.activityInfo.packageName,
-                    label = it.loadLabel(pm).toString(),
-                    icon = runCatching { it.loadIcon(pm) }.getOrNull(),
-                )
-            }
-            .distinctBy { it.packageName }
-            .sortedBy { it.label.lowercase() }
-    }
-
-    val filteredApps = remember(searchQuery, apps) {
-        if (searchQuery.isBlank()) apps
-        else apps.filter {
-            it.label.contains(searchQuery, ignoreCase = true) ||
-                it.packageName.contains(searchQuery, ignoreCase = true)
-        }
-    }
-
-    var selected by remember(initial, show) { mutableStateOf(initial.toSet()) }
-
-    WindowBottomSheet(
-        show = show,
-        title = stringResource(R.string.choose_pass_through_apps),
-        onDismissRequest = onDismiss,
-    ) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            TextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                label = stringResource(R.string.search_app_hint),
-                useLabelAsPlaceholder = true,
-                singleLine = true,
-                insideMargin = DpSize(12.dp, 10.dp),
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = null,
-                        tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
-                        modifier = Modifier.padding(start = 12.dp).size(16.dp),
-                    )
-                },
-                modifier = Modifier.fillMaxWidth(),
+            Spacer(modifier = Modifier.height(2.dp))
+            MiuixSectionTitle(
+                title = if (isZh) "常用功能" else "Common Features",
+                trailingText = if (isZh) "点击卡片进入设置" else "Tap card to configure",
             )
 
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 340.dp)
-                    .overScrollVertical(),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                items(filteredApps, key = { it.packageName }) { app ->
-                    val isChecked = app.packageName in selected
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable {
-                                selected = selected.toMutableSet().apply {
-                                    if (!add(app.packageName)) remove(app.packageName)
-                                }.toSet()
-                            }
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        if (app.icon != null) {
-                            Image(
-                                bitmap = app.icon.toBitmap(84, 84).asImageBitmap(),
-                                contentDescription = null,
-                                modifier = Modifier.size(32.dp),
-                            )
-                        } else {
-                            Box(
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(MiuixTheme.colorScheme.secondaryContainer),
-                            )
+            // 3. 四张纵向常用功能卡片
+            // (1) 商店跨区
+            val storeStatusText = when {
+                !storeActive -> if (isZh) "未开启 · 使用手机默认地区" else "Off · System default region"
+                regionCleanupPending -> if (isZh) "当前：${formatRegionDisplayName(csc, true)}（待刷新商店）"
+                else "Active: ${formatRegionDisplayName(csc, false)} (Refresh pending)"
+                else -> if (isZh) "当前：${formatRegionDisplayName(csc, true)}"
+                else "Active: ${formatRegionDisplayName(csc, false)}"
+            }
+            OneUiHomeFeatureCard(
+                title = if (isZh) "商店跨区" else "Store Region Unlock",
+                description = if (isZh) "切换三星应用商店与主题商店地区，下载港版/韩版/美版应用"
+                else "Switch Galaxy Store & Theme Store region without affecting SIM signal",
+                statusText = storeStatusText,
+                icon = Icons.Default.Public,
+                accentColor = IosGlassTokens.IosBlue,
+                isActive = storeActive,
+                isWarning = storeActive && (!xposedReady || regionCleanupPending),
+                checked = storeActive,
+                onCheckedChange = { targetEnabled ->
+                    if (!targetEnabled) {
+                        updateCsc(if (isZh) "已关闭商店跨区" else "Store region unlock disabled") {
+                            it.copy(enabled = false)
                         }
-
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                text = app.label,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = MiuixTheme.colorScheme.onSurface,
-                            )
-                            Text(
-                                text = app.packageName,
-                                fontSize = 10.5.sp,
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            )
-                        }
-
-                        Checkbox(
-                            state = ToggleableState(isChecked),
-                            onClick = {
-                                selected = selected.toMutableSet().apply {
-                                    if (!add(app.packageName)) remove(app.packageName)
-                                }.toSet()
+                    } else {
+                        val defaultPreset = REGION_QUICK_PRESETS.first()
+                        val defaultPresetName = context.getString(defaultPreset.nameRes)
+                        updateCsc(
+                            if (csc.salesCode.isBlank()) {
+                                if (isZh) "已开启商店跨区（默认设为 ${defaultPreset.labelZh} TGY，点击卡片可切换地区）"
+                                else "Enabled Store Region Unlock (Default: Hong Kong TGY)"
+                            } else {
+                                if (isZh) "已开启商店跨区：${formatRegionDisplayName(csc.copy(enabled = true), true)}"
+                                else "Store region unlock enabled"
                             },
-                        )
+                        ) { cur ->
+                            if (cur.salesCode.isBlank()) {
+                                cur.copy(
+                                    enabled = true,
+                                    salesCode = defaultPreset.salesCode,
+                                    countryCode = defaultPreset.countryCode,
+                                    simMcc = defaultPreset.simMcc,
+                                    simMnc = defaultPreset.mnc,
+                                    simNumeric = defaultPreset.numeric,
+                                    simOperatorName = defaultPreset.operator,
+                                    simCountryIso = defaultPreset.countryCode.lowercase(),
+                                    marketUnlockRaw = "${defaultPreset.numeric},${defaultPreset.operator},${defaultPreset.countryCode.lowercase()},${defaultPresetName}",
+                                    spoofSimInfo = true,
+                                )
+                            } else {
+                                cur.copy(enabled = true)
+                            }
+                        }
                     }
+                },
+                onClick = { onOpenFeature(FeaturePageId.STORE_REGION) },
+            )
+
+            // (2) 机型伪装
+            val perAppCount = csc.perAppDeviceModels.size
+            val deviceStatusText = when {
+                !deviceActive -> if (isZh) "未开启 · 本机型号 ${Build.MODEL}" else "Off · Real model ${Build.MODEL}"
+                csc.deviceName.isNotBlank() && perAppCount > 0 -> {
+                    if (isZh) "默认：${csc.deviceName} · 另有 $perAppCount 个分应用机型"
+                    else "Default: ${csc.deviceName} · +$perAppCount per-app"
+                }
+                csc.deviceName.isNotBlank() -> {
+                    if (isZh) "当前伪装：${csc.deviceName}" else "Spoofing as: ${csc.deviceName}"
+                }
+                else -> {
+                    if (isZh) "已为 $perAppCount 个应用单独设置机型" else "$perAppCount app(s) configured"
                 }
             }
+            OneUiHomeFeatureCard(
+                title = if (isZh) "机型伪装" else "Device Model Spoofing",
+                description = if (isZh) "修改社交软件尾巴型号或解锁游戏高帧率，支持全局与分应用机型"
+                else "Spoof device model globally or per-app for social tails & high FPS gaming",
+                statusText = deviceStatusText,
+                icon = Icons.Default.Smartphone,
+                accentColor = IosGlassTokens.IosPurple,
+                isActive = deviceActive,
+                isWarning = deviceActive && !xposedReady,
+                checked = deviceActive,
+                onCheckedChange = { targetEnabled ->
+                    if (!targetEnabled) {
+                        updateCsc(if (isZh) "已关闭机型伪装" else "Device spoofing disabled") {
+                            it.copy(spoofDevice = false)
+                        }
+                    } else {
+                        val fallbackModel = RECOMMENDED_DEVICE_MODELS.first()
+                        val useFallback = csc.deviceName.isBlank() && csc.perAppDeviceModels.isEmpty()
+                        updateCsc(
+                            if (useFallback) {
+                                if (isZh) "已开启机型伪装（默认设为 $fallbackModel，点击卡片可更换机型）"
+                                else "Enabled Device Spoofing ($fallbackModel)"
+                            } else {
+                                if (isZh) "已开启机型伪装" else "Device spoofing enabled"
+                            },
+                        ) { cur ->
+                            cur.copy(
+                                spoofDevice = true,
+                                deviceName = if (useFallback) fallbackModel else cur.deviceName,
+                            )
+                        }
+                    }
+                },
+                onClick = { onOpenFeature(FeaturePageId.DEVICE_SPOOF) },
+            )
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                TextButton(
-                    text = stringResource(R.string.cancel),
-                    onClick = onDismiss,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(
-                    text = stringResource(R.string.save_app_selection, selected.size),
-                    onClick = { onSave(selected) },
-                    colors = ButtonDefaults.textButtonColorsPrimary(),
-                    modifier = Modifier.weight(1f),
-                )
+            // (3) 微信增强
+            val wechatStatusText = when {
+                tuning.stepEnabled && tuning.antiRecall -> {
+                    if (isZh) "已开启：步数 ${tuning.stepMultiplier}倍 + 消息防撤回"
+                    else "On: ${tuning.stepMultiplier}x Steps + Anti-Recall"
+                }
+                tuning.stepEnabled -> {
+                    if (isZh) "已开启：步数修改（${tuning.stepMultiplier}倍 · 上限 ${tuning.stepMaximum}）"
+                    else "On: Step Modifier (${tuning.stepMultiplier}x)"
+                }
+                tuning.antiRecall -> {
+                    if (isZh) "已开启：消息防撤回（步数修改未开启）"
+                    else "On: Message Anti-Recall"
+                }
+                else -> if (isZh) "未开启 · 支持微信运动步数修改与防撤回" else "Off · Step counter & message anti-recall"
             }
+            OneUiHomeFeatureCard(
+                title = if (isZh) "微信增强" else "WeChat Enhancement",
+                description = if (isZh) "自动递增或放大今日微信运动步数，并阻止对方撤回聊天消息"
+                else "Modify daily WeChat steps and prevent others from recalling messages",
+                statusText = wechatStatusText,
+                icon = Icons.AutoMirrored.Filled.DirectionsRun,
+                accentColor = IosGlassTokens.IosGreen,
+                isActive = wechatActive,
+                isWarning = wechatActive && !xposedReady,
+                onClick = {
+                    if (!tuning.stepEnabled && tuning.antiRecall) {
+                        onOpenFeature(FeaturePageId.WECHAT_ANTI_RECALL)
+                    } else {
+                        onOpenFeature(FeaturePageId.WECHAT_STEPS)
+                    }
+                },
+            )
+
+            // (4) 充电优化
+            val tempText = if (batteryTempTenths > 0) String.format(Locale.US, "%.1f°C", batteryTempTenths / 10f) else "--°C"
+            val powerStatusText = when {
+                tuning.brightScreenFastCharge && tuning.passThrough -> {
+                    if (isZh) "亮屏快充 (${tuning.thermalCutoffCelsius}°C保护) + 旁路供电 (${selectedPassApps.size}应用) · 当前 $tempText"
+                    else "Fast Charge (${tuning.thermalCutoffCelsius}°C) + Bypass (${selectedPassApps.size} apps) · $tempText"
+                }
+                tuning.brightScreenFastCharge -> {
+                    if (isZh) "已开启亮屏快充（${tuning.thermalCutoffCelsius}°C 自动恢复温控 · 当前 $tempText）"
+                    else "Screen-On Fast Charge (${tuning.thermalCutoffCelsius}°C cutoff · Now $tempText)"
+                }
+                tuning.passThrough -> {
+                    if (isZh) "已开启应用旁路供电（已选 ${selectedPassApps.size} 个应用 · >${tuning.passThroughLimit}% 生效）"
+                    else "Bypass Power On (${selectedPassApps.size} apps · >${tuning.passThroughLimit}%)"
+                }
+                else -> if (isZh) "未开启 · 亮屏快充解锁与游戏旁路直供（当前电池 $tempText）"
+                else "Off · Screen-on fast charge & gaming bypass power (Battery $tempText)"
+            }
+            OneUiHomeFeatureCard(
+                title = if (isZh) "充电优化" else "Charging Optimization",
+                description = if (isZh) "解除亮屏边玩边充限流（含过热自动保护），支持游戏旁路直供减少发热"
+                else "Unlock screen-on fast charge with thermal protection & gaming bypass power",
+                statusText = powerStatusText,
+                icon = Icons.Default.Bolt,
+                accentColor = IosGlassTokens.IosAmber,
+                isActive = powerActive,
+                isWarning = powerActive && (!hasRoot || batteryRestricted),
+                checked = tuning.brightScreenFastCharge,
+                onCheckedChange = { targetEnabled ->
+                    if (!targetEnabled) {
+                        updateTuning(
+                            if (isZh) "已关闭亮屏快充并恢复系统温控" else "Screen-on fast charge disabled",
+                        ) { it.copy(brightScreenFastCharge = false) }
+                    } else {
+                        ensureNotificationPermission()
+                        scope.launch {
+                            val rootOk = withContext(Dispatchers.IO) { RootShell.hasRoot(forceRefresh = true) }
+                            hasRoot = rootOk
+                            if (rootOk) {
+                                updateTuning(
+                                    if (isZh) "已开启亮屏快充（${tuning.thermalCutoffCelsius}°C 自动过热保护）"
+                                    else "Screen-on fast charge enabled",
+                                ) { it.copy(brightScreenFastCharge = true) }
+                            } else {
+                                snackbar.showSnackbar(
+                                    if (isZh) "开启失败：亮屏快充需要 Root 权限，请在 Magisk / KernelSU 中授权"
+                                    else "Root access is required for Screen-On Fast Charge",
+                                )
+                            }
+                        }
+                    }
+                },
+                onClick = {
+                    if (!tuning.brightScreenFastCharge && tuning.passThrough) {
+                        onOpenFeature(FeaturePageId.BYPASS_POWER)
+                    } else {
+                        onOpenFeature(FeaturePageId.FAST_CHARGE)
+                    }
+                },
+            )
         }
     }
+
+    ConfirmRestartAppsDialog(
+        show = showClearStoreConfirm,
+        title = if (isZh) "刷新三星商店缓存？" else "Refresh Galaxy Store Cache?",
+        message = if (isZh) {
+            "将强制关闭三星应用商店与主题商店并清理其地区缓存，重新打开商店即可加载新地区内容。"
+        } else {
+            "Galaxy Store & Theme Store will be closed and their cache cleared so the new region loads immediately."
+        },
+        confirmText = if (isZh) "立即刷新" else "Refresh Now",
+        cancelText = stringResource(R.string.cancel),
+        onDismiss = { showClearStoreConfirm = false },
+        onConfirm = {
+            showClearStoreConfirm = false
+            scope.launch {
+                val ok = withContext(Dispatchers.IO) { StoreCleaner.clearStoreDataRoot() }
+                if (ok) {
+                    RegionApplyState.markApplied(context)
+                    regionCleanupPending = false
+                    snackbar.showSnackbar(context.getString(R.string.clear_store_success))
+                } else {
+                    snackbar.showSnackbar(context.getString(R.string.clear_store_fail))
+                }
+            }
+        },
+    )
+
+    ActivationGuideDialog(
+        show = showActivationGuide,
+        isZh = isZh,
+        xposedReady = xposedReady,
+        rootReady = hasRoot,
+        onOpenLsposed = {
+            scope.launch(Dispatchers.IO) { LsposedScopeHelper.launchLsposedManager(context) }
+        },
+        onRetest = { recheckEnvironment(showToast = true) },
+        onDismiss = { showActivationGuide = false },
+    )
 }

@@ -50,10 +50,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.weitiao.tuning.R
 import com.weitiao.tuning.ui.theme.OneUiTokens
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Scaffold
@@ -61,13 +69,15 @@ import top.yukonga.miuix.kmp.basic.SnackbarHost
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.extra.WindowDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.miuixShape
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 
 /**
- * Miuix 精致紧凑顶栏页面脚手架（去除夸张大字号标题与底部悬浮栏留白）
+ * Miuix 精致紧凑顶栏页面脚手架（支持底部三栏导航与内页返回）
  */
 @Composable
 fun MiuixPageScaffold(
@@ -76,6 +86,7 @@ fun MiuixPageScaffold(
     subtitle: String? = null,
     onBack: (() -> Unit)? = null,
     actions: @Composable (RowScope.() -> Unit)? = null,
+    bottomBar: @Composable (() -> Unit)? = null,
     snackbarHostState: SnackbarHostState? = null,
     bottomNavigationPadding: Dp = 20.dp,
     content: @Composable ColumnScope.() -> Unit,
@@ -140,6 +151,11 @@ fun MiuixPageScaffold(
                 }
             }
         },
+        bottomBar = {
+            if (bottomBar != null) {
+                bottomBar()
+            }
+        },
         snackbarHost = {
             if (snackbarHostState != null) {
                 SnackbarHost(state = snackbarHostState)
@@ -160,9 +176,9 @@ fun MiuixPageScaffold(
             if (!subtitle.isNullOrBlank()) {
                 Text(
                     text = subtitle,
-                    fontSize = 11.5.sp,
+                    fontSize = 12.sp,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 8.dp),
+                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 10.dp),
                 )
             }
 
@@ -923,6 +939,410 @@ fun OneUiNoticeBanner(
                     softWrap = false,
                 )
             }
+        }
+    }
+}
+
+data class MiuixNavTab<T>(
+    val id: T,
+    val label: String,
+    val icon: ImageVector,
+)
+
+/**
+ * Miuix 三栏底部导航栏（首页 / 功能 / 设置）
+ */
+@Composable
+fun <T> MiuixBottomNavBar(
+    tabs: List<MiuixNavTab<T>>,
+    selectedTab: T,
+    onSelectTab: (T) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val haptics = rememberOneUiHaptics()
+    val isDark = isSystemInDarkTheme()
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(MiuixTheme.colorScheme.surfaceContainer)
+            .navigationBarsPadding(),
+    ) {
+        HorizontalDivider()
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(60.dp)
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            tabs.forEach { tab ->
+                val isSelected = tab.id == selectedTab
+                val pillBg by animateColorAsState(
+                    targetValue = if (isSelected) {
+                        IosGlassTokens.activeTileBg()
+                    } else {
+                        Color.Transparent
+                    },
+                    label = "bottomNavPill",
+                )
+                val fgColor by animateColorAsState(
+                    targetValue = if (isSelected) {
+                        IosGlassTokens.activeTileFg()
+                    } else {
+                        MiuixTheme.colorScheme.onSurfaceVariantSummary
+                    },
+                    label = "bottomNavFg",
+                )
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(miuixShape(14.dp))
+                        .background(pillBg)
+                        .clickable {
+                            if (!isSelected) {
+                                haptics.tap()
+                                onSelectTab(tab.id)
+                            }
+                        }
+                        .padding(vertical = 5.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Icon(
+                        imageVector = tab.icon,
+                        contentDescription = tab.label,
+                        tint = fgColor,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Text(
+                        text = tab.label,
+                        fontSize = 11.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        color = fgColor,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 首页常用功能卡片（统一展示：功能名称 + 一句话简短说明 + 当前状态/结果 + 快捷开关或点击进入详情）
+ */
+@Composable
+fun OneUiHomeFeatureCard(
+    title: String,
+    description: String,
+    statusText: String,
+    icon: ImageVector,
+    accentColor: Color,
+    isActive: Boolean,
+    isWarning: Boolean = false,
+    checked: Boolean? = null,
+    onCheckedChange: ((Boolean) -> Unit)? = null,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val haptics = rememberOneUiHaptics()
+    val statusDotColor = when {
+        isWarning -> IosGlassTokens.IosAmber
+        isActive -> IosGlassTokens.IosGreen
+        else -> MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.45f)
+    }
+    val statusTextColor = when {
+        isWarning -> IosGlassTokens.IosAmber
+        isActive -> IosGlassTokens.IosBlue
+        else -> MiuixTheme.colorScheme.onSurfaceVariantSummary
+    }
+
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        cornerRadius = 18.dp,
+        insideMargin = PaddingValues(horizontal = 14.dp, vertical = 13.dp),
+        colors = CardDefaults.defaultColors(
+            color = MiuixTheme.colorScheme.surfaceContainer,
+            contentColor = MiuixTheme.colorScheme.onSurfaceContainer,
+        ),
+        onClick = {
+            haptics.tap()
+            onClick()
+        },
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(miuixShape(12.dp))
+                    .background(IosGlassTokens.pastelBg(accentColor)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = title,
+                    tint = accentColor,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Text(
+                    text = title,
+                    fontSize = 14.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MiuixTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = description,
+                    fontSize = 11.5.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    modifier = Modifier.padding(top = 1.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(statusDotColor),
+                    )
+                    Text(
+                        text = statusText,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = statusTextColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+
+            if (checked != null && onCheckedChange != null) {
+                Switch(
+                    checked = checked,
+                    onCheckedChange = {
+                        haptics.toggle()
+                        onCheckedChange(it)
+                    },
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 默认折叠的高级设置 / 技术说明卡片组件
+ */
+@Composable
+fun OneUiCollapsibleCard(
+    title: String,
+    modifier: Modifier = Modifier,
+    subtitle: String? = null,
+    initiallyExpanded: Boolean = false,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val haptics = rememberOneUiHaptics()
+    var expanded by rememberSaveable { mutableStateOf(initiallyExpanded) }
+
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        cornerRadius = 18.dp,
+        insideMargin = PaddingValues(12.dp),
+        colors = CardDefaults.defaultColors(
+            color = MiuixTheme.colorScheme.surfaceContainer,
+            contentColor = MiuixTheme.colorScheme.onSurfaceContainer,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(miuixShape(10.dp))
+                    .clickable {
+                        haptics.tap()
+                        expanded = !expanded
+                    }
+                    .padding(horizontal = 4.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = title,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MiuixTheme.colorScheme.onSurface,
+                    )
+                    if (!subtitle.isNullOrBlank()) {
+                        Text(
+                            text = subtitle,
+                            fontSize = 11.sp,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                    }
+                }
+                Icon(
+                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = null,
+                    tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+
+            if (expanded) {
+                HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    content()
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 强停并重启目标应用前的简短确认弹窗（避免用户不知道应用为何被关闭）
+ */
+@Composable
+fun ConfirmRestartAppsDialog(
+    show: Boolean,
+    title: String,
+    message: String,
+    confirmText: String,
+    cancelText: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    WindowDialog(
+        show = show,
+        title = title,
+        onDismissRequest = onDismiss,
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text(
+                text = message,
+                fontSize = 13.sp,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                TextButton(
+                    text = cancelText,
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    text = confirmText,
+                    colors = ButtonDefaults.textButtonColorsPrimary(),
+                    onClick = onConfirm,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 按需展示的单屏激活与权限步骤说明弹窗
+ */
+@Composable
+fun ActivationGuideDialog(
+    show: Boolean,
+    isZh: Boolean,
+    xposedReady: Boolean,
+    rootReady: Boolean,
+    onOpenLsposed: () -> Unit,
+    onRetest: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    WindowDialog(
+        show = show,
+        title = if (isZh) "激活与权限指引" else "Activation & Permission Guide",
+        onDismissRequest = onDismiss,
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                text = if (isZh) {
+                    "1. 开启 LSPosed 模块（用于商店跨区、机型伪装、微信增强）：\n" +
+                        "   · 打开 LSPosed 管理器 → 模块 → 启用「微调」\n" +
+                        "   · 勾选需要生效的应用（如三星应用商店、微信等），无需勾选系统框架\n\n" +
+                        "2. 授予 Root 权限（用于亮屏快充、旁路供电、自动刷新商店）：\n" +
+                        "   · 在 Magisk / KernelSU / APatch 中为「微调」开启超级用户权限"
+                } else {
+                    "1. Enable in LSPosed (for Region, Model Spoofing & WeChat):\n" +
+                        "   · Open LSPosed Manager → Modules → Enable WeiTiao\n" +
+                        "   · Check target apps (Galaxy Store, WeChat, etc.). Do not check System Framework.\n\n" +
+                        "2. Grant Root Access (for Fast Charge, Bypass Power & Store Reset):\n" +
+                        "   · Grant Superuser access to WeiTiao in Magisk / KernelSU / APatch."
+                },
+                fontSize = 12.5.sp,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+
+            OneUiNoticeBanner(
+                text = if (isZh) {
+                    "当前状态：LSPosed ${if (xposedReady) "已激活" else "尚未激活"} · Root ${if (rootReady) "已授权" else "未授权"}"
+                } else {
+                    "Status: LSPosed ${if (xposedReady) "Active" else "Inactive"} · Root ${if (rootReady) "Granted" else "Not granted"}"
+                },
+                contentColor = if (xposedReady && rootReady) IosGlassTokens.IosGreen else IosGlassTokens.IosAmber,
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                TextButton(
+                    text = if (isZh) "打开 LSPosed" else "Open LSPosed",
+                    onClick = onOpenLsposed,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    text = if (isZh) "重新检测" else "Re-check",
+                    colors = ButtonDefaults.textButtonColorsPrimary(),
+                    onClick = onRetest,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+
+            TextButton(
+                text = if (isZh) "我知道了" else "Close",
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }

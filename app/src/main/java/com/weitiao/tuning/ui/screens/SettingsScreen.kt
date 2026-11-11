@@ -3,19 +3,18 @@ package com.weitiao.tuning.ui.screens
 import android.os.Build
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.Stars
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -26,77 +25,50 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.weitiao.tuning.App
 import com.weitiao.tuning.BuildConfig
 import com.weitiao.tuning.R
-import com.weitiao.tuning.core.CscConfig
 import com.weitiao.tuning.core.CscPrefs
 import com.weitiao.tuning.core.CscSpoof
 import com.weitiao.tuning.core.HookLiveness
 import com.weitiao.tuning.core.LanguageManager
-import com.weitiao.tuning.core.RegionApplyState
+import com.weitiao.tuning.core.LsposedScopeHelper
 import com.weitiao.tuning.core.RootShell
+import com.weitiao.tuning.core.TuningPrefs
+import com.weitiao.tuning.ui.components.ActivationGuideDialog
 import com.weitiao.tuning.ui.components.IosGlassTokens
 import com.weitiao.tuning.ui.components.MiuixPageScaffold
+import com.weitiao.tuning.ui.components.OneUiCollapsibleCard
 import com.weitiao.tuning.ui.components.OneUiIslandCard
 import com.weitiao.tuning.ui.components.OneUiItemRow
-import com.weitiao.tuning.ui.components.OneUiNoticeBanner
 import com.weitiao.tuning.ui.components.rememberOneUiHaptics
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
-import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
-import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.basic.TextField
+import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-private data class CscFeaturePresetItem(
-    val key: String,
-    val activeValue: String,
-    val titleRes: Int,
-    val descRes: Int,
-)
-
-private val SAMSUNG_CSC_FEATURE_PRESETS = listOf(
-    CscFeaturePresetItem(
-        key = "CscFeature_VoiceCall_ConfigRecording",
-        activeValue = "RecordingAllowed",
-        titleRes = R.string.csc_preset_call_recording,
-        descRes = R.string.csc_preset_call_recording_desc,
-    ),
-    CscFeaturePresetItem(
-        key = "CscFeature_Camera_ShutterSoundMenu",
-        activeValue = "TRUE",
-        titleRes = R.string.csc_preset_shutter_sound,
-        descRes = R.string.csc_preset_shutter_sound_desc,
-    ),
-    CscFeaturePresetItem(
-        key = "CscFeature_Setting_SupportRealTimeNetworkSpeed",
-        activeValue = "TRUE",
-        titleRes = R.string.csc_preset_network_speed,
-        descRes = R.string.csc_preset_network_speed_desc,
-    ),
-    CscFeaturePresetItem(
-        key = "CscFeature_SystemUI_SupportDataUsageViewOnQuickPanel",
-        activeValue = "TRUE",
-        titleRes = R.string.csc_preset_data_usage,
-        descRes = R.string.csc_preset_data_usage_desc,
-    ),
-)
-
+/**
+ * 底部导航栏「设置」分栏：保留低频与高级诊断内容，高级技术信息默认折叠
+ * - 环境与伪装自检（含重新检测按钮）
+ * - Root 状态、电池无限制权限、LSPosed 作用域说明与界面语言切换
+ * - 活跃宿主进程和诊断信息（默认折叠）
+ * - 关于、版本、开源许可和免责声明（默认折叠）
+ */
 @Composable
 fun SettingsScreen(
+    refreshTrigger: Int = 0,
+    bottomBar: (@Composable () -> Unit)? = null,
+    onOpenFeature: ((FeaturePageId) -> Unit)? = null,
     onBack: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
@@ -105,22 +77,23 @@ fun SettingsScreen(
     val scope = rememberCoroutineScope()
     val isZh = remember { Locale.getDefault().language.startsWith("zh") }
 
-    var config by remember { mutableStateOf(CscPrefs.load(context)) }
-    var customPropsText by rememberSaveable { mutableStateOf(config.customProps.toJson()) }
-    var customFeaturesText by rememberSaveable { mutableStateOf(config.customCscFeatures.toJson()) }
-    var propKeyInput by rememberSaveable { mutableStateOf("") }
-    var propValInput by rememberSaveable { mutableStateOf("") }
-    var featKeyInput by rememberSaveable { mutableStateOf("") }
-    var featValInput by rememberSaveable { mutableStateOf("") }
-    var error by remember { mutableStateOf<String?>(null) }
-
-    val xposedConnected = App.getXposedService() != null || App.getRemotePrefs() != null
+    var config by remember(refreshTrigger) { mutableStateOf(CscPrefs.load(context)) }
+    var xposedConnected by remember {
+        mutableStateOf(App.getXposedService() != null || App.getRemotePrefs() != null)
+    }
     var probeTick by remember { mutableIntStateOf(0) }
     var hasRoot by remember { mutableStateOf(false) }
     var hookedPkgs by remember { mutableStateOf<Set<String>>(emptySet()) }
     var nativeSalesCode by remember { mutableStateOf("") }
+    var batteryRestricted by remember {
+        mutableStateOf(TuningPrefs.isBatteryOptimizationRestricted(context))
+    }
+    var showActivationGuide by rememberSaveable { mutableStateOf(false) }
 
-    LaunchedEffect(probeTick) {
+    LaunchedEffect(probeTick, refreshTrigger) {
+        config = CscPrefs.load(context)
+        xposedConnected = App.getXposedService() != null || App.getRemotePrefs() != null
+        batteryRestricted = TuningPrefs.isBatteryOptimizationRestricted(context)
         withContext(Dispatchers.IO) {
             val root = RootShell.hasRoot(forceRefresh = probeTick > 0)
             val pkgs = HookLiveness.recentHookedPackages() ?: emptySet()
@@ -137,20 +110,17 @@ fun SettingsScreen(
         }
     }
 
-    fun persistSwitch(updated: CscConfig) {
-        val changed = updated != config
-        config = updated
-        CscPrefs.save(context, updated)
-        if (changed) RegionApplyState.markPending(context)
-        scope.launch {
-            snackbarHostState.showSnackbar(context.getString(R.string.settings_auto_saved))
-        }
-    }
+    val effectiveModel = CscSpoof.matchDeviceProp("ro.product.model", config) ?: Build.MODEL
+    val effectiveCsc = CscSpoof.matchProp("ro.csc.sales_code", config)
+        ?: nativeSalesCode.ifBlank { if (isZh) "原生默认" else "Native" }
 
     MiuixPageScaffold(
         title = stringResource(R.string.settings_title),
+        subtitle = if (isZh) "环境自检、权限设置与高级诊断" else "Self-Test, Permissions & Diagnostics",
         onBack = onBack,
+        bottomBar = bottomBar,
         snackbarHostState = snackbarHostState,
+        bottomNavigationPadding = 24.dp,
     ) {
         Column(
             modifier = Modifier
@@ -158,28 +128,147 @@ fun SettingsScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            // 第一层：运行环境与界面语言（全宽列表项，文案完整显示不截断）
+            // 1. 环境与伪装自检
             OneUiIslandCard(
-                title = if (isZh) "运行环境与语言" else "Environment & Language",
+                title = stringResource(R.string.selftest_card_title),
+                subtitle = stringResource(R.string.selftest_card_subtitle),
+                icon = Icons.Default.BugReport,
             ) {
                 OneUiItemRow(
-                    title = if (isZh) "LSPosed 框架状态" else "LSPosed Framework",
-                    subtitle = "Modern Xposed API 102 · v${BuildConfig.VERSION_NAME}",
+                    title = if (isZh) "LSPosed 模块状态" else "LSPosed Module Status",
+                    subtitle = if (xposedConnected) {
+                        if (isZh) "模块已激活并连接远程配置服务" else "Module active and remote preferences connected"
+                    } else {
+                        if (isZh) "模块未激活，点击查看激活步骤" else "Module inactive — tap for activation guide"
+                    },
                     icon = Icons.Default.Security,
                     iconTint = if (xposedConnected) IosGlassTokens.IosGreen else IosGlassTokens.IosAmber,
                     badgeText = if (xposedConnected) {
-                        if (isZh) "已就绪" else "Ready"
+                        if (isZh) "已激活" else "Active"
                     } else {
-                        if (isZh) "未连接" else "Disconnected"
+                        if (isZh) "未激活" else "Inactive"
                     },
                     badgeColor = if (xposedConnected) IosGlassTokens.IosGreen else IosGlassTokens.IosAmber,
+                    showChevron = !xposedConnected,
+                    onClick = { showActivationGuide = true },
+                )
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                OneUiItemRow(
+                    title = stringResource(R.string.selftest_root_status),
+                    subtitle = if (hasRoot) {
+                        if (isZh) "Root 权限已授予（支持亮屏快充、旁路供电与一键清商店缓存）"
+                        else "Superuser granted (Fast charge, bypass power & store cleaner ready)"
+                    } else {
+                        if (isZh) "未获取 Root 权限，请在 Magisk / KernelSU 中授权后点击下方重新检测"
+                        else "Root unavailable — grant in Magisk / KernelSU and re-test"
+                    },
+                    badgeText = if (hasRoot) {
+                        if (isZh) "已授权" else "Granted"
+                    } else {
+                        if (isZh) "未获取" else "Unavailable"
+                    },
+                    badgeColor = if (hasRoot) IosGlassTokens.IosGreen else IosGlassTokens.IosAmber,
+                )
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                OneUiItemRow(
+                    title = stringResource(R.string.selftest_build_model),
+                    subtitle = if (config.spoofDevice && config.deviceName.isNotBlank()) {
+                        if (isZh) "本机型号: ${Build.MODEL} → 伪装结果: $effectiveModel"
+                        else "Real: ${Build.MODEL} → Spoofed: $effectiveModel"
+                    } else {
+                        if (isZh) "当前使用本机真实型号" else "Using real device model"
+                    },
+                    trailingValue = effectiveModel,
+                )
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                OneUiItemRow(
+                    title = stringResource(R.string.selftest_csc_code),
+                    subtitle = if (config.enabled && config.salesCode.isNotBlank()) {
+                        if (isZh) "本机 CSC: ${nativeSalesCode.ifBlank { "-" }} → 伪装地区: ${config.salesCode}"
+                        else "Real CSC: ${nativeSalesCode.ifBlank { "-" }} → Target: ${config.salesCode}"
+                    } else {
+                        if (isZh) "商店跨区未开启，保持本机默认区域" else "Store region unlock off"
+                    },
+                    trailingValue = effectiveCsc,
+                )
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                OneUiItemRow(
+                    title = stringResource(R.string.selftest_refresh_btn),
+                    subtitle = if (isZh) "立即重新检测 LSPosed、Root 与伪装状态" else "Re-check LSPosed, Root & spoofing status now",
+                    icon = Icons.Default.Refresh,
+                    iconTint = IosGlassTokens.IosTeal,
+                    onClick = {
+                        haptics.tap()
+                        probeTick++
+                        scope.launch {
+                            snackbarHostState.showSnackbar(
+                                if (isZh) "已重新检测环境状态" else "Environment status refreshed",
+                            )
+                        }
+                    },
+                )
+            }
+
+            // 2. 权限、作用域与常规设置
+            OneUiIslandCard(
+                title = if (isZh) "权限、作用域与语言" else "Permissions, Scope & Language",
+            ) {
+                OneUiItemRow(
+                    title = if (isZh) "LSPosed 作用域管理" else "LSPosed Scope Manager",
+                    subtitle = if (isZh) "打开 LSPosed 管理器检查勾选的目标应用" else "Open LSPosed Manager to review target app scope",
+                    icon = Icons.Default.Tune,
+                    iconTint = IosGlassTokens.IosPurple,
+                    showChevron = true,
+                    onClick = {
+                        scope.launch(Dispatchers.IO) {
+                            val ok = LsposedScopeHelper.launchLsposedManager(context)
+                            if (!ok) {
+                                withContext(Dispatchers.Main) {
+                                    showActivationGuide = true
+                                }
+                            }
+                        }
+                    },
+                )
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                OneUiItemRow(
+                    title = if (isZh) "后台电池无限制权限" else "Unrestricted Battery Usage",
+                    subtitle = if (batteryRestricted) {
+                        if (isZh) "当前受限：建议设为「不受限制」以保证充电温控服务稳定运行"
+                        else "Restricted: tap to allow unrestricted background usage"
+                    } else {
+                        if (isZh) "已设为「不受限制」，后台充电与温控服务不会被休眠"
+                        else "Unrestricted: background charging protection is active"
+                    },
+                    icon = Icons.Default.BatteryAlert,
+                    iconTint = if (batteryRestricted) IosGlassTokens.IosAmber else IosGlassTokens.IosGreen,
+                    badgeText = if (batteryRestricted) {
+                        if (isZh) "去设置" else "Allow"
+                    } else {
+                        if (isZh) "已开启" else "Allowed"
+                    },
+                    badgeColor = if (batteryRestricted) IosGlassTokens.IosAmber else IosGlassTokens.IosGreen,
+                    onClick = {
+                        TuningPrefs.requestIgnoreBatteryOptimization(context)
+                        batteryRestricted = TuningPrefs.isBatteryOptimizationRestricted(context)
+                    },
                 )
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
                 OneUiItemRow(
                     title = if (isZh) "界面语言 / Language" else "UI Language",
-                    subtitle = if (isZh) "点击立即切换中英文界面" else "Tap to switch UI language",
+                    subtitle = if (isZh) "点击切换中英文界面" else "Tap to switch between Chinese and English",
                     icon = Icons.Default.Language,
                     iconTint = IosGlassTokens.IosBlue,
                     trailingValue = if (isZh) "简体中文" else "English",
@@ -192,388 +281,100 @@ fun SettingsScreen(
                 )
             }
 
-            // 第一点五层：环境与伪装自检探针（实时验证伪装结果与系统探针）
-            val effectiveModel = CscSpoof.matchDeviceProp("ro.product.model", config) ?: Build.MODEL
-            val effectiveCsc = CscSpoof.matchProp("ro.csc.sales_code", config)
-                ?: nativeSalesCode.ifBlank { if (isZh) "原生默认" else "Native" }
-            OneUiIslandCard(
-                title = stringResource(R.string.selftest_card_title),
-                subtitle = stringResource(R.string.selftest_card_subtitle),
-                icon = Icons.Default.BugReport,
+            // 3. LSPosed 作用域推荐说明（折叠卡片）
+            OneUiCollapsibleCard(
+                title = if (isZh) "LSPosed 作用域推荐说明" else "LSPosed Scope Recommendations",
+                subtitle = if (isZh) "查看各功能建议勾选的目标应用及注意事项" else "Recommended target apps for each feature",
+                initiallyExpanded = false,
             ) {
-                OneUiItemRow(
-                    title = stringResource(R.string.selftest_build_model),
-                    subtitle = if (config.spoofDevice && config.deviceName.isNotBlank()) {
-                        if (isZh) "物理机型: ${Build.MODEL} → 伪装生效: $effectiveModel"
-                        else "Physical: ${Build.MODEL} → Spoofed: $effectiveModel"
+                Text(
+                    text = if (isZh) {
+                        "• 商店跨区：建议勾选「三星应用商店 (com.sec.android.app.samsungapps)」与「三星主题商店 (com.samsung.android.themestore)」。\n" +
+                            "• 微信增强：请勾选「微信 (com.tencent.mm)」。\n" +
+                            "• 机型伪装：请勾选需要伪装型号的社交或游戏应用（也可在「机型伪装」页面让微调通过 Root 自动同步作用域）。\n" +
+                            "• 安全提示：请勿勾选「系统框架 (android)」，仅勾选具体目标应用即可获得最佳稳定性与续航。"
                     } else {
-                        if (isZh) "当前为物理真实机型" else "Physical native model"
+                        "• Store Region: Check Galaxy Store (com.sec.android.app.samsungapps) and Theme Store (com.samsung.android.themestore).\n" +
+                            "• WeChat Enhancement: Check WeChat (com.tencent.mm).\n" +
+                            "• Device Spoofing: Check the specific social or game apps you want to spoof.\n" +
+                            "• Safety Note: Do NOT check System Framework (android) in LSPosed."
                     },
-                    trailingValue = effectiveModel,
-                )
-
-                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-
-                OneUiItemRow(
-                    title = stringResource(R.string.selftest_csc_code),
-                    subtitle = if (config.enabled && config.salesCode.isNotBlank()) {
-                        if (isZh) "原厂 CSC: ${nativeSalesCode.ifBlank { "-" }} → 伪装目标: ${config.salesCode}"
-                        else "Native CSC: ${nativeSalesCode.ifBlank { "-" }} → Target: ${config.salesCode}"
-                    } else {
-                        if (isZh) "未开启商店跨区，保持原厂区域" else "Store spoofing off, native region"
-                    },
-                    trailingValue = effectiveCsc,
-                )
-
-                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-
-                OneUiItemRow(
-                    title = stringResource(R.string.selftest_root_status),
-                    subtitle = if (isZh) "持久交互式 su 会话池 (含单次兜底)" else "Persistent su shell session with fallback",
-                    badgeText = if (hasRoot) {
-                        if (isZh) "已授权" else "Granted"
-                    } else {
-                        if (isZh) "未获取" else "Unavailable"
-                    },
-                    badgeColor = if (hasRoot) IosGlassTokens.IosGreen else IosGlassTokens.IosAmber,
-                )
-
-                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-
-                OneUiItemRow(
-                    title = stringResource(R.string.selftest_lsposed_status),
-                    subtitle = if (hookedPkgs.isEmpty()) {
-                        if (isZh) "打开任意目标应用即可触发注入心跳" else "Open any target app to trigger hook heartbeat"
-                    } else {
-                        hookedPkgs.joinToString(", ")
-                    },
-                    trailingValue = if (xposedConnected) {
-                        if (isZh) "${hookedPkgs.size} 个进程活跃" else "${hookedPkgs.size} active"
-                    } else {
-                        if (isZh) "未激活" else "Inactive"
-                    },
-                )
-
-                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-
-                OneUiItemRow(
-                    title = stringResource(R.string.selftest_refresh_btn),
-                    icon = Icons.Default.Refresh,
-                    iconTint = IosGlassTokens.IosTeal,
-                    showChevron = false,
-                    onClick = {
-                        haptics.tap()
-                        probeTick++
-                    },
+                    fontSize = 11.5.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
             }
 
-            // 三星 One UI 常用 CscFeature 一键预设卡片
-            OneUiIslandCard(
-                title = stringResource(R.string.csc_presets_card_title),
-                subtitle = stringResource(R.string.csc_presets_card_subtitle),
-                icon = Icons.Default.Stars,
-            ) {
-                SAMSUNG_CSC_FEATURE_PRESETS.forEachIndexed { idx, item ->
-                    if (idx > 0) {
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                    }
-                    val isEnabled = config.customCscFeatures[item.key].equals(item.activeValue, ignoreCase = true)
-                    OneUiItemRow(
-                        title = stringResource(item.titleRes),
-                        subtitle = stringResource(item.descRes),
-                        checked = isEnabled,
-                        onCheckedChange = { checked ->
-                            val updatedMap = config.customCscFeatures.toMutableMap().apply {
-                                if (checked) {
-                                    put(item.key, item.activeValue)
-                                } else {
-                                    remove(item.key)
-                                }
-                            }.toMap()
-                            customFeaturesText = updatedMap.toJson()
-                            persistSwitch(
-                                config.copy(
-                                    spoofSemCscFeature = true,
-                                    customCscFeatures = updatedMap,
-                                )
-                            )
-                        },
-                    )
-                }
-            }
-
-            // 第二层：细分欺骗项开关（Miuix SuperSwitch）
-            OneUiIslandCard(
-                title = stringResource(R.string.settings_inject_title),
-                subtitle = stringResource(R.string.settings_inject_desc),
-                icon = Icons.Default.Tune,
-            ) {
-                OneUiItemRow(
-                    title = stringResource(R.string.spoof_sales_code_setting),
-                    subtitle = stringResource(R.string.spoof_sales_code_setting_desc),
-                    checked = config.spoofSalesCode,
-                    onCheckedChange = { persistSwitch(config.copy(spoofSalesCode = it)) },
-                )
-
-                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-
-                OneUiItemRow(
-                    title = stringResource(R.string.spoof_country_code_setting),
-                    subtitle = stringResource(R.string.spoof_country_code_setting_desc),
-                    checked = config.spoofCountryCode,
-                    onCheckedChange = { persistSwitch(config.copy(spoofCountryCode = it)) },
-                )
-
-                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-
-                OneUiItemRow(
-                    title = stringResource(R.string.spoof_ril_code_setting),
-                    subtitle = stringResource(R.string.spoof_ril_code_setting_desc),
-                    checked = config.spoofRilSalesCode,
-                    onCheckedChange = { persistSwitch(config.copy(spoofRilSalesCode = it)) },
-                )
-
-                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-
-                OneUiItemRow(
-                    title = stringResource(R.string.spoof_omc_setting),
-                    subtitle = "ro.csc.omcnw_code / official_csc / csc_code",
-                    checked = config.spoofOmcCodes,
-                    onCheckedChange = { persistSwitch(config.copy(spoofOmcCodes = it)) },
-                )
-
-                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-
-                OneUiItemRow(
-                    title = stringResource(R.string.hook_csc_feature_setting),
-                    subtitle = stringResource(R.string.hook_csc_feature_setting_desc),
-                    checked = config.spoofSemCscFeature,
-                    onCheckedChange = { persistSwitch(config.copy(spoofSemCscFeature = it)) },
-                )
-            }
-
-            // 第三层：自定义属性覆盖
-            OneUiIslandCard(
-                title = stringResource(R.string.custom_props),
-                subtitle = stringResource(R.string.custom_props_desc),
-                icon = Icons.Default.Code,
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    TextField(
-                        value = propKeyInput,
-                        onValueChange = { propKeyInput = it },
-                        label = stringResource(R.string.kv_key_hint),
-                        useLabelAsPlaceholder = true,
-                        singleLine = true,
-                        insideMargin = DpSize(10.dp, 8.dp),
-                        modifier = Modifier.weight(1.2f),
-                    )
-                    TextField(
-                        value = propValInput,
-                        onValueChange = { propValInput = it },
-                        label = stringResource(R.string.kv_value_hint),
-                        useLabelAsPlaceholder = true,
-                        singleLine = true,
-                        insideMargin = DpSize(10.dp, 8.dp),
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(
-                        text = stringResource(R.string.kv_add_btn),
-                        colors = ButtonDefaults.textButtonColorsPrimary(),
-                        onClick = {
-                            val k = propKeyInput.trim()
-                            if (k.isNotEmpty()) {
-                                haptics.tap()
-                                val map = runCatching { customPropsText.trim().ifEmpty { "{}" }.toMap() }
-                                    .getOrDefault(config.customProps)
-                                    .toMutableMap()
-                                map[k] = propValInput.trim()
-                                customPropsText = map.toJson()
-                                propKeyInput = ""
-                                propValInput = ""
-                                persistSwitch(config.copy(customProps = map))
-                            }
-                        },
-                    )
-                }
-
-                TextField(
-                    value = customPropsText,
-                    onValueChange = { customPropsText = it },
-                    label = "{\"ro.csc.custom\":\"value\"}",
-                    useLabelAsPlaceholder = true,
-                    minLines = 3,
-                    textStyle = MiuixTheme.textStyles.body2.copy(fontFamily = FontFamily.Monospace),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    TextButton(
-                        text = stringResource(R.string.format_json_btn),
-                        onClick = {
-                            haptics.tap()
-                            runCatching {
-                                val formatted = JSONObject(customPropsText).toString(2)
-                                customPropsText = formatted
-                            }
-                        },
-                        modifier = Modifier.weight(1f),
-                    )
-
-                    TextButton(
-                        text = stringResource(R.string.clear_btn),
-                        onClick = {
-                            haptics.tap()
-                            customPropsText = "{}"
-                        },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
-
-            // 第四层：自定义 CscFeature 覆盖
-            OneUiIslandCard(
-                title = stringResource(R.string.custom_features),
-                subtitle = stringResource(R.string.custom_features_desc),
-                icon = Icons.Default.Code,
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    TextField(
-                        value = featKeyInput,
-                        onValueChange = { featKeyInput = it },
-                        label = stringResource(R.string.kv_key_hint),
-                        useLabelAsPlaceholder = true,
-                        singleLine = true,
-                        insideMargin = DpSize(10.dp, 8.dp),
-                        modifier = Modifier.weight(1.2f),
-                    )
-                    TextField(
-                        value = featValInput,
-                        onValueChange = { featValInput = it },
-                        label = stringResource(R.string.kv_value_hint),
-                        useLabelAsPlaceholder = true,
-                        singleLine = true,
-                        insideMargin = DpSize(10.dp, 8.dp),
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(
-                        text = stringResource(R.string.kv_add_btn),
-                        colors = ButtonDefaults.textButtonColorsPrimary(),
-                        onClick = {
-                            val k = featKeyInput.trim()
-                            if (k.isNotEmpty()) {
-                                haptics.tap()
-                                val map = runCatching { customFeaturesText.trim().ifEmpty { "{}" }.toMap() }
-                                    .getOrDefault(config.customCscFeatures)
-                                    .toMutableMap()
-                                map[k] = featValInput.trim()
-                                customFeaturesText = map.toJson()
-                                featKeyInput = ""
-                                featValInput = ""
-                                persistSwitch(config.copy(spoofSemCscFeature = true, customCscFeatures = map))
-                            }
-                        },
-                    )
-                }
-
-                TextField(
-                    value = customFeaturesText,
-                    onValueChange = { customFeaturesText = it },
-                    label = "{\"CscFeature_Common_ConfigSamsungLegal\":\"...\"}",
-                    useLabelAsPlaceholder = true,
-                    minLines = 3,
-                    textStyle = MiuixTheme.textStyles.body2.copy(fontFamily = FontFamily.Monospace),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    TextButton(
-                        text = stringResource(R.string.format_json_btn),
-                        onClick = {
-                            haptics.tap()
-                            runCatching {
-                                val formatted = JSONObject(customFeaturesText).toString(2)
-                                customFeaturesText = formatted
-                            }
-                        },
-                        modifier = Modifier.weight(1f),
-                    )
-
-                    TextButton(
-                        text = stringResource(R.string.clear_btn),
-                        onClick = {
-                            haptics.tap()
-                            customFeaturesText = "{}"
-                        },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
-
-            TextButton(
-                text = stringResource(R.string.save_and_apply_btn),
-                colors = ButtonDefaults.textButtonColorsPrimary(),
-                onClick = {
-                    haptics.confirm()
-                    error = null
-                    val props = runCatching { customPropsText.trim().ifEmpty { "{}" }.toMap() }
-                        .getOrElse { error = "JSON format error"; return@TextButton }
-                    val features = runCatching { customFeaturesText.trim().ifEmpty { "{}" }.toMap() }
-                        .getOrElse { error = "JSON format error"; return@TextButton }
-
-                    val final = config.copy(customProps = props, customCscFeatures = features)
-                    val changed = final != config
-                    config = final
-                    CscPrefs.save(context, final)
-                    if (changed) RegionApplyState.markPending(context)
-                    scope.launch { snackbarHostState.showSnackbar(context.getString(R.string.settings_saved)) }
+            // 4. 活跃宿主进程与高级诊断信息（默认折叠）
+            OneUiCollapsibleCard(
+                title = if (isZh) "活跃宿主进程与高级诊断" else "Active Host Processes & Diagnostics",
+                subtitle = if (xposedConnected) {
+                    if (isZh) "当前检测到 ${hookedPkgs.size} 个活跃注入进程（默认折叠）"
+                    else "${hookedPkgs.size} active hooked process(es)"
+                } else {
+                    if (isZh) "查看进程注入心跳与诊断状态" else "View hook heartbeats & diagnostic status"
                 },
-                modifier = Modifier.fillMaxWidth(),
-            )
-
-            error?.let {
-                OneUiNoticeBanner(
-                    text = it,
-                    contentColor = IosGlassTokens.IosRed,
+                initiallyExpanded = false,
+            ) {
+                Text(
+                    text = if (hookedPkgs.isEmpty()) {
+                        if (isZh) "暂无活跃宿主进程记录。打开已勾选作用域的目标应用后，点击上方「重新检测」即可查看活跃进程。"
+                        else "No active hooked processes recorded yet. Launch a target app and tap Re-test above."
+                    } else {
+                        if (isZh) "最近活跃注入进程：\n${hookedPkgs.joinToString("\n") { "• $it" }}"
+                        else "Recently active hooked processes:\n${hookedPkgs.joinToString("\n") { "• $it" }}"
+                    },
+                    fontSize = 11.5.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
             }
 
-            OneUiNoticeBanner(
-                text = stringResource(R.string.scope_note),
-                icon = Icons.Default.Info,
-                contentColor = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            )
+            // 5. 关于、版本、开源许可与免责声明（默认折叠）
+            OneUiCollapsibleCard(
+                title = if (isZh) "关于、版本与免责声明" else "About, License & Disclaimer",
+                subtitle = "WeiTiao v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                initiallyExpanded = false,
+            ) {
+                OneUiItemRow(
+                    title = if (isZh) "应用版本" else "Version",
+                    subtitle = "com.weitiao.tuning",
+                    icon = Icons.Default.Info,
+                    iconTint = IosGlassTokens.IosBlue,
+                    trailingValue = "v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                )
+                HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+                Text(
+                    text = if (isZh) {
+                        "开源地址：https://github.com/WEIHEWU/WeiTiao\n" +
+                            "UI 框架：Miuix KMP (HyperOS / One UI 融合设计风格)\n\n" +
+                            "免责声明：\n" +
+                            "1. 本工具仅通过运行时 Hook 与受控温控守护服务提供区域切换、机型伪装与充电辅助，不修改系统分区与基带固件。\n" +
+                            "2. 使用亮屏快充时建议保持默认 44°C 安全温控阈值，切勿在高温密闭环境下遮挡手机散热。"
+                    } else {
+                        "GitHub: https://github.com/WEIHEWU/WeiTiao\n" +
+                            "UI Framework: Miuix KMP\n\n" +
+                            "Disclaimer:\n" +
+                            "1. WeiTiao operates via runtime hooks and controlled thermal guard services without modifying system partitions.\n" +
+                            "2. Keep the recommended 44°C thermal cutoff when using Screen-On Fast Charge."
+                    },
+                    fontSize = 11.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            }
 
             Spacer(modifier = Modifier.height(12.dp))
         }
     }
-}
 
-private fun Map<String, String>.toJson(): String =
-    JSONObject(this).toString(2)
-
-private fun String.toMap(): Map<String, String> {
-    val obj = JSONObject(this)
-    val keys = obj.keys()
-    return buildMap {
-        while (keys.hasNext()) {
-            val k = keys.next()
-            put(k, obj.optString(k))
-        }
-    }
+    ActivationGuideDialog(
+        show = showActivationGuide,
+        isZh = isZh,
+        xposedReady = xposedConnected,
+        rootReady = hasRoot,
+        onOpenLsposed = {
+            scope.launch(Dispatchers.IO) { LsposedScopeHelper.launchLsposedManager(context) }
+        },
+        onRetest = { probeTick++ },
+        onDismiss = { showActivationGuide = false },
+    )
 }
