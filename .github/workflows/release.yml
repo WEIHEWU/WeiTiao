@@ -24,23 +24,30 @@ jobs:
 
       - name: Verify APK & Generate SHA-256 Checksum
         run: |
-          test -f releases/WeiTiao-v1.5.6.apk
+          test -f releases/WeiTiao-v1.5.7.apk
           cd releases
-          sha256sum WeiTiao-v1.5.6.apk > WeiTiao-v1.5.6.apk.sha256
-          cat WeiTiao-v1.5.6.apk.sha256
+          sha256sum WeiTiao-v1.5.7.apk > WeiTiao-v1.5.7.apk.sha256
+          cat WeiTiao-v1.5.7.apk.sha256
 
       - name: Create GitHub Release and Upload APK + Checksum
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.5.6
-          name: "微调 WeiTiao v1.5.6 (亮屏快充单通知状态机重构 · 根除待命常驻与双通知并存问题)"
+          tag_name: v1.5.7
+          name: "微调 WeiTiao v1.5.7 (修复微信步数每日封顶、快充温控熔断与通知栏空白通知)"
           body: |
-            ### 微调 (WeiTiao) v1.5.6
+            ### 微调 (WeiTiao) v1.5.7
 
-            - **亮屏快充通知架构合并与统一状态机 (`FastChargeNotifier` / `BrightScreenFastChargeService`)**：
-              - **单通知 ID 原地切换 (`NOTIFICATION_ID = 19077`)**：彻底废弃旧版 `19076` 常驻服务通知 ID，前台服务保活与充电实时数据合并共用唯一 ID `19077`；未插电待命态绑定 `IMPORTANCE_NONE` 隐藏渠道使通知栏完全不显示「亮屏快充」条目，插电充电态（含亮屏快充、息屏安全充电、高温保护恢复原生温控）在同一通知 ID 上原地刷新。
-              - **覆盖安装自动清理旧版残留与防渠道篡改保护**：新增带版本号的 `cleanupLegacyIfNeeded` 一次性自动清理旧版 `19076` 残留通知与旧渠道；当后台隐藏渠道重要性被外部误改时，采用「先新建隐藏渠道并切换前台通知绑定、再删除旧渠道」的无感轮转保护（上限 3 次），同时 100% 尊重用户对「亮屏快充」可见通知类别的开关设置。
-              - **全链路拔线兜底一致性 (`FastChargeReceiver` / `FastChargeWatchdog`)**：统一常驻服务、静态广播与 `JobService.onStopJob` 拔线恢复路径，拔线瞬间立即切回隐藏态、恢复官方温控节点并重新布防插电触发器。
+            - **微信步数封顶与跨重启状态持久化 (`WechatHooks` / `TuningConfig`)**：
+              - 新增真实硬件计步读数门禁 (`hasRealHardwareReading`)，在未收到系统真实 `TYPE_STEP_COUNTER` 读数（`raw > 0f`）前绝不注入 `0f` / `1000f` 假事件，杜绝污染微信今日计步基准值。
+              - 将今日计步状态（`todayKey`、`baseHardwareRaw`、`lastHardwareRaw`、`currentDelivered`、`lastOutput`）持久化到宿主 `SharedPreferences("weitiao_step_state")`，确保同日重启微信后传感器输出单调不降、绝不触发微信「手机重启二次累加」Bug，全天步数严格封顶在设定上限（如 `28,000` 步）内。
+              - `TuningPrefs.save()` 同步写入 `KEY_LOCAL_SAVED_AT` 标记并采用 `commit()` 落盘，防止跨进程同步回退默认值。
+            - **亮屏快充温控熔断加固与滑块范围统一 (`FastChargeController` / `BrightScreenFastChargeService` / `SystemAndWechatScreens`)**：
+              - 加固 `rd()` 对 `0/00/000/0000` 权限位及不可读节点的瞬时 `chmod 0444 -> cat -> chmod 0000` 读取，并引入未被屏蔽的 `/sys/class/thermal/thermal_zone*` 电池热敏源作为兜底校验。
+              - 触发过热保护时无条件执行 `restoreTemperatureNodes()`（强制 `chmod 0644` 恢复全部温控节点），并禁止在节点锁死期间用卡死在旧温度的 `EXTRA_TEMPERATURE` 广播覆盖真实 sysfs 温度。
+              - 将 UI 温度滑块范围与后台安全边界统一对齐为 `38°C ~ 48°C`（步进 `1°C`）。
+            - **通知栏空白通知消除与单色状态栏图标 (`FastChargeNotifier` / `PassThroughService`)**：
+              - 新增 24dp 透明背景纯白单色状态栏矢量图标 `ic_stat_weitiao.xml`，替换通知栏中的多色桌面图标。
+              - 移除 `isDegraded` 空字符串降级逻辑；未插电时在 `onCreate`/`onStartCommand` 履行 `startForeground()` 契约后自动退出前台服务（插电由广播与 `JobScheduler` 立即唤醒），确保未充电时通知栏 100% 不残留空白通知。
           files: |
-            releases/WeiTiao-v1.5.6.apk
-            releases/WeiTiao-v1.5.6.apk.sha256
+            releases/WeiTiao-v1.5.7.apk
+            releases/WeiTiao-v1.5.7.apk.sha256
