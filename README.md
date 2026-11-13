@@ -1,7 +1,5 @@
 # 微调 (WeiTiao)
 
-[English](README.en.md) · **[点击直接下载安装包 (WeiTiao-v1.5.6.apk · 1.7 MB)](https://github.com/WEIHEWU/WeiTiao/raw/main/releases/WeiTiao-v1.5.6.apk)** · [Releases 页面](https://github.com/WEIHEWU/WeiTiao/releases)
-
 一个基于 `libxposed API 102`、`Root` 与 **`miuix` (`0.8.8`)** 界面的三星 One UI 增强模块，集成 **底层 Native COW 系统属性伪装引擎**、**应用商店跨区解锁（CSC/SIM 伪装）**、**分应用独立硬件机型伪装（三年内纯血旗舰库）**、**三星 One UI 隐藏 CscFeature 一键预设**、**微信运动步数与消息防撤回**、**亮屏快充（实时功率监控）** 以及 **USB PD 应用旁路供电**。
 
 > 全面测试并官方适配三星 One UI 8.5 / One UI 9（Android 17 / API 37），兼容搭载 One UI 的 Galaxy 全系机型。
