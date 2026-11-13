@@ -124,26 +124,16 @@ object FastChargeFallback {
      */
     fun applyNow(context: Context) {
         val cfg = TuningPrefs.load(context)
-        if (!cfg.brightScreenFastCharge) {
+        val fastChargeEnabled = cfg.brightScreenFastCharge
+        val passThroughEnabled = cfg.passThrough
+
+        if (!fastChargeEnabled && !passThroughEnabled) {
             FastChargeController.restoreTemperatureNodes()
             FastChargeScheduler.disable(context)
             FastChargeNotifier.cancelLive(context)
             return
         }
         FastChargeScheduler.enable(context)
-
-        // 优先尝试拉起/唤醒常驻前台服务；若常驻服务已存活，严禁在此处越权执行 blockTemperatureNodes()，
-        // 彻底避免周期性 JobService 在高温熔断期间（如 17:05:31）背着常驻服务把温度节点重新锁死为 0000！
-        val startedOrNotified = runCatching {
-            val intent = Intent(context, BrightScreenFastChargeService::class.java)
-                .setAction(BrightScreenFastChargeService.ACTION_START)
-            ContextCompat.startForegroundService(context, intent)
-            true
-        }.getOrDefault(false)
-
-        if (BrightScreenFastChargeService.isServiceAlive || startedOrNotified) {
-            return
-        }
 
         val battery = runCatching {
             context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
@@ -153,8 +143,35 @@ object FastChargeFallback {
 
         if (plugged <= 0) {
             FastChargeController.restoreTemperatureNodes()
-            FastChargeNotifier.hideNotification(context)
+            FastChargeNotifier.cancelLive(context)
             FastChargeScheduler.armChargingTrigger(context)
+            return
+        }
+
+        if (passThroughEnabled && !PassThroughService.isServiceAlive) {
+            runCatching {
+                val passIntent = Intent(context, PassThroughService::class.java)
+                    .setAction(PassThroughService.ACTION_REFRESH)
+                ContextCompat.startForegroundService(context, passIntent)
+            }
+        }
+
+        if (!fastChargeEnabled) {
+            FastChargeController.restoreTemperatureNodes()
+            FastChargeNotifier.cancelLive(context)
+            return
+        }
+
+        // 优先尝试拉起/唤醒亮屏快充前台服务；若服务已存活，严禁在此处越权执行 blockTemperatureNodes()，
+        // 彻底避免周期性 JobService 在高温熔断期间（如 17:05:31）背着常驻服务把温度节点重新锁死为 0000！
+        val startedOrNotified = runCatching {
+            val intent = Intent(context, BrightScreenFastChargeService::class.java)
+                .setAction(BrightScreenFastChargeService.ACTION_START)
+            ContextCompat.startForegroundService(context, intent)
+            true
+        }.getOrDefault(false)
+
+        if (BrightScreenFastChargeService.isServiceAlive || startedOrNotified) {
             return
         }
 
@@ -172,7 +189,10 @@ object FastChargeFallback {
         BrightScreenFastChargeService.lastKnownMetrics = metrics
         val overheated = FastChargeController.isOverheated(
             metrics = metrics,
-            cutoffCelsius = cfg.thermalCutoffCelsius,
+            cutoffCelsius = cfg.thermalCutoffCelsius.coerceIn(
+                 com.weitiao.tuning.core.TuningConfig.MIN_THERMAL_CUTOFF_CELSIUS,
+                com.weitiao.tuning.core.TuningConfig.MAX_THERMAL_CUTOFF_CELSIUS,
+            ),
             previouslyOverheated = BrightScreenFastChargeService.isThermalCutoffActive,
         )
         BrightScreenFastChargeService.isThermalCutoffActive = overheated
@@ -224,20 +244,21 @@ class FastChargeJobService : JobService() {
         // 当用户拔掉充电器导致 requiresCharging 约束失效，或任务被取消时，系统会立即回调 onStopJob：
         // 即使常驻服务已被系统回收，这里也能在后台线程确保拔线瞬间无条件恢复全部温控节点！
         val context = applicationContext
-        val enabled = TuningPrefs.load(context).brightScreenFastCharge
+        val cfg = TuningPrefs.load(context)
+        val anyEnabled = cfg.brightScreenFastCharge || cfg.passThrough
         Thread({
             runCatching {
-                if (!enabled) {
+                if (!anyEnabled) {
                     FastChargeController.restoreTemperatureNodes()
                     FastChargeScheduler.disable(context)
                     FastChargeNotifier.cancelLive(context)
                 } else if (!FastChargeScheduler.isPluggedIn(context)) {
                     FastChargeController.restoreTemperatureNodes()
-                    FastChargeNotifier.hideNotification(context)
+                    FastChargeNotifier.cancelLive(context)
                     FastChargeScheduler.armChargingTrigger(context)
                 }
             }
         }, "Tuning-FastChargeUnplugRestore").apply { isDaemon = true }.start()
-        return enabled
+        return anyEnabled
     }
 }

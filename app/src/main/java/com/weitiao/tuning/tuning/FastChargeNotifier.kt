@@ -310,11 +310,11 @@ object FastChargeNotifier {
         cleanupLegacyIfNeeded(context)
         val manager = context.getSystemService(NotificationManager::class.java)
         val channelId = manager?.let { prepareHiddenChannelId(context, it) } ?: CHANNEL_HIDDEN_BASE
-        val isDegraded = channelId == CHANNEL_HIDDEN_FALLBACK_MIN
+        val safeStatus = status.ifBlank { IDLE_STATUS }
         val builder = Notification.Builder(context, channelId)
-            .setSmallIcon(R.drawable.ic_module)
-            .setContentTitle(if (isDegraded) "" else TITLE)
-            .setContentText(if (isDegraded) "" else status)
+            .setSmallIcon(R.drawable.ic_stat_weitiao)
+            .setContentTitle(TITLE)
+            .setContentText(safeStatus)
             .setContentIntent(contentIntent(context))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -330,10 +330,11 @@ object FastChargeNotifier {
     /** 充电时展示的唯一可见实时通知。 */
     fun buildLiveNotification(context: Context, status: String, subText: String? = null): Notification {
         ensureChannels(context)
+        val safeStatus = status.ifBlank { IDLE_STATUS }
         val builder = Notification.Builder(context, CHANNEL_LIVE)
-            .setSmallIcon(R.drawable.ic_module)
+            .setSmallIcon(R.drawable.ic_stat_weitiao)
             .setContentTitle(TITLE)
-            .setContentText(status)
+            .setContentText(safeStatus)
             .setContentIntent(contentIntent(context))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -474,9 +475,11 @@ object FastChargeNotifier {
                 deletePendingObsoleteHiddenChannel(manager)
             }
             TransitionAction.NOTIFY_HIDDEN -> {
-                if (hasPermission(context)) {
+                if (!BrightScreenFastChargeService.isServiceAlive) {
+                    runCatching { manager?.cancel(NOTIFICATION_ID) }
+                    deletePendingObsoleteHiddenChannel(manager)
+                } else if (hasPermission(context)) {
                     val hiddenNotif = buildServiceNotification(context, status)
-                    // 若隐藏渠道配额耗尽且处于降级模式，非 Service 上下文不主动 notify，防止在通知栏露出可见条目
                     val targetChannel = manager?.getNotificationChannel(hiddenNotif.channelId)
                     if (targetChannel == null || targetChannel.importance == NotificationManager.IMPORTANCE_NONE) {
                         runCatching {

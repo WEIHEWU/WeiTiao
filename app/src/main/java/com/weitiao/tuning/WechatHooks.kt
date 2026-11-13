@@ -3,6 +3,7 @@ package com.weitiao.tuning
 import android.app.Application
 import android.content.ContentValues
 import android.content.Context
+import android.content.SharedPreferences
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -56,7 +57,7 @@ internal class WechatHooks(
 
     @Volatile private var lastRawHardwareStep = 0f
 
-    private val stepEngine = WechatStepEngine(logger)
+    private val stepEngine = WechatStepEngine(logger = logger)
     @Volatile private var messageInsertMethod: Method? = null
     @Volatile private var messageStorage: Any? = null
 
@@ -98,12 +99,21 @@ internal class WechatHooks(
     }
 
     private fun activate(context: Context, classLoader: ClassLoader, processName: String) {
+        runCatching {
+            val stepPrefs = context.getSharedPreferences(STEP_STATE_PREFS, Context.MODE_PRIVATE)
+            stepEngine.bindStateStore(PrefsStepStateStore(stepPrefs))
+            val restoredRaw = stepEngine.currentHardwareBaseline()
+            if (restoredRaw > 0f && lastRawHardwareStep <= 0f) {
+                lastRawHardwareStep = restoredRaw
+            }
+        }.onFailure { logger("初始化微信步数持久化状态失败", it) }
+
         installAntiRecallCore(classLoader)
         Thread({
             installMessageStorageHook(context, classLoader)
             installXmlParserHook(context, classLoader)
         }, "Tuning-WeChatScan").apply { isDaemon = true }.start()
-        logger("微信防撤回功能已在 $processName 初始化", null)
+        logger("微信防撤回与计步持久化已在 $processName 初始化", null)
     }
 
     /**
@@ -236,6 +246,7 @@ internal class WechatHooks(
                     if (syntheticDispatchInProgress.get() != true && processedInDispatchQueue.get() != true) {
                         if (values[0] > 0f) {
                             lastRawHardwareStep = values[0]
+                            stepEngine.markRealHardwareReading(values[0])
                         }
                     }
                 }
@@ -257,6 +268,9 @@ internal class WechatHooks(
      * 后台平滑计步驱动器：
      * 当开启「自动递增模式」或存在待释放的倍率步数时，定期在监听器所属 Handler/Looper 上触发平滑增量，
      * 解决手机静置时硬件 TYPE_STEP_COUNTER (ON_CHANGE) 不触发第二次事件导致微信步数卡死为 0 的问题。
+     *
+     * 关键安全门禁：在尚未获取到真实硬件计步基准（或已持久化的真实基准）前，绝不派发 0f / 1000f 假事件，
+     * 彻底杜绝污染微信的「今日零点/手机重启基准值」。
      */
     private fun ensureAutoTickerRunning() {
         if (!autoTickerStarted.compareAndSet(false, true)) return
@@ -268,6 +282,9 @@ internal class WechatHooks(
                     if (!cfg.stepEnabled || !stepEngine.shouldDispatchAutoTick(cfg)) {
                         continue
                     }
+                    val currentRawHw = lastRawHardwareStep.takeIf { it > 0f }
+                        ?: stepEngine.currentHardwareBaseline().takeIf { it > 0f }
+                        ?: continue
                     val iter = activeStepListeners.entries.iterator()
                     while (iter.hasNext()) {
                         val (_, entry) = iter.next()
@@ -277,7 +294,7 @@ internal class WechatHooks(
                             continue
                         }
                         val event = entry.templateEvent
-                            ?: createFallbackSensorEvent(entry.sensor)?.also { entry.templateEvent = it }
+                            ?: createFallbackSensorEvent(entry.sensor, currentRawHw)?.also { entry.templateEvent = it }
                             ?: continue
                         val targetHandler = entry.handler ?: Handler(Looper.getMainLooper())
                         targetHandler.post {
@@ -287,7 +304,8 @@ internal class WechatHooks(
                                     return@runCatching
                                 }
                                 val rawHw = lastRawHardwareStep.takeIf { it > 0f }
-                                    ?: stepEngine.currentHardwareBaseline()
+                                    ?: stepEngine.currentHardwareBaseline().takeIf { it > 0f }
+                                    ?: return@runCatching
                                 if (event.values != null && event.values.isNotEmpty()) {
                                     event.values[0] = rawHw
                                 }
@@ -310,19 +328,22 @@ internal class WechatHooks(
         }, "WeiTiao-StepTicker").apply { isDaemon = true }.start()
     }
 
-    private fun createFallbackSensorEvent(sensor: Sensor): SensorEvent? = runCatching {
-        val ctor = SensorEvent::class.java.getDeclaredConstructor(Int::class.javaPrimitiveType).apply {
-            isAccessible = true
-        }
-        val event = ctor.newInstance(16)
-        findField(SensorEvent::class.java, "sensor")?.set(event, sensor)
-        event.accuracy = SensorManager.SENSOR_STATUS_ACCURACY_HIGH
-        event.timestamp = SystemClock.elapsedRealtimeNanos()
-        if (event.values != null && event.values.isNotEmpty()) {
-            event.values[0] = lastRawHardwareStep.takeIf { it > 0f } ?: 1000f
-        }
-        event
-    }.getOrNull()
+    private fun createFallbackSensorEvent(sensor: Sensor, initialRaw: Float): SensorEvent? {
+        if (initialRaw <= 0f) return null
+        return runCatching {
+            val ctor = SensorEvent::class.java.getDeclaredConstructor(Int::class.javaPrimitiveType).apply {
+                isAccessible = true
+            }
+            val event = ctor.newInstance(16)
+            findField(SensorEvent::class.java, "sensor")?.set(event, sensor)
+            event.accuracy = SensorManager.SENSOR_STATUS_ACCURACY_HIGH
+            event.timestamp = SystemClock.elapsedRealtimeNanos()
+            if (event.values != null && event.values.isNotEmpty()) {
+                event.values[0] = initialRaw
+            }
+            event
+        }.getOrNull()
+    }
 
     /**
      * Hook SystemSensorManager$SensorEventQueue.dispatchSensorEvent。
@@ -377,6 +398,7 @@ internal class WechatHooks(
                     if (isStepCounter) {
                         if (values[0] > 0f) {
                             lastRawHardwareStep = values[0]
+                            stepEngine.markRealHardwareReading(values[0])
                         }
                         runCatching {
                             val queueListener = listenerField?.get(chain.thisObject) as? SensorEventListener
@@ -420,15 +442,59 @@ internal class WechatHooks(
     private fun readIntField(target: Any, name: String): Int? =
         runCatching { findField(target.javaClass, name)?.get(target) as? Int }.getOrNull()
 
+    internal interface StepStateStore {
+        fun getInt(key: String, default: Int): Int
+        fun getLong(key: String, default: Long): Long
+        fun getFloat(key: String, default: Float): Float
+        fun getBoolean(key: String, default: Boolean): Boolean
+        fun saveState(
+            todayKey: Int,
+            baseHardwareRaw: Float,
+            lastHardwareRaw: Float,
+            currentDelivered: Long,
+            lastOutput: Float,
+            baselineEstablished: Boolean,
+        )
+    }
+
+    internal class PrefsStepStateStore(
+        private val prefs: SharedPreferences,
+    ) : StepStateStore {
+        override fun getInt(key: String, default: Int): Int = prefs.getInt(key, default)
+        override fun getLong(key: String, default: Long): Long = prefs.getLong(key, default)
+        override fun getFloat(key: String, default: Float): Float = prefs.getFloat(key, default)
+        override fun getBoolean(key: String, default: Boolean): Boolean = prefs.getBoolean(key, default)
+
+        override fun saveState(
+            todayKey: Int,
+            baseHardwareRaw: Float,
+            lastHardwareRaw: Float,
+            currentDelivered: Long,
+            lastOutput: Float,
+            baselineEstablished: Boolean,
+        ) {
+            prefs.edit()
+                .putInt(KEY_STATE_TODAY, todayKey)
+                .putFloat(KEY_STATE_BASE_RAW, baseHardwareRaw)
+                .putFloat(KEY_STATE_LAST_RAW, lastHardwareRaw)
+                .putLong(KEY_STATE_DELIVERED, currentDelivered)
+                .putFloat(KEY_STATE_LAST_OUTPUT, lastOutput)
+                .putBoolean(KEY_STATE_BASELINE_ESTABLISHED, baselineEstablished)
+                .apply()
+        }
+    }
+
     /**
-     * 极速内存计步引擎：
-     * 1. 纯内存原子计算，零磁盘阻塞 I/O，无锁无卡顿。
-     * 2. 首帧锚点保护：进程/当日首个计步事件仅对齐基准（0 突跳），防止被微信首帧吞没或判定为异常跳变。
-     * 3. 支持自动步数（逐步平滑增加）与真实步数倍率放大（含缓冲平滑释放）。
-     * 4. 严格封顶：values[0] 注入值永远保证今日增量 <= stepMaximum，微信计算出的今日步数绝对不超限。
-     * 5. 设备重启、跨天平滑衔接，严格保证 output 永远单调递增，彻底杜绝微信负跳变重启累加。
+     * 计步状态引擎（内存计算 + 宿主 SharedPreferences 跨重启/跨进程持久化）：
+     * 1. 真实硬件门禁 (`hasRealHardwareReading`)：未收到真实硬件 `TYPE_STEP_COUNTER` 读数（`raw > 0f`）前绝不注入 0f / 1000f，
+     *    彻底杜绝污染微信的「今日零点/重启基准值」。
+     * 2. 跨进程/重启状态持久化：将 `todayKey`、`baseHardwareRaw`、`lastHardwareRaw`、`currentDelivered`、`lastOutput`
+     *    持久化到 `weitiao_step_state`，确保重启微信后传感器输出单调不降，绝不触发微信「手机重启二次累加」Bug。
+     * 3. 首帧锚点保护：当日首个计步事件仅对齐基准（0 突跳），防止被微信首帧吞没或判定为异常跳变。
+     * 4. 严格封顶：`values[0]` 注入值永远保证今日累计增量 `<= stepMaximum`，微信运动步数绝对不超限。
      */
     internal class WechatStepEngine(
+        @Volatile private var stateStore: StepStateStore? = null,
         private val logger: (String, Throwable?) -> Unit,
     ) {
         @Volatile private var todayKey = 0
@@ -438,10 +504,35 @@ internal class WechatHooks(
         @Volatile private var currentDelivered = 0L
         @Volatile private var pendingSteps = 0L
         @Volatile private var baselineEstablished = false
+        @Volatile private var hasRealHardwareReading = false
         @Volatile private var lastClampLogTime = 0L
+
+        init {
+            stateStore?.let { syncFromStoreLocked(it) }
+        }
+
+        @Synchronized
+        fun bindStateStore(store: StepStateStore) {
+            this.stateStore = store
+            syncFromStoreLocked(store)
+        }
+
+        @Synchronized
+        fun markRealHardwareReading(raw: Float) {
+            if (raw > 0f) {
+                hasRealHardwareReading = true
+            }
+        }
+
+        @Synchronized
+        fun hasHardwareReading(): Boolean =
+            hasRealHardwareReading || lastHardwareRaw > 0f || baseHardwareRaw > 0f
 
         @Synchronized
         fun processStepCounter(raw: Float, cfg: TuningConfig): Float {
+            if (raw > 0f) {
+                hasRealHardwareReading = true
+            }
             val arr = floatArrayOf(raw)
             process(arr, isDetector = false, cfg = cfg, isLiveWechatHook = false)
             return arr[0]
@@ -452,11 +543,12 @@ internal class WechatHooks(
 
         @Synchronized
         fun currentHardwareBaseline(): Float =
-            lastHardwareRaw.takeIf { it > 0f } ?: baseHardwareRaw.takeIf { it > 0f } ?: 1000f
+            lastHardwareRaw.takeIf { it > 0f } ?: baseHardwareRaw.takeIf { it > 0f } ?: 0f
 
         @Synchronized
         fun shouldDispatchAutoTick(cfg: TuningConfig): Boolean {
             if (!cfg.stepEnabled) return false
+            if (!hasHardwareReading()) return false
             val calendar = Calendar.getInstance()
             val currentHour = calendar.get(Calendar.HOUR_OF_DAY)
             val endHour = if (cfg.stepEndHour <= 0) 24 else cfg.stepEndHour.coerceIn(1, 24)
@@ -464,6 +556,69 @@ internal class WechatHooks(
             val maxCap = cfg.stepMaximum.coerceAtLeast(1).toLong()
             if (currentDelivered >= maxCap) return false
             return cfg.stepAuto || pendingSteps > 0L || !baselineEstablished
+        }
+
+        private fun currentDayKey(calendar: Calendar = Calendar.getInstance()): Int =
+            calendar.get(Calendar.YEAR) * 10000 +
+                (calendar.get(Calendar.MONTH) + 1) * 100 +
+                calendar.get(Calendar.DAY_OF_MONTH)
+
+        private fun syncFromStoreLocked(store: StepStateStore, today: Int = currentDayKey()) {
+            val storedToday = store.getInt(KEY_STATE_TODAY, 0)
+            if (storedToday <= 0) return
+            val storedBaseRaw = store.getFloat(KEY_STATE_BASE_RAW, 0f)
+            val storedLastRaw = store.getFloat(KEY_STATE_LAST_RAW, 0f)
+            val storedDelivered = store.getLong(KEY_STATE_DELIVERED, 0L)
+            val storedLastOutput = store.getFloat(KEY_STATE_LAST_OUTPUT, 0f)
+            val storedBaseline = store.getBoolean(KEY_STATE_BASELINE_ESTABLISHED, false)
+
+            if (storedLastRaw > 0f || storedBaseRaw > 0f) {
+                hasRealHardwareReading = true
+            }
+
+            if (storedToday == today) {
+                if (todayKey != today) {
+                    todayKey = today
+                    baseHardwareRaw = storedBaseRaw
+                    lastHardwareRaw = storedLastRaw
+                    currentDelivered = storedDelivered
+                    lastOutput = storedLastOutput
+                    baselineEstablished = storedBaseline
+                } else {
+                    if (storedBaseRaw > 0f && baseHardwareRaw <= 0f) {
+                        baseHardwareRaw = storedBaseRaw
+                    }
+                    if (storedLastRaw > lastHardwareRaw) {
+                        lastHardwareRaw = storedLastRaw
+                    }
+                    if (storedDelivered > currentDelivered) {
+                        currentDelivered = storedDelivered
+                    }
+                    if (storedLastOutput > lastOutput) {
+                        lastOutput = storedLastOutput
+                    }
+                    if (storedBaseline) {
+                        baselineEstablished = true
+                    }
+                }
+            } else if (todayKey == 0) {
+                // 跨天且当前进程刚启动：继承昨日最终输出值与硬件读数作为跨天单调递增起点
+                lastOutput = maxOf(lastOutput, storedLastOutput)
+                if (storedLastRaw > 0f && lastHardwareRaw <= 0f) {
+                    lastHardwareRaw = storedLastRaw
+                }
+            }
+        }
+
+        private fun persistToStoreLocked() {
+            stateStore?.saveState(
+                todayKey = todayKey,
+                baseHardwareRaw = baseHardwareRaw,
+                lastHardwareRaw = lastHardwareRaw,
+                currentDelivered = currentDelivered,
+                lastOutput = lastOutput,
+                baselineEstablished = baselineEstablished,
+            )
         }
 
         @Synchronized
@@ -477,12 +632,20 @@ internal class WechatHooks(
             val calendar = Calendar.getInstance()
             val currentHour = calendar.get(Calendar.HOUR_OF_DAY)
             val endHour = if (cfg.stepEndHour <= 0) 24 else cfg.stepEndHour.coerceIn(1, 24)
+            val today = currentDayKey(calendar)
 
-            val today = calendar.get(Calendar.YEAR) * 10000 +
-                (calendar.get(Calendar.MONTH) + 1) * 100 +
-                calendar.get(Calendar.DAY_OF_MONTH)
+            stateStore?.let { syncFromStoreLocked(it, today) }
 
             val raw = values[0]
+            if (!isDetector) {
+                if (raw > 0f) {
+                    hasRealHardwareReading = true
+                } else if (!hasHardwareReading()) {
+                    // 尚未收到任何真实硬件计步读数前，绝不处理 raw <= 0f 的无效事件，防止将微信基准污染为 0
+                    return
+                }
+            }
+
             val maxCap = cfg.stepMaximum.coerceAtLeast(1).toLong()
             val multiplier = cfg.stepMultiplier.coerceIn(1, 10_000).toLong()
 
@@ -497,14 +660,16 @@ internal class WechatHooks(
             }
 
             // 设备重启检测（raw < lastHardwareRaw）：对齐硬件基准，维持当前输出不倒退
-            if (raw + 100f < lastHardwareRaw) {
+            if (!isDetector && raw > 0f && raw + 100f < lastHardwareRaw) {
                 baseHardwareRaw = maxOf(0f, lastOutput - currentDelivered)
                 lastHardwareRaw = raw
             }
 
             // 截止时间判定：到达或超过截止小时，冻结增加步数
             if (currentHour >= endHour) {
-                lastHardwareRaw = raw
+                if (!isDetector && raw > 0f) {
+                    lastHardwareRaw = raw
+                }
                 if (isDetector) {
                     values[0] = 0f
                 } else {
@@ -513,6 +678,7 @@ internal class WechatHooks(
                     if (output < lastOutput) output = lastOutput
                     lastOutput = output
                     values[0] = output
+                    persistToStoreLocked()
                 }
                 return
             }
@@ -523,6 +689,7 @@ internal class WechatHooks(
                     val gain = multiplier.coerceAtMost(maxCap - currentDelivered)
                     currentDelivered += gain
                     values[0] = gain.toFloat()
+                    persistToStoreLocked()
                 } else {
                     values[0] = 0f
                     logCapReached(maxCap)
@@ -535,7 +702,9 @@ internal class WechatHooks(
                     if (baseHardwareRaw <= 0f) {
                         baseHardwareRaw = maxOf(lastOutput, raw)
                     }
-                    lastHardwareRaw = raw
+                    if (raw > 0f) {
+                        lastHardwareRaw = raw
+                    }
                     val totalTodaySteps = currentDelivered.toFloat().coerceAtMost(maxCap.toFloat())
                     var output = baseHardwareRaw + totalTodaySteps
                     if (output < lastOutput) {
@@ -543,6 +712,7 @@ internal class WechatHooks(
                     }
                     lastOutput = output
                     values[0] = output
+                    persistToStoreLocked()
                     return
                 }
 
@@ -587,7 +757,9 @@ internal class WechatHooks(
                         }
                     }
                 }
-                lastHardwareRaw = raw
+                if (raw > 0f) {
+                    lastHardwareRaw = raw
+                }
 
                 // 核心输出：保证单调递增，且当日增量严格 <= maxCap
                 val totalTodaySteps = currentDelivered.toFloat().coerceAtMost(maxCap.toFloat())
@@ -597,6 +769,7 @@ internal class WechatHooks(
                 }
                 lastOutput = output
                 values[0] = output
+                persistToStoreLocked()
             }
         }
 
@@ -971,9 +1144,17 @@ internal class WechatHooks(
         }
     }
 
-    private companion object {
+    internal companion object {
         const val AUTO_TICK_INTERVAL_MS = 1200L
         const val MAX_LIVE_EVENT_STEP_GAIN = 2_000L
+
+        const val STEP_STATE_PREFS = "weitiao_step_state"
+        const val KEY_STATE_TODAY = "step_today_key"
+        const val KEY_STATE_BASE_RAW = "step_base_hardware_raw"
+        const val KEY_STATE_LAST_RAW = "step_last_hardware_raw"
+        const val KEY_STATE_DELIVERED = "step_current_delivered"
+        const val KEY_STATE_LAST_OUTPUT = "step_last_output"
+        const val KEY_STATE_BASELINE_ESTABLISHED = "step_baseline_established"
 
         val RECALL_MEDIA_TABLES = setOf("ImgInfo2", "videoinfo2", "voiceinfo", "voiceinfo2")
         const val FIELD_MSG_ID = "field_msgId"

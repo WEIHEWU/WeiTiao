@@ -69,6 +69,7 @@ import com.weitiao.tuning.ui.components.OneUiItemRow
 import com.weitiao.tuning.ui.components.OneUiNoticeBanner
 import com.weitiao.tuning.ui.components.OneUiSegmentedControl
 import java.text.NumberFormat
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -375,7 +376,12 @@ internal fun PowerOptimizationDetailContent(
 ) {
     val context = LocalContext.current
     var thermalDraft by remember(tuning.thermalCutoffCelsius) {
-        mutableFloatStateOf(tuning.thermalCutoffCelsius.toFloat())
+        mutableFloatStateOf(
+            tuning.thermalCutoffCelsius.coerceIn(
+                TuningConfig.MIN_THERMAL_CUTOFF_CELSIUS,
+                TuningConfig.MAX_THERMAL_CUTOFF_CELSIUS,
+            ).toFloat(),
+        )
     }
     var passLimitDraft by remember(tuning.passThroughLimit) {
         mutableFloatStateOf(tuning.passThroughLimit.toFloat())
@@ -501,10 +507,14 @@ internal fun PowerOptimizationDetailContent(
             )
         } else {
             OneUiIslandCard(
-                title = if (isZh) "安全温控阈值（推荐 44°C）" else "Thermal Safety Cutoff (Recommended 44°C)",
+                title = if (isZh) "安全温控阈值（38°C ~ 48°C，推荐 44°C）" else "Thermal Safety Cutoff (38°C ~ 48°C, Recommended 44°C)",
                 subtitle = if (isZh) "电池温度达到该阈值时立即停止快充解锁并恢复系统温控保护"
                 else "Immediately restores system thermal protection when battery reaches this temperature",
             ) {
+                val currentDraftCelsius = thermalDraft.roundToInt().coerceIn(
+                    TuningConfig.MIN_THERMAL_CUTOFF_CELSIUS,
+                    TuningConfig.MAX_THERMAL_CUTOFF_CELSIUS,
+                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -517,28 +527,53 @@ internal fun PowerOptimizationDetailContent(
                         color = MiuixTheme.colorScheme.onSurface,
                     )
                     Text(
-                        text = "${thermalDraft.toInt()}°C",
+                        text = "${currentDraftCelsius}°C",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (thermalDraft.toInt() >= 46) IosGlassTokens.IosAmber else IosGlassTokens.IosGreen,
+                        color = if (currentDraftCelsius >= 46) IosGlassTokens.IosAmber else IosGlassTokens.IosGreen,
                     )
                 }
                 Slider(
-                    value = thermalDraft,
-                    onValueChange = { thermalDraft = it.toInt().toFloat() },
+                    value = currentDraftCelsius.toFloat(),
+                    onValueChange = {
+                        thermalDraft = it.roundToInt().coerceIn(
+                            TuningConfig.MIN_THERMAL_CUTOFF_CELSIUS,
+                            TuningConfig.MAX_THERMAL_CUTOFF_CELSIUS,
+                        ).toFloat()
+                    },
                     onValueChangeFinished = {
-                        val nextTemp = thermalDraft.toInt().coerceIn(38, 48)
+                        val nextTemp = thermalDraft.roundToInt().coerceIn(
+                            TuningConfig.MIN_THERMAL_CUTOFF_CELSIUS,
+                            TuningConfig.MAX_THERMAL_CUTOFF_CELSIUS,
+                        )
+                        thermalDraft = nextTemp.toFloat()
                         onUpdateTuning(null) { it.copy(thermalCutoffCelsius = nextTemp) }
                     },
-                    valueRange = 38f..48f,
+                    valueRange = TuningConfig.MIN_THERMAL_CUTOFF_CELSIUS.toFloat()..TuningConfig.MAX_THERMAL_CUTOFF_CELSIUS.toFloat(),
+                    steps = TuningConfig.MAX_THERMAL_CUTOFF_CELSIUS - TuningConfig.MIN_THERMAL_CUTOFF_CELSIUS - 1,
                 )
-                if (tuning.thermalCutoffCelsius != 44) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        text = "${TuningConfig.MIN_THERMAL_CUTOFF_CELSIUS}°C",
+                        fontSize = 11.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                    Text(
+                        text = "${TuningConfig.MAX_THERMAL_CUTOFF_CELSIUS}°C",
+                        fontSize = 11.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                }
+                if (tuning.thermalCutoffCelsius != TuningConfig.DEFAULT_THERMAL_CUTOFF_CELSIUS) {
                     TextButton(
                         text = if (isZh) "恢复推荐设置 (44°C)" else "Restore Recommended (44°C)",
                         onClick = {
-                            thermalDraft = 44f
+                            thermalDraft = TuningConfig.DEFAULT_THERMAL_CUTOFF_CELSIUS.toFloat()
                             onUpdateTuning(context.getString(R.string.saved_toast)) {
-                                it.copy(thermalCutoffCelsius = 44)
+                                it.copy(thermalCutoffCelsius = TuningConfig.DEFAULT_THERMAL_CUTOFF_CELSIUS)
                             }
                         },
                         modifier = Modifier.fillMaxWidth(),

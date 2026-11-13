@@ -267,7 +267,8 @@ class DeviceModelsTest {
         assertEquals(false, config.brightScreenFastCharge)
         assertEquals(false, config.passThrough)
         assertEquals(20, config.passThroughLimit)
-        assertEquals(80_000, config.stepMaximum)
+        assertEquals(3, config.stepMultiplier)
+        assertEquals(28_000, config.stepMaximum)
     }
 
     @Test

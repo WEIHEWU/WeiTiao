@@ -55,7 +55,9 @@ class PassThroughService : Service() {
                     batteryLevel = newLevel
                     if (plugged != isCharging) {
                         isCharging = plugged
-                        if (plugged && isScreenOn) {
+                        if (!plugged) {
+                            standbyAndStop()
+                        } else if (isScreenOn) {
                             startActivePolling()
                         } else {
                             stopActivePollingAndEvaluate()
@@ -74,7 +76,7 @@ class PassThroughService : Service() {
                 }
                 Intent.ACTION_POWER_DISCONNECTED -> {
                     isCharging = false
-                    stopActivePollingAndEvaluate()
+                    standbyAndStop()
                 }
                 Intent.ACTION_SCREEN_ON -> {
                     isScreenOn = true
@@ -95,6 +97,10 @@ class PassThroughService : Service() {
             handler.removeCallbacks(this)
             if (!isFeatureEnabled()) {
                 disableAndStop()
+                return
+            }
+            if (!isCharging) {
+                standbyAndStop()
                 return
             }
             requestEvaluation()
@@ -122,8 +128,9 @@ class PassThroughService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        isServiceAlive = true
         createNotificationChannel()
-        // 待命态用静默通道承载前台服务：服务存活但通知不可见
+        // 启动时先立即调用一次 startForeground 履行 Android 前台服务系统契约，防止 ForegroundServiceDidNotStartInTimeException
         runCatching {
             startForeground(NOTIFICATION_ID, buildNotification("等待所选应用进入前台", visible = false))
         }.onFailure { Log.e(TAG, "前台服务启动失败（可能受后台启动限制）", it) }
@@ -144,14 +151,22 @@ class PassThroughService : Service() {
             registerReceiver(batteryReceiver, filter)
         }
         receiverRegistered = true
-        val battery = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-        if (battery != null) {
-            batteryLevel = battery.getIntExtra(BatteryManager.EXTRA_LEVEL, 0)
-            isCharging = battery.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) > 0
-        }
+        refreshBatteryState()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        isServiceAlive = true
+        // 每次 startForegroundService 触发 onStartCommand 时均先同步调用 startForeground 履行系统契约
+        runCatching {
+            startForeground(
+                NOTIFICATION_ID,
+                buildNotification(
+                    lastNotifiedStatus ?: "等待所选应用进入前台",
+                    visible = lastNotifiedVisible == true,
+                ),
+            )
+        }
+
         if (intent != null && ACTION_DISABLE == intent.action) {
             disableAndStop()
             return START_NOT_STICKY
@@ -160,12 +175,30 @@ class PassThroughService : Service() {
             disableAndStop()
             return START_NOT_STICKY
         }
-        if (isCharging && isScreenOn) {
+
+        FastChargeScheduler.enable(this)
+        refreshBatteryState()
+        if (!isCharging) {
+            standbyAndStop()
+            return START_NOT_STICKY
+        }
+
+        if (isScreenOn) {
             startActivePolling()
         } else {
             stopActivePollingAndEvaluate()
         }
         return START_STICKY
+    }
+
+    private fun refreshBatteryState() {
+        val battery = runCatching {
+            registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        }.getOrNull()
+        if (battery != null) {
+            batteryLevel = battery.getIntExtra(BatteryManager.EXTRA_LEVEL, batteryLevel)
+            isCharging = battery.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) > 0
+        }
     }
 
     private fun requestEvaluation() {
@@ -253,6 +286,27 @@ class PassThroughService : Service() {
         packageManager.getApplicationLabel(packageManager.getApplicationInfo(packageName, 0)).toString()
     }.getOrDefault(packageName)
 
+    private fun standbyAndStop() {
+        pollRunning = false
+        handler.removeCallbacks(pollRunnable)
+        FastChargeScheduler.enable(this)
+        postWorker {
+            setPassThroughSysfs(false)
+            appliedState = false
+            handler.post {
+                refreshBatteryState()
+                if (isFeatureEnabled() && isCharging) {
+                    Log.i(TAG, "待命退出取消：已重新连接电源")
+                    if (isScreenOn) startActivePolling() else stopActivePollingAndEvaluate()
+                    return@post
+                }
+                runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+                runCatching { getSystemService(NotificationManager::class.java)?.cancel(NOTIFICATION_ID) }
+                stopSelf()
+            }
+        }
+    }
+
     private fun disableAndStop() {
         pollRunning = false
         handler.removeCallbacks(pollRunnable)
@@ -267,6 +321,8 @@ class PassThroughService : Service() {
                     Log.i(TAG, "停止流程被取消：功能已重新开启")
                     return@post
                 }
+                runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+                runCatching { getSystemService(NotificationManager::class.java)?.cancel(NOTIFICATION_ID) }
                 stopSelf()
             }
         }
@@ -305,6 +361,9 @@ class PassThroughService : Service() {
                 ).apply {
                     description = "旁路供电生效时展示当前电量与前台应用"
                     setShowBadge(false)
+                    setSound(null, null)
+                    enableVibration(false)
+                    enableLights(false)
                 },
             )
         }
@@ -318,6 +377,10 @@ class PassThroughService : Service() {
                     ).apply {
                         description = "维持旁路供电监听（完全静默，生效时才展示）"
                         setShowBadge(false)
+                        setSound(null, null)
+                        enableVibration(false)
+                        enableLights(false)
+                        lockscreenVisibility = Notification.VISIBILITY_SECRET
                     },
                 )
             }
@@ -331,12 +394,15 @@ class PassThroughService : Service() {
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        val safeStatus = status.ifBlank { "等待所选应用进入前台" }
         return Notification.Builder(this, if (visible) CHANNEL_ID else CHANNEL_SILENT)
-            .setSmallIcon(R.drawable.ic_module)
+            .setSmallIcon(R.drawable.ic_stat_weitiao)
             .setContentTitle("微调 · 暂停 USB PD 游戏充电")
-            .setContentText(status)
+            .setContentText(safeStatus)
             .setContentIntent(open)
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setShowWhen(false)
             .build()
     }
 
@@ -361,6 +427,7 @@ class PassThroughService : Service() {
     }
 
     override fun onDestroy() {
+        isServiceAlive = false
         pollRunning = false
         handler.removeCallbacks(pollRunnable)
         if (receiverRegistered) {
@@ -376,6 +443,10 @@ class PassThroughService : Service() {
     companion object {
         const val ACTION_REFRESH = "com.weitiao.tuning.action.REFRESH_PASS_THROUGH"
         const val ACTION_DISABLE = "com.weitiao.tuning.action.DISABLE_PASS_THROUGH"
+
+        @Volatile
+        var isServiceAlive: Boolean = false
+            private set
 
         private const val TAG = "TuningPassThrough"
         private const val CHANNEL_ID = "usb_pd_pass_through"

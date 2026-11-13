@@ -27,8 +27,11 @@ class FastChargeReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent?) {
         val action = intent?.action
-        val enabled = TuningPrefs.load(context).brightScreenFastCharge
-        if (!enabled) {
+        val cfg = TuningPrefs.load(context)
+        val fastChargeEnabled = cfg.brightScreenFastCharge
+        val passThroughEnabled = cfg.passThrough
+
+        if (!fastChargeEnabled && !passThroughEnabled) {
             val pending = goAsync()
             Thread({
                 try {
@@ -42,21 +45,32 @@ class FastChargeReceiver : BroadcastReceiver() {
             return
         }
 
-        if (action == Intent.ACTION_POWER_DISCONNECTED) {
+        if (action == Intent.ACTION_POWER_DISCONNECTED || !FastChargeScheduler.isPluggedIn(context)) {
             val pending = goAsync()
             Thread({
                 try {
                     FastChargeController.restoreTemperatureNodes()
-                    FastChargeNotifier.hideNotification(context)
-                    // 拔线时不在后台调用 startForegroundService（targetSdk=37 在 Android 12+ 下 ACTION_POWER_DISCONNECTED
-                    // 无后台启动 FGS 豁免，会抛 ForegroundServiceStartNotAllowedException）：
-                    // - 若 BrightScreenFastChargeService 已存活，其内部动态注册的 chargingReceiver 会立即自行切入待命态；
-                    // - 若服务已被系统回收，这里通过 enable() 重新布防 RequiresCharging 的插电触发器等待下次插电拉起。
+                    FastChargeNotifier.cancelLive(context)
+                    // 未插电或拔线时绝不在后台启动前台服务，而是布防 RequiresCharging 的插电触发器等待下次插电拉起
                     FastChargeScheduler.enable(context)
                 } finally {
                     runCatching { pending?.finish() }
                 }
             }, "Tuning-FastChargeUnplug").apply { isDaemon = true }.start()
+            return
+        }
+
+        if (passThroughEnabled) {
+            runCatching {
+                ContextCompat.startForegroundService(
+                    context,
+                    Intent(context, PassThroughService::class.java).setAction(PassThroughService.ACTION_REFRESH),
+                )
+            }
+        }
+
+        if (!fastChargeEnabled) {
+            FastChargeScheduler.enable(context)
             return
         }
 
@@ -68,7 +82,7 @@ class FastChargeReceiver : BroadcastReceiver() {
         }.getOrDefault(false)
 
         if (started) {
-            Log.i(TAG, "已拉起常驻前台服务 (action=$action)")
+            Log.i(TAG, "已拉起亮屏快充前台服务 (action=$action)")
             return
         }
 

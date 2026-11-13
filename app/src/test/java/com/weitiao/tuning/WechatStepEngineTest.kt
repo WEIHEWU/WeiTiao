@@ -220,6 +220,87 @@ class WechatStepEngineTest {
     }
 
     @Test
+    fun stepEngineBlocksZeroFakeReadingAndPreserves28000CapAcrossMultipleWechatRestarts() {
+        val sharedStore = object : WechatHooks.StepStateStore {
+            private val map = mutableMapOf<String, Any>()
+            override fun getInt(key: String, default: Int): Int = (map[key] as? Int) ?: default
+            override fun getLong(key: String, default: Long): Long = (map[key] as? Long) ?: default
+            override fun getFloat(key: String, default: Float): Float = (map[key] as? Float) ?: default
+            override fun getBoolean(key: String, default: Boolean): Boolean = (map[key] as? Boolean) ?: default
+            override fun saveState(
+                todayKey: Int,
+                baseHardwareRaw: Float,
+                lastHardwareRaw: Float,
+                currentDelivered: Long,
+                lastOutput: Float,
+                baselineEstablished: Boolean,
+            ) {
+                map[WechatHooks.KEY_STATE_TODAY] = todayKey
+                map[WechatHooks.KEY_STATE_BASE_RAW] = baseHardwareRaw
+                map[WechatHooks.KEY_STATE_LAST_RAW] = lastHardwareRaw
+                map[WechatHooks.KEY_STATE_DELIVERED] = currentDelivered
+                map[WechatHooks.KEY_STATE_LAST_OUTPUT] = lastOutput
+                map[WechatHooks.KEY_STATE_BASELINE_ESTABLISHED] = baselineEstablished
+            }
+        }
+
+        val config = TuningConfig(
+            stepEnabled = true,
+            stepMultiplier = 3,
+            stepMaximum = 28_000,
+            stepAuto = true,
+            stepEndHour = 24,
+        )
+
+        // Process #1: Before any real hardware reading, auto-ticker must NOT dispatch and 0f must be ignored
+        val engineRun1 = WechatHooks.WechatStepEngine(sharedStore) { _, _ -> }
+        assertFalse("Must not auto-tick before real hardware reading", engineRun1.shouldDispatchAutoTick(config))
+        val zeroValues = floatArrayOf(0f)
+        engineRun1.process(zeroValues, isDetector = false, cfg = config, isLiveWechatHook = true)
+        assertFalse("0f event must not establish baseline", engineRun1.hasHardwareReading())
+
+        // Real hardware reading arrives: 54,716 steps since boot
+        var hardwareRaw = 54_716f
+        val values = floatArrayOf(hardwareRaw)
+        engineRun1.process(values, isDetector = false, cfg = config, isLiveWechatHook = true)
+        val wechatStartOfDayBaseline = values[0]
+        assertEquals(54_716f, wechatStartOfDayBaseline, 0.01f)
+        var wechatLastSensor = wechatStartOfDayBaseline
+        var wechatTodayTotal = 0f
+
+        // Tick until reaching 28,000 cap in Run #1
+        for (i in 1..120) {
+            values[0] = hardwareRaw
+            engineRun1.process(values, isDetector = false, cfg = config, isLiveWechatHook = true)
+            assertTrue("Sensor output must never drop", values[0] >= wechatLastSensor)
+            wechatTodayTotal += (values[0] - wechatLastSensor)
+            wechatLastSensor = values[0]
+        }
+        assertEquals(28_000f, wechatTodayTotal, 0.01f)
+        assertEquals(82_716f, wechatLastSensor, 0.01f)
+
+        // Simulate 3 WeChat process restarts on the same day while user continues walking
+        for (restart in 1..3) {
+            hardwareRaw += 200f
+            val newProcessEngine = WechatHooks.WechatStepEngine(sharedStore) { _, _ -> }
+            for (tick in 1..20) {
+                values[0] = hardwareRaw
+                newProcessEngine.process(values, isDetector = false, cfg = config, isLiveWechatHook = true)
+                // Critical assertion: sensor output must NEVER drop back to hardwareRaw (54,916),
+                // which would trick WeChat into thinking the phone rebooted and stacking another +28,000!
+                assertTrue(
+                    "Restart #$restart tick #$tick: output (${values[0]}) must stay >= wechatLastSensor ($wechatLastSensor)",
+                    values[0] >= wechatLastSensor,
+                )
+                wechatTodayTotal += (values[0] - wechatLastSensor)
+                wechatLastSensor = values[0]
+            }
+        }
+
+        assertEquals("Daily WeChat step total must stay strictly capped at 28,000 across restarts", 28_000f, wechatTodayTotal, 0.01f)
+    }
+
+    @Test
     fun cscSpoofExcludesWechatInGlobalDefaultMode() {
         val defaultAllAppsConfig = CscConfig(
             enabled = true,

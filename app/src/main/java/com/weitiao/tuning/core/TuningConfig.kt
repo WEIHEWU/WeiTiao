@@ -7,14 +7,15 @@ import android.os.Build
 import androidx.core.content.ContextCompat
 import com.weitiao.tuning.App
 import com.weitiao.tuning.tuning.BrightScreenFastChargeService
+import com.weitiao.tuning.tuning.FastChargeNotifier
 import com.weitiao.tuning.tuning.FastChargeScheduler
 import com.weitiao.tuning.tuning.PassThroughService
 
 data class TuningConfig(
     val stepEnabled: Boolean = false,
     val stepAuto: Boolean = true,
-    val stepMultiplier: Int = 100,
-    val stepMaximum: Int = 80_000,
+    val stepMultiplier: Int = 3,
+    val stepMaximum: Int = 28_000,
     val stepEndHour: Int = 24,
     val antiRecall: Boolean = false,
     val brightScreenFastCharge: Boolean = false,
@@ -23,6 +24,10 @@ data class TuningConfig(
     val passThroughLimit: Int = 20,
 ) {
     companion object {
+        const val MIN_THERMAL_CUTOFF_CELSIUS = 38
+        const val MAX_THERMAL_CUTOFF_CELSIUS = 48
+        const val DEFAULT_THERMAL_CUTOFF_CELSIUS = 44
+
         const val KEY_STEP_ENABLED = "tuning_wechat_step"
         const val KEY_STEP_AUTO = "tuning_wechat_step_auto"
         const val KEY_STEP_MULTIPLIER = "tuning_wechat_step_multiplier"
@@ -37,12 +42,13 @@ data class TuningConfig(
         fun fromPrefs(prefs: SharedPreferences) = TuningConfig(
             stepEnabled = prefs.getBoolean(KEY_STEP_ENABLED, false),
             stepAuto = prefs.getBoolean(KEY_STEP_AUTO, true),
-            stepMultiplier = prefs.getInt(KEY_STEP_MULTIPLIER, 100).coerceIn(1, 10_000),
-            stepMaximum = prefs.getInt(KEY_STEP_MAX, 80_000).coerceIn(1, 1_000_000),
+            stepMultiplier = prefs.getInt(KEY_STEP_MULTIPLIER, 3).coerceIn(1, 10_000),
+            stepMaximum = prefs.getInt(KEY_STEP_MAX, 28_000).coerceIn(1, 1_000_000),
             stepEndHour = prefs.getInt(KEY_STEP_END_HOUR, 24).coerceIn(0, 24),
             antiRecall = prefs.getBoolean(KEY_ANTI_RECALL, false),
             brightScreenFastCharge = prefs.getBoolean(KEY_FAST_CHARGE, false),
-            thermalCutoffCelsius = prefs.getInt(KEY_THERMAL_CUTOFF, 44).coerceIn(38, 48),
+            thermalCutoffCelsius = prefs.getInt(KEY_THERMAL_CUTOFF, DEFAULT_THERMAL_CUTOFF_CELSIUS)
+                .coerceIn(MIN_THERMAL_CUTOFF_CELSIUS, MAX_THERMAL_CUTOFF_CELSIUS),
             passThrough = prefs.getBoolean(KEY_PASS_THROUGH, false),
             passThroughLimit = prefs.getInt(KEY_PASS_THROUGH_LIMIT, 20).coerceIn(0, 100),
         )
@@ -55,7 +61,10 @@ data class TuningConfig(
             editor.putInt(KEY_STEP_END_HOUR, config.stepEndHour.coerceIn(0, 24))
             editor.putBoolean(KEY_ANTI_RECALL, config.antiRecall)
             editor.putBoolean(KEY_FAST_CHARGE, config.brightScreenFastCharge)
-            editor.putInt(KEY_THERMAL_CUTOFF, config.thermalCutoffCelsius.coerceIn(38, 48))
+            editor.putInt(
+                KEY_THERMAL_CUTOFF,
+                config.thermalCutoffCelsius.coerceIn(MIN_THERMAL_CUTOFF_CELSIUS, MAX_THERMAL_CUTOFF_CELSIUS),
+            )
             editor.putBoolean(KEY_PASS_THROUGH, config.passThrough)
             editor.putInt(KEY_PASS_THROUGH_LIMIT, config.passThroughLimit.coerceIn(0, 100))
         }
@@ -86,16 +95,18 @@ object TuningPrefs {
 
     fun save(context: Context, config: TuningConfig) {
         val previous = TuningConfig.fromPrefs(localPrefs(context))
-        App.getXposedService()?.getRemotePreferences(CscConstants.PREFS_NAME)?.edit()?.let {
-            TuningConfig.write(it, config)
-            it.commit()
+        App.getXposedService()?.getRemotePreferences(CscConstants.PREFS_NAME)?.edit()?.let { editor ->
+            TuningConfig.write(editor, config)
+            if (!editor.commit()) {
+                editor.apply()
+            }
         }
-        localPrefs(context).edit().let {
-            TuningConfig.write(it, config)
+        localPrefs(context).edit().let { editor ->
+            TuningConfig.write(editor, config)
             // 打上"本地被用户显式保存过"的标记。缺了它，App.onServiceBind 会认为
             // 本地是默认值而不敢拿它覆盖 remote，用户改的开关就推不到 hook。
-            it.putLong(CscConstants.KEY_LOCAL_SAVED_AT, System.currentTimeMillis())
-            it.commit()
+            editor.putLong(CscConstants.KEY_LOCAL_SAVED_AT, System.currentTimeMillis())
+            editor.commit()
         }
         syncServices(context, previous, config)
     }
@@ -112,14 +123,16 @@ object TuningPrefs {
     }
 
     /**
-     * 应用回到前台时重新武装常驻服务。
-     *
-     * 用户「划掉后台」会连同前台服务一起杀掉整个进程，之后插电只能靠静态广播兜底。
-     * 这里在 Activity 可见时补一次拉起，让「打开页面就恢复」这件事不再依赖手动关开开关。
+     * 应用回到前台时重新武装充电触发器并在已插电时拉起前台服务。
+     * 未插电时仅布防 JobScheduler 插电触发器，不在后台启动空转前台服务，确保未充电时通知栏 100% 不出现常驻通知。
      */
     fun resyncServices(context: Context) {
         val config = load(context)
-        if (config.brightScreenFastCharge) {
+        val plugged = FastChargeScheduler.isPluggedIn(context)
+        if (config.brightScreenFastCharge || config.passThrough) {
+            FastChargeScheduler.enable(context)
+        }
+        if (config.brightScreenFastCharge && plugged) {
             runCatching {
                 ContextCompat.startForegroundService(
                     context,
@@ -128,7 +141,7 @@ object TuningPrefs {
                 )
             }
         }
-        if (config.passThrough) {
+        if (config.passThrough && plugged) {
             runCatching {
                 ContextCompat.startForegroundService(
                     context,
@@ -180,17 +193,24 @@ object TuningPrefs {
     }
 
     private fun syncServices(context: Context, previous: TuningConfig, config: TuningConfig) {
+        val plugged = FastChargeScheduler.isPluggedIn(context)
         val fastIntent = Intent(context, BrightScreenFastChargeService::class.java).setAction(
             if (config.brightScreenFastCharge) BrightScreenFastChargeService.ACTION_START
             else BrightScreenFastChargeService.ACTION_RESTORE_AND_STOP,
         )
         if (config.brightScreenFastCharge) {
-            // 兜底任务保证进程被回收后仍能恢复；服务自身也会在 onCreate 中注册
             FastChargeScheduler.enable(context)
-            ContextCompat.startForegroundService(context, fastIntent)
+            if (plugged || BrightScreenFastChargeService.isServiceAlive) {
+                runCatching { ContextCompat.startForegroundService(context, fastIntent) }
+            }
         } else {
-            FastChargeScheduler.disable(context)
-            context.startService(fastIntent)
+            if (!config.passThrough) {
+                FastChargeScheduler.disable(context)
+            }
+            FastChargeNotifier.cancelLive(context)
+            if (previous.brightScreenFastCharge || BrightScreenFastChargeService.isServiceAlive) {
+                runCatching { context.startService(fastIntent) }
+            }
         }
 
         val passIntent = Intent(context, PassThroughService::class.java).setAction(
@@ -198,9 +218,17 @@ object TuningPrefs {
             else PassThroughService.ACTION_DISABLE,
         )
         if (config.passThrough) {
-            ContextCompat.startForegroundService(context, passIntent)
+            FastChargeScheduler.enable(context)
+            if (plugged || PassThroughService.isServiceAlive) {
+                runCatching { ContextCompat.startForegroundService(context, passIntent) }
+            }
         } else {
-            context.startService(passIntent)
+            if (!config.brightScreenFastCharge) {
+                FastChargeScheduler.disable(context)
+            }
+            if (previous.passThrough || PassThroughService.isServiceAlive) {
+                runCatching { context.startService(passIntent) }
+            }
         }
     }
 

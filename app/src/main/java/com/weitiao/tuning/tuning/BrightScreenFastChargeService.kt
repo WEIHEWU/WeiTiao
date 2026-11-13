@@ -66,7 +66,8 @@ class BrightScreenFastChargeService : Service() {
     @Volatile private var lastVerifyElapsed = 0L
     @Volatile private var lastTickElapsed = 0L
 
-    @Volatile private var latestMetrics = FastChargeController.BatteryMetrics(0, 0, 0.0, 320, 0)
+    @Volatile private var latestMetrics = FastChargeController.BatteryMetrics(0, 0, 0.0, 0, 0)
+    @Volatile private var hasFreshSysfsMetrics = false
     private var lastNotifiedLevel = -1
     private var lastNotifiedWatts = -1.0
     private var lastNotifyTime = 0L
@@ -95,19 +96,22 @@ class BrightScreenFastChargeService : Service() {
 
             if (isWiredCharging) {
                 wasChargingLastTick = true
-                evaluatePolicy()
                 if (isScreenOn) {
+                    // 若已有真实 sysfs 温度数据则立即评估策略；首次采样等待 readMetricsAsync 返回真实温度后再决定是否屏蔽节点
+                    if (hasFreshSysfsMetrics || isOverheated) {
+                        evaluatePolicy()
+                    }
                     readMetricsAsync()
                     updateLiveNotification()
                     handler.postDelayed(this, TICKER_ACTIVE_MS)
                 } else {
                     // 息屏充电时强制交还官方温控，暂停 5s 高频采样，亮屏广播会立即恢复。
                     // 仍处于充电状态，因此保留同一条实时通知，但不做高频采样。
+                    evaluatePolicy()
                     updateLiveNotification()
                 }
             } else {
                 enterStandby()
-                // 未插电待命态完全由动态广播唤醒，不再周期性轮询，彻底消除待机耗电
             }
         }
     }
@@ -187,6 +191,10 @@ class BrightScreenFastChargeService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         isServiceAlive = true
+        // 每次 ContextCompat.startForegroundService 触发 onStartCommand 时均必须先同步满足系统的 startForeground 契约，
+        // 随后再根据开关或插电状态决定继续运行还是 stopForeground + stopSelf，彻底杜绝 ForegroundServiceDidNotStartInTimeException。
+        foregroundStarted = FastChargeNotifier.bindForegroundService(this) || foregroundStarted
+
         if (intent?.action == ACTION_RESTORE_AND_STOP) {
             restoreAndStop()
             return START_NOT_STICKY
@@ -196,10 +204,13 @@ class BrightScreenFastChargeService : Service() {
             return START_NOT_STICKY
         }
 
-        // 每次 ContextCompat.startForegroundService 触发 onStartCommand 时均需满足系统的 startForeground 要求；
-        // bindForegroundService 会复用当前充电实时通知或隐藏通知，不闪烁、不新增通知。
-        foregroundStarted = FastChargeNotifier.bindForegroundService(this) || foregroundStarted
         FastChargeScheduler.enable(this)
+        refreshChargingState()
+        if (!isWiredCharging) {
+            enterStandby()
+            return START_NOT_STICKY
+        }
+
         postRoot {
             logResult("启用三星快充系统设置", FastChargeController.enableSamsungFastChargingSettings())
         }
@@ -224,7 +235,9 @@ class BrightScreenFastChargeService : Service() {
             val tempExtra = FastChargeController.normalizeTemp(
                 battery.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0),
             )
-            if (tempExtra > 0) {
+            // 温控节点被 0000 锁死期间，系统 healthd 广播的 EXTRA_TEMPERATURE 会卡死在旧温度或返回 -888，
+            // 因此仅在节点未锁死或尚未拿到有效 sysfs 温度时才允许广播温度更新兜底值。
+            if (tempExtra > 0 && (appliedBlocked != true || !hasFreshSysfsMetrics)) {
                 currentTempTenths = tempExtra
             }
         }
@@ -236,7 +249,10 @@ class BrightScreenFastChargeService : Service() {
     }
 
     private fun updateOverheatState(metrics: FastChargeController.BatteryMetrics) {
-        val cutoffCelsius = currentConfig().thermalCutoffCelsius.coerceIn(38, 48)
+        val cutoffCelsius = currentConfig().thermalCutoffCelsius.coerceIn(
+            TuningConfig.MIN_THERMAL_CUTOFF_CELSIUS,
+            TuningConfig.MAX_THERMAL_CUTOFF_CELSIUS,
+        )
         val effectiveTemp = if (metrics.temperatureTenths > 0) metrics.temperatureTenths else currentTempTenths
         val effectiveMetrics = if (metrics.temperatureTenths > 0) {
             metrics
@@ -277,14 +293,12 @@ class BrightScreenFastChargeService : Service() {
                     lastKnownMetrics = metrics
                     if (metrics.temperatureTenths > 0) {
                         currentTempTenths = metrics.temperatureTenths
+                        hasFreshSysfsMetrics = true
                     }
                     handler.post {
-                        val wasOverheated = isOverheated
                         updateOverheatState(metrics)
-                        if (isOverheated != wasOverheated || isOverheated) {
-                            evaluatePolicy()
-                        }
                         if (isWiredCharging) {
+                            evaluatePolicy()
                             updateLiveNotification()
                         }
                     }
@@ -312,7 +326,7 @@ class BrightScreenFastChargeService : Service() {
             // 当处于过热熔断、息屏或拔电状态时：
             // 不仅在 appliedBlocked != false 时恢复，且每 VERIFY_INTERVAL_MS 强校验底层节点权限，
             // 彻底杜绝任何外部任务或状态不同步导致节点残留 0000 锁死！
-            if (forceRestore || appliedBlocked != false || needVerify) {
+            if (forceRestore || isOverheated || appliedBlocked != false || needVerify) {
                 scheduleNodeSync()
             }
         }
@@ -343,7 +357,9 @@ class BrightScreenFastChargeService : Service() {
                             logResult("亮屏启用充电温控优化", result)
                         }
                     } else {
+                        // 过热保护触发或强制解锁时无条件执行 restoreTemperatureNodes（强制 chmod 0644 全部温控节点）
                         val shouldRestore = forceUnlock ||
+                            isOverheated ||
                             appliedBlocked != false ||
                             (FastChargeController.isAnyTemperatureNodeBlocked() != false)
                         if (shouldRestore) {
@@ -368,24 +384,40 @@ class BrightScreenFastChargeService : Service() {
         }
     }
 
-    /** 拔线时的待命态：无条件强制恢复官方温控、隐藏实时通知，但服务保持存活 */
+    /**
+     * 拔线/未插电时：恢复官方温控节点、布防充电唤醒触发器，并退出前台服务移除通知，
+     * 确保未充电时通知栏 100% 不残留任何通知，下次插电由广播 + JobScheduler 立即唤醒。
+     */
     private fun enterStandby() {
-        val justUnplugged = wasChargingLastTick
+        handler.removeCallbacks(tickerRunnable)
         wasChargingLastTick = false
         desiredBlocked = false
-        if (justUnplugged || appliedBlocked != false) {
-            forceRestoreRequested.set(true)
-        }
-        scheduleNodeSync()
-        hideServiceNotification()
+        hasFreshSysfsMetrics = false
+        isOverheated = false
+        isThermalCutoffActive = false
         lastNotifiedLevel = -1
         lastNotifiedWatts = -1.0
         lastNotifyTime = 0L
         lastNotifiedScreenOn = null
         lastNotifiedOverheated = null
-        // 仅在拔线瞬间重新布防「插电触发器」，避免待命态每次轮询都重复操作 JobScheduler
-        if (justUnplugged) {
-            FastChargeScheduler.armChargingTrigger(this)
+
+        FastChargeScheduler.enable(this)
+        postRoot {
+            logResult("未充电待命，恢复官方温控", FastChargeController.restoreTemperatureNodes())
+            appliedBlocked = false
+            rootSuccessState = null
+            handler.post {
+                if (isEnabled() && FastChargeScheduler.isPluggedIn(this)) {
+                    Log.i(TAG, "待命退出取消：已重新连接电源")
+                    lastTickElapsed = 0L
+                    handler.post(tickerRunnable)
+                    return@post
+                }
+                FastChargeNotifier.cancelLive(this)
+                runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+                foregroundStarted = false
+                stopSelf()
+            }
         }
     }
 

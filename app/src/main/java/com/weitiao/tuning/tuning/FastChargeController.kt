@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
 import com.weitiao.tuning.core.RootShell
+import com.weitiao.tuning.core.TuningConfig
 import kotlin.math.abs
 
 /**
@@ -68,7 +69,10 @@ object FastChargeController {
         cutoffCelsius: Int,
         previouslyOverheated: Boolean,
     ): Boolean {
-        val clampedCutoff = cutoffCelsius.coerceIn(38, 48)
+        val clampedCutoff = cutoffCelsius.coerceIn(
+            TuningConfig.MIN_THERMAL_CUTOFF_CELSIUS,
+            TuningConfig.MAX_THERMAL_CUTOFF_CELSIUS,
+        )
         val battOverheatTenths = clampedCutoff * 10
         val battCoolDownTenths = battOverheatTenths - 30 // 降温 3.0°C 恢复
 
@@ -138,12 +142,12 @@ object FastChargeController {
             for (node in CHARGING_TEMPERATURE_NODES) {
                 val escaped = node.replace("'", "'\\''")
                 append("[ -e '$escaped' ] && { m=$(stat -c %a '$escaped' 2>/dev/null); ")
-                append("if [ -n \"\$m\" ] && [ \"\$m\" != \"0\" ]; then echo __OPEN__; else echo __BLOCKED__; fi; }; ")
+                append("case \"\$m\" in 0|00|000|0000) echo __BLOCKED__ ;; \"\") ;; *) echo __OPEN__ ;; esac; }; ")
             }
             for (node in SOC_THERMAL_SAFETY_NODES) {
                 val escaped = node.replace("'", "'\\''")
                 append("[ -e '$escaped' ] && { m=$(stat -c %a '$escaped' 2>/dev/null); ")
-                append("if [ \"\$m\" = \"0\" ]; then echo __SOC_LOCKED__; fi; }; ")
+                append("case \"\$m\" in 0|00|000|0000) echo __SOC_LOCKED__ ;; esac; }; ")
             }
             append("echo __DONE__")
         }
@@ -165,7 +169,7 @@ object FastChargeController {
             for (node in ALL_MANAGED_NODES) {
                 val escaped = node.replace("'", "'\\''")
                 append("[ -e '$escaped' ] && { m=$(stat -c %a '$escaped' 2>/dev/null); ")
-                append("if [ \"\$m\" = \"0\" ]; then echo __ANY_BLOCKED__; fi; }; ")
+                append("case \"\$m\" in 0|00|000|0000) echo __ANY_BLOCKED__ ;; esac; }; ")
             }
             append("echo __DONE__")
         }
@@ -190,20 +194,25 @@ object FastChargeController {
     /** 真实硬件节点直读：利用 Root 毫秒级读取系统 /sys 真实电压、电流与多路真实温度并计算实际功率 (W) */
     fun readBatteryMetrics(context: Context): BatteryMetrics {
         // 关键设计：
-        // 1. 定义 rd() 函数：若目标充电温度节点处于 0000 屏蔽态，在同一亚毫秒 shell 内瞬时切换 0444 读取真实温度后立即恢复 0000，
+        // 1. 定义 rd() 函数：兼容 stat 输出 0/00/000/0000 及不可读状态，若目标充电温度节点处于 0000 屏蔽态，
+        //    在同一亚毫秒 shell 内瞬时切换 0444 读取真实温度后立即恢复 0000，
         //    彻底解决 SELinux 下 cat 0000 节点返回空值导致温控熔断器变成“瞎子”的致命缺陷。
-        // 2. 同时采集电池 (batt_temp/temp)、中框 (sec-cf-thermistor)、处理器 (sec-ap-thermistor)、
-        //    射频功放 (sec-pa-thermistor) 与充电IC (chg_temp/dchg_temp) 多路真实温度。
+        // 2. 同时采集电池 (batt_temp/temp)、thermal_zone 电池热敏源、中框 (sec-cf-thermistor)、
+        //    处理器 (sec-ap-thermistor)、射频功放 (sec-pa-thermistor) 与充电IC (chg_temp/dchg_temp) 多路真实温度。
         // 3. 彻底移除 batt_temp_raw（这是 NTC 热敏电阻原始 ADC 值而非摄氏度，升温时阻值反而下降！）。
         val (exitCode, stdout) = RootShell.exec(
             "echo __UID__\$(id -u); " +
                 "rd() { p=\"\$1\"; if [ -e \"\$p\" ]; then m=\$(stat -c %a \"\$p\" 2>/dev/null); " +
-                "if [ \"\$m\" = \"0\" ]; then chmod 0444 \"\$p\" 2>/dev/null; v=\$(cat \"\$p\" 2>/dev/null); chmod 0000 \"\$p\" 2>/dev/null; echo \"\$v\"; " +
-                "else cat \"\$p\" 2>/dev/null; fi; fi; }; " +
+                "case \"\$m\" in 0|00|000|0000) chmod 0444 \"\$p\" 2>/dev/null; v=\$(cat \"\$p\" 2>/dev/null | head -n 1); chmod 0000 \"\$p\" 2>/dev/null; echo \"\$v\" ;; " +
+                "*) v=\$(cat \"\$p\" 2>/dev/null | head -n 1); if [ -z \"\$v\" ]; then chmod 0444 \"\$p\" 2>/dev/null; v=\$(cat \"\$p\" 2>/dev/null | head -n 1); [ -n \"\$m\" ] && chmod \"\$m\" \"\$p\" 2>/dev/null; fi; echo \"\$v\" ;; esac; fi; }; " +
+                "tzb=\"\"; for z in /sys/class/thermal/thermal_zone*; do [ -e \"\$z/type\" ] || continue; t=\$(cat \"\$z/type\" 2>/dev/null); " +
+                "case \"\$t\" in *battery*|*batt*|*BAT*|*sec-battery*) tv=\$(cat \"\$z/temp\" 2>/dev/null | head -n 1); case \"\$tv\" in \"\"|-*|0) ;; *) tzb=\"\$tv\"; break ;; esac ;; esac; done; " +
                 "echo C=\$(cat /sys/class/power_supply/battery/current_now 2>/dev/null); " +
                 "echo V=\$(cat /sys/class/power_supply/battery/voltage_now 2>/dev/null); " +
                 "echo TB1=\$(rd /sys/class/power_supply/battery/batt_temp); " +
                 "echo TB2=\$(rd /sys/class/power_supply/battery/temp); " +
+                "echo TB3=\$(rd /sys/class/sec/battery/batt_temp); " +
+                "echo TZB=\$tzb; " +
                 "echo TCF=\$(cat /sys/class/sec/sec-cf-thermistor/temperature 2>/dev/null); " +
                 "echo TTH=\$(cat /sys/class/sec/sec-thermistor/temperature 2>/dev/null); " +
                 "echo TAP=\$(cat /sys/class/sec/sec-ap-thermistor/temperature 2>/dev/null); " +
@@ -230,10 +239,12 @@ object FastChargeController {
 
             val tb1 = normalizeTemp(taggedInt(stdout, "TB1"))
             val tb2 = normalizeTemp(taggedInt(stdout, "TB2"))
+            val tb3 = normalizeTemp(taggedInt(stdout, "TB3"))
+            val tzb = normalizeTemp(taggedInt(stdout, "TZB"))
             val tcf = normalizeTemp(taggedInt(stdout, "TCF"))
             val tth = normalizeTemp(taggedInt(stdout, "TTH"))
-            // 电池/机身有效温度取电池与中框的最高值，防止机身已达 45°C 而电池热容滞后
-            tempTenths = maxOf(tb1, tb2, tcf, tth)
+            // 电池/机身有效温度取电池、thermal_zone 电池热敏与中框的最高值，防止机身已达 45°C 而单一节点滞后或失真
+            tempTenths = maxOf(tb1, tb2, tb3, tzb, tcf, tth)
 
             val tap = normalizeTemp(taggedInt(stdout, "TAP"))
             val tpa = normalizeTemp(taggedInt(stdout, "TPA"))
