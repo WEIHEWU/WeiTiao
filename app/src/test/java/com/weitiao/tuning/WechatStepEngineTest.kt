@@ -2,11 +2,21 @@ package com.weitiao.tuning
 
 import com.weitiao.tuning.core.CscConfig
 import com.weitiao.tuning.core.CscSpoof
+import com.weitiao.tuning.core.LocalWechatStepProvider
+import com.weitiao.tuning.core.LocalWechatStepSnapshot
+import com.weitiao.tuning.core.SportKvStepReader
 import com.weitiao.tuning.core.TuningConfig
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.ByteArrayOutputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.util.Calendar
+import java.util.TimeZone
 
 class WechatStepEngineTest {
 
@@ -329,5 +339,325 @@ class WechatStepEngineTest {
             "WeChat can still be spoofed when explicitly added to deviceTargetPackages",
             CscSpoof.isDeviceSpoofTarget(explicitWechatConfig, "com.tencent.mm"),
         )
+    }
+
+    @Test
+    fun sportKvReaderParsesMmkvV5DetailAndUploadRecords() {
+        val tz = TimeZone.getTimeZone("UTC")
+        val dayStartCal = Calendar.getInstance(tz).apply {
+            set(2026, Calendar.NOVEMBER, 14, 0, 0, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val todayKey = 20261114
+        val dayStartMs = dayStartCal.timeInMillis
+        val saveTimeMs = dayStartMs + 76_479_381L
+
+        val (kvBytes, crcBytes) = buildTestMmkvV5(
+            listOf(
+                "KEY_STEP_DETAIL_INFO" to encodeMmkvString("$dayStartMs,$saveTimeMs,$saveTimeMs,8795033595725,130,31423,130"),
+                "KEY_LAST_UPLOAD_DEVICE_STEP_TIME_LONG" to encodeMmkvVarint(saveTimeMs + 1000L),
+                "KEY_LAST_UPLOAD_DEVICE_STEP_COUNT_LONG" to encodeMmkvVarint(31500L),
+            ),
+        )
+
+        val snapshot = SportKvStepReader.parseSnapshot(kvBytes, crcBytes, todayKey, tz)
+        assertNotNull("Expected parsed SportKv snapshot", snapshot)
+        assertEquals(todayKey, snapshot!!.todayKey)
+        assertEquals(31_500L, snapshot.todaySteps)
+        assertEquals(130f, snapshot.lastSensorValue, 0.01f)
+        assertTrue(snapshot.hasSensorValue)
+        assertEquals(saveTimeMs + 1000L, snapshot.saveTimeMs)
+
+        // Different day key should ignore stale yesterday records
+        assertNull(SportKvStepReader.parseSnapshot(kvBytes, crcBytes, 20261115, tz))
+    }
+
+    @Test
+    fun stepEngineCombinesWithLocalUnhookedStepsAndRespectsCap() {
+        val todayKey = currentDayKey()
+        val now = System.currentTimeMillis()
+        // Scenario: Temp root was lost on reboot; user walked 10,000 steps while unhooked,
+        // so WeChat's local SportKv already has todaySteps=10,000 at sensorValue=10,000.
+        val localProvider = object : LocalWechatStepProvider {
+            override fun readToday(todayKey: Int): LocalWechatStepSnapshot {
+                return LocalWechatStepSnapshot(
+                    todayKey = todayKey,
+                    todaySteps = 10_000L,
+                    lastSensorValue = 10_000f,
+                    hasSensorValue = true,
+                    saveTimeMs = now,
+                )
+            }
+        }
+
+        val engine = WechatHooks.WechatStepEngine { _, _ -> }
+        engine.bindLocalStepProvider(localProvider)
+
+        val config = TuningConfig(
+            stepEnabled = true,
+            stepMultiplier = 3,
+            stepMaximum = 28_000,
+            stepAuto = true,
+            stepEndHour = 24,
+        )
+
+        val values = floatArrayOf(10_050f)
+        var lastSensor = 10_000f
+        var wechatTodayTotal = 10_000f
+
+        for (i in 1..100) {
+            values[0] = 10_050f
+            engine.process(values, isDetector = false, cfg = config, isLiveWechatHook = true)
+            assertTrue("Sensor output must not drop: ${values[0]} >= $lastSensor", values[0] >= lastSensor)
+            wechatTodayTotal += (values[0] - lastSensor)
+            lastSensor = values[0]
+        }
+
+        assertEquals(todayKey, currentDayKey())
+        assertEquals("Combined local + WeiTiao steps must cap at exactly 28,000", 28_000f, wechatTodayTotal, 0.01f)
+        assertFalse("Auto tick stops once combined total reaches cap", engine.shouldDispatchAutoTick(config))
+    }
+
+    @Test
+    fun stepEngineReanchorsWhenLocalSportKvAlreadyExceededCapAfterReboot() {
+        val today = currentDayKey()
+        val storeMap = mutableMapOf<String, Any>(
+            WechatHooks.KEY_STATE_TODAY to today,
+            WechatHooks.KEY_STATE_BASE_RAW to 29_713f,
+            WechatHooks.KEY_STATE_LAST_RAW to 2_831f,
+            WechatHooks.KEY_STATE_DELIVERED to 28_000L,
+            WechatHooks.KEY_STATE_LAST_OUTPUT to 57_713f,
+            WechatHooks.KEY_STATE_BASELINE_ESTABLISHED to true,
+            WechatHooks.KEY_STATE_SAVED_AT to (System.currentTimeMillis() - 600_000L),
+        )
+        val sharedStore = createMapStepStore(storeMap)
+
+        // After reboot unhooked, WeChat saw raw hardware sensor=130 and accumulated todaySteps=31,423 (> 28,000 cap).
+        val localProvider = object : LocalWechatStepProvider {
+            override fun readToday(todayKey: Int): LocalWechatStepSnapshot =
+                LocalWechatStepSnapshot(
+                    todayKey = todayKey,
+                    todaySteps = 31_423L,
+                    lastSensorValue = 130f,
+                    hasSensorValue = true,
+                    saveTimeMs = System.currentTimeMillis() - 10_000L,
+                )
+        }
+
+        val engine = WechatHooks.WechatStepEngine(sharedStore) { _, _ -> }
+        engine.bindLocalStepProvider(localProvider)
+
+        val config = TuningConfig(
+            stepEnabled = true,
+            stepMultiplier = 3,
+            stepMaximum = 28_000,
+            stepAuto = true,
+            stepEndHour = 24,
+        )
+
+        // Hardware climbs from 135 -> 500; engine must hold exactly 130 (NOT jump to stale 57,713!) and add 0 steps.
+        for (raw in listOf(135f, 200f, 350f, 500f)) {
+            val values = floatArrayOf(raw)
+            engine.process(values, isDetector = false, cfg = config, isLiveWechatHook = true)
+            assertEquals("Output must stay anchored at WeChat local 130f with zero spike", 130f, values[0], 0.01f)
+        }
+        assertFalse(engine.shouldDispatchAutoTick(config))
+    }
+
+    @Test
+    fun stepEngineReanchorsBelowCapAfterRebootWithoutDoubleCounting() {
+        val today = currentDayKey()
+        val storeMap = mutableMapOf<String, Any>(
+            WechatHooks.KEY_STATE_TODAY to today,
+            WechatHooks.KEY_STATE_BASE_RAW to 20_000f,
+            WechatHooks.KEY_STATE_LAST_RAW to 1_500f,
+            WechatHooks.KEY_STATE_DELIVERED to 10_000L,
+            WechatHooks.KEY_STATE_LAST_OUTPUT to 30_000f,
+            WechatHooks.KEY_STATE_BASELINE_ESTABLISHED to true,
+            WechatHooks.KEY_STATE_SAVED_AT to (System.currentTimeMillis() - 600_000L),
+        )
+        val sharedStore = createMapStepStore(storeMap)
+
+        // Rebooted unhooked: hardware sensor reset, WeChat saved sensorValue=200 and todaySteps=12,000.
+        val localProvider = object : LocalWechatStepProvider {
+            override fun readToday(todayKey: Int): LocalWechatStepSnapshot =
+                LocalWechatStepSnapshot(
+                    todayKey = todayKey,
+                    todaySteps = 12_000L,
+                    lastSensorValue = 200f,
+                    hasSensorValue = true,
+                    saveTimeMs = System.currentTimeMillis() - 5_000L,
+                )
+        }
+
+        val engine = WechatHooks.WechatStepEngine(sharedStore) { _, _ -> }
+        engine.bindLocalStepProvider(localProvider)
+
+        val config = TuningConfig(
+            stepEnabled = true,
+            stepMultiplier = 3,
+            stepMaximum = 28_000,
+            stepAuto = true,
+            stepEndHour = 24,
+        )
+
+        var wechatSensor = 200f
+        var wechatTotal = 12_000f
+        for (i in 1..100) {
+            val values = floatArrayOf(210f)
+            engine.process(values, isDetector = false, cfg = config, isLiveWechatHook = true)
+            assertTrue("Must not jump backwards or spike: ${values[0]} vs $wechatSensor", values[0] >= wechatSensor)
+            assertTrue("Per-event increment <= 2000", (values[0] - wechatSensor) <= 2000f)
+            wechatTotal += (values[0] - wechatSensor)
+            wechatSensor = values[0]
+        }
+
+        assertEquals(28_000f, wechatTotal, 0.01f)
+        assertEquals(16_200f, wechatSensor, 0.01f)
+    }
+
+    @Test
+    fun stepEngineDoesNotRewindWhenLocalSportKvLagsBehindLiveEngine() {
+        val today = currentDayKey()
+        var diskSteps = 0L
+        var diskSensor = 1000f
+        var diskSaveTime = 0L
+
+        val laggingProvider = object : LocalWechatStepProvider {
+            override fun readToday(todayKey: Int): LocalWechatStepSnapshot? {
+                if (diskSaveTime <= 0L) return null
+                return LocalWechatStepSnapshot(
+                    todayKey = todayKey,
+                    todaySteps = diskSteps,
+                    lastSensorValue = diskSensor,
+                    hasSensorValue = true,
+                    saveTimeMs = diskSaveTime,
+                )
+            }
+        }
+
+        val engine = WechatHooks.WechatStepEngine { _, _ -> }
+        engine.bindLocalStepProvider(laggingProvider)
+
+        val config = TuningConfig(
+            stepEnabled = true,
+            stepMultiplier = 10,
+            stepMaximum = 28_000,
+            stepAuto = true,
+            stepEndHour = 24,
+        )
+
+        // Frame 1: anchor at 1000
+        val v1 = floatArrayOf(1000f)
+        engine.process(v1, isDetector = false, cfg = config, isLiveWechatHook = true)
+        assertEquals(1000f, v1[0], 0.01f)
+
+        // Advance 3 ticks in memory (+300 each => 1900)
+        var latest = 1000f
+        for (i in 1..3) {
+            val v = floatArrayOf(1000f)
+            engine.process(v, isDetector = false, cfg = config, isLiveWechatHook = true)
+            latest = v[0]
+        }
+        assertEquals(1900f, latest, 0.01f)
+
+        // SportKv now flushes an older value it emitted earlier (1300) AFTER WeiTiao persisted 1900
+        diskSteps = 300L
+        diskSensor = 1300f
+        diskSaveTime = System.currentTimeMillis() + 5_000L
+
+        val vNext = floatArrayOf(1000f)
+        engine.process(vNext, isDetector = false, cfg = config, isLiveWechatHook = true)
+        assertEquals("Live engine must NOT rewind from 1900 to lagging 1300", 2200f, vNext[0], 0.01f)
+    }
+
+    private fun currentDayKey(): Int {
+        val cal = Calendar.getInstance()
+        return cal.get(Calendar.YEAR) * 10000 +
+            (cal.get(Calendar.MONTH) + 1) * 100 +
+            cal.get(Calendar.DAY_OF_MONTH)
+    }
+
+    private fun createMapStepStore(map: MutableMap<String, Any>): WechatHooks.StepStateStore {
+        return object : WechatHooks.StepStateStore {
+            override fun getInt(key: String, default: Int): Int = (map[key] as? Int) ?: default
+            override fun getLong(key: String, default: Long): Long = (map[key] as? Long) ?: default
+            override fun getFloat(key: String, default: Float): Float = (map[key] as? Float) ?: default
+            override fun getBoolean(key: String, default: Boolean): Boolean = (map[key] as? Boolean) ?: default
+            override fun saveState(
+                todayKey: Int,
+                baseHardwareRaw: Float,
+                lastHardwareRaw: Float,
+                currentDelivered: Long,
+                lastOutput: Float,
+                baselineEstablished: Boolean,
+            ) {
+                map[WechatHooks.KEY_STATE_TODAY] = todayKey
+                map[WechatHooks.KEY_STATE_BASE_RAW] = baseHardwareRaw
+                map[WechatHooks.KEY_STATE_LAST_RAW] = lastHardwareRaw
+                map[WechatHooks.KEY_STATE_DELIVERED] = currentDelivered
+                map[WechatHooks.KEY_STATE_LAST_OUTPUT] = lastOutput
+                map[WechatHooks.KEY_STATE_BASELINE_ESTABLISHED] = baselineEstablished
+                map[WechatHooks.KEY_STATE_SAVED_AT] = System.currentTimeMillis()
+            }
+        }
+    }
+
+    private fun buildTestMmkvV5(entries: List<Pair<String, ByteArray>>): Pair<ByteArray, ByteArray> {
+        val body = ByteArrayOutputStream()
+        for ((key, value) in entries) {
+            val kb = key.toByteArray(Charsets.UTF_8)
+            writeVarint32(body, kb.size)
+            body.write(kb)
+            writeVarint32(body, value.size)
+            body.write(value)
+        }
+        val payload = body.toByteArray()
+        val kvBuf = ByteArray(8 + payload.size)
+        // [0..4] = 0 (actualSize stored in .crc[28..32] like MMKV v5), [4..8] = flags/checksum placeholder
+        System.arraycopy(payload, 0, kvBuf, 8, payload.size)
+
+        val actualSize = 4 + payload.size
+        val crcBuf = ByteArray(64)
+        ByteBuffer.wrap(crcBuf).order(ByteOrder.LITTLE_ENDIAN).apply {
+            putInt(0, 0x12345678)
+            putInt(4, 5)
+            putInt(8, 42)
+            putInt(28, actualSize)
+        }
+        return kvBuf to crcBuf
+    }
+
+    private fun encodeMmkvString(s: String): ByteArray {
+        val utf8 = s.toByteArray(Charsets.UTF_8)
+        val out = ByteArrayOutputStream()
+        writeVarint32(out, utf8.size)
+        out.write(utf8)
+        return out.toByteArray()
+    }
+
+    private fun encodeMmkvVarint(v: Long): ByteArray {
+        val out = ByteArrayOutputStream()
+        var x = v
+        while (true) {
+            if ((x and 0x7FL.inv()) == 0L) {
+                out.write(x.toInt())
+                return out.toByteArray()
+            }
+            out.write(((x.toInt() and 0x7F) or 0x80))
+            x = x ushr 7
+        }
+    }
+
+    private fun writeVarint32(out: ByteArrayOutputStream, value: Int) {
+        var x = value
+        while (true) {
+            if ((x and 0x7F.inv()) == 0) {
+                out.write(x)
+                return
+            }
+            out.write((x and 0x7F) or 0x80)
+            x = x ushr 7
+        }
     }
 }

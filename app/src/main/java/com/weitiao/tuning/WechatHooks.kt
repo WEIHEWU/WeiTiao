@@ -12,6 +12,8 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.SparseArray
+import com.weitiao.tuning.core.LocalWechatStepProvider
+import com.weitiao.tuning.core.SportKvStepReader
 import com.weitiao.tuning.core.TuningConfig
 import dalvik.system.DexFile
 import io.github.libxposed.api.XposedInterface
@@ -102,6 +104,10 @@ internal class WechatHooks(
         runCatching {
             val stepPrefs = context.getSharedPreferences(STEP_STATE_PREFS, Context.MODE_PRIVATE)
             stepEngine.bindStateStore(PrefsStepStateStore(stepPrefs))
+            val sportKvProvider = SportKvStepReader.fromFiles(
+                kvFile = File(context.filesDir, "mmkv/SportKv"),
+            )
+            stepEngine.bindLocalStepProvider(sportKvProvider)
             val restoredRaw = stepEngine.currentHardwareBaseline()
             if (restoredRaw > 0f && lastRawHardwareStep <= 0f) {
                 lastRawHardwareStep = restoredRaw
@@ -480,23 +486,26 @@ internal class WechatHooks(
                 .putLong(KEY_STATE_DELIVERED, currentDelivered)
                 .putFloat(KEY_STATE_LAST_OUTPUT, lastOutput)
                 .putBoolean(KEY_STATE_BASELINE_ESTABLISHED, baselineEstablished)
+                .putLong(KEY_STATE_SAVED_AT, System.currentTimeMillis())
                 .apply()
         }
     }
 
     /**
-     * 计步状态引擎（内存计算 + 宿主 SharedPreferences 跨重启/跨进程持久化）：
+     * 计步状态引擎（内存计算 + 宿主 SharedPreferences + 微信本地 `SportKv` MMKV 三方协同）：
      * 1. 真实硬件门禁 (`hasRealHardwareReading`)：未收到真实硬件 `TYPE_STEP_COUNTER` 读数（`raw > 0f`）前绝不注入 0f / 1000f，
      *    彻底杜绝污染微信的「今日零点/重启基准值」。
-     * 2. 跨进程/重启状态持久化：将 `todayKey`、`baseHardwareRaw`、`lastHardwareRaw`、`currentDelivered`、`lastOutput`
-     *    持久化到 `weitiao_step_state`，确保重启微信后传感器输出单调不降，绝不触发微信「手机重启二次累加」Bug。
+     * 2. 结合微信本地 `SportKv`（`KEY_STEP_DETAIL_INFO` / `KEY_LAST_UPLOAD_DEVICE_STEP_COUNT_LONG`）：
+     *    每次运行时自动读取微信本地今日已记录步数与传感器锚点，将未注入/空窗期期间的真实步数合并计入当日进度，
+     *    并对齐微信当前预期传感器基准，彻底避免「各走各的」导致的重复累加超上限或恢复注入跳变。
      * 3. 首帧锚点保护：当日首个计步事件仅对齐基准（0 突跳），防止被微信首帧吞没或判定为异常跳变。
-     * 4. 严格封顶：`values[0]` 注入值永远保证今日累计增量 `<= stepMaximum`，微信运动步数绝对不超限。
+     * 4. 严格封顶：`values[0]` 注入值永远保证今日增量不突破 `stepMaximum`。
      */
     internal class WechatStepEngine(
         @Volatile private var stateStore: StepStateStore? = null,
         private val logger: (String, Throwable?) -> Unit,
     ) {
+        @Volatile private var localStepProvider: LocalWechatStepProvider? = null
         @Volatile private var todayKey = 0
         @Volatile private var baseHardwareRaw = 0f
         @Volatile private var lastHardwareRaw = 0f
@@ -506,6 +515,10 @@ internal class WechatHooks(
         @Volatile private var baselineEstablished = false
         @Volatile private var hasRealHardwareReading = false
         @Volatile private var lastClampLogTime = 0L
+        @Volatile private var lastSavedAtMs = 0L
+        @Volatile private var emittedMinOutput = Float.NaN
+        @Volatile private var emittedMaxOutput = Float.NaN
+        @Volatile private var lastLocalSyncLogKey = ""
 
         init {
             stateStore?.let { syncFromStoreLocked(it) }
@@ -515,6 +528,13 @@ internal class WechatHooks(
         fun bindStateStore(store: StepStateStore) {
             this.stateStore = store
             syncFromStoreLocked(store)
+            reconcileWithLocalWechatLocked(currentDayKey(), raw = 0f)
+        }
+
+        @Synchronized
+        fun bindLocalStepProvider(provider: LocalWechatStepProvider) {
+            this.localStepProvider = provider
+            reconcileWithLocalWechatLocked(currentDayKey(), raw = 0f)
         }
 
         @Synchronized
@@ -553,6 +573,9 @@ internal class WechatHooks(
             val currentHour = calendar.get(Calendar.HOUR_OF_DAY)
             val endHour = if (cfg.stepEndHour <= 0) 24 else cfg.stepEndHour.coerceIn(1, 24)
             if (currentHour >= endHour) return false
+            val today = currentDayKey(calendar)
+            stateStore?.let { syncFromStoreLocked(it, today) }
+            reconcileWithLocalWechatLocked(today, raw = 0f)
             val maxCap = cfg.stepMaximum.coerceAtLeast(1).toLong()
             if (currentDelivered >= maxCap) return false
             return cfg.stepAuto || pendingSteps > 0L || !baselineEstablished
@@ -571,9 +594,13 @@ internal class WechatHooks(
             val storedDelivered = store.getLong(KEY_STATE_DELIVERED, 0L)
             val storedLastOutput = store.getFloat(KEY_STATE_LAST_OUTPUT, 0f)
             val storedBaseline = store.getBoolean(KEY_STATE_BASELINE_ESTABLISHED, false)
+            val storedSavedAt = store.getLong(KEY_STATE_SAVED_AT, 0L)
 
             if (storedLastRaw > 0f || storedBaseRaw > 0f) {
                 hasRealHardwareReading = true
+            }
+            if (storedSavedAt > lastSavedAtMs) {
+                lastSavedAtMs = storedSavedAt
             }
 
             if (storedToday == today) {
@@ -585,7 +612,7 @@ internal class WechatHooks(
                     lastOutput = storedLastOutput
                     baselineEstablished = storedBaseline
                 } else {
-                    if (storedBaseRaw > 0f && baseHardwareRaw <= 0f) {
+                    if (storedBaseRaw != 0f && baseHardwareRaw == 0f) {
                         baseHardwareRaw = storedBaseRaw
                     }
                     if (storedLastRaw > lastHardwareRaw) {
@@ -610,7 +637,88 @@ internal class WechatHooks(
             }
         }
 
+        private fun recordEmittedOutputLocked(output: Float) {
+            if (emittedMinOutput.isNaN() || output < emittedMinOutput) {
+                emittedMinOutput = output
+            }
+            if (emittedMaxOutput.isNaN() || output > emittedMaxOutput) {
+                emittedMaxOutput = output
+            }
+        }
+
+        /**
+         * 查看微信本地 `SportKv` 是否已有今日数据，并与微调自身步数状态合并：
+         * - 微信今日步数若高于微调记录（例如临时 Root 重启窗口期或未开启微调期间已走动），立即对齐 `currentDelivered`；
+         * - 若微信本地传感器锚点与微调持久化状态出现偏移（例如重启后微信裸跑过或跨进程更新），重新锚定 `lastOutput`，
+         *   避免恢复注入时发送过高的旧输出造成暴跳或再次累加。
+         */
+        private fun reconcileWithLocalWechatLocked(today: Int, raw: Float) {
+            val local = localStepProvider?.readToday(today) ?: return
+            if (local.todayKey != today) return
+
+            val localHadMoreSteps = local.todaySteps > currentDelivered
+            var updated = false
+            if (localHadMoreSteps) {
+                currentDelivered = local.todaySteps
+                pendingSteps = 0L
+                updated = true
+            }
+
+            if (local.hasSensorValue) {
+                val localSensor = local.lastSensorValue.coerceAtLeast(0f)
+                val emittedByThisProcess = !emittedMinOutput.isNaN() &&
+                    localSensor >= emittedMinOutput - 1f &&
+                    localSensor <= emittedMaxOutput + 1f
+
+                if (!emittedByThisProcess) {
+                    val storeHasToday = (stateStore?.getInt(KEY_STATE_TODAY, 0) ?: 0) == today
+                    val storedLastOutput = if (storeHasToday) stateStore?.getFloat(KEY_STATE_LAST_OUTPUT, 0f) ?: 0f else 0f
+                    val storedDelivered = if (storeHasToday) stateStore?.getLong(KEY_STATE_DELIVERED, 0L) ?: 0L else 0L
+                    val storedSavedAt = if (storeHasToday) stateStore?.getLong(KEY_STATE_SAVED_AT, 0L) ?: 0L else 0L
+
+                    val localDivergedFromStore = !storeHasToday ||
+                        local.todaySteps > storedDelivered ||
+                        (kotlin.math.abs(localSensor - storedLastOutput) > 1f &&
+                            (storedSavedAt <= 0L || local.saveTimeMs > storedSavedAt))
+
+                    val localNewerThanLiveEngine = baselineEstablished &&
+                        local.saveTimeMs > lastSavedAtMs &&
+                        (localHadMoreSteps || kotlin.math.abs(localSensor - lastOutput) > 1f)
+
+                    if ((!baselineEstablished && localDivergedFromStore) || localNewerThanLiveEngine) {
+                        lastOutput = localSensor
+                        baseHardwareRaw = localSensor - currentDelivered.toFloat()
+                        baselineEstablished = true
+                        if (lastHardwareRaw <= 0f && raw > 0f) {
+                            lastHardwareRaw = raw
+                        }
+                        emittedMinOutput = localSensor
+                        emittedMaxOutput = localSensor
+                        updated = true
+                    }
+                }
+            }
+
+            if (updated) {
+                if (todayKey != today) {
+                    todayKey = today
+                }
+                if (stateStore != null) {
+                    persistToStoreLocked()
+                }
+                val logKey = "$today:${local.todaySteps}:${local.lastSensorValue}"
+                if (logKey != lastLocalSyncLogKey) {
+                    lastLocalSyncLogKey = logKey
+                    logger(
+                        "已结合微信本地步数数据：今日累计=${currentDelivered}，传感器锚点=${lastOutput}",
+                        null,
+                    )
+                }
+            }
+        }
+
         private fun persistToStoreLocked() {
+            lastSavedAtMs = System.currentTimeMillis()
             stateStore?.saveState(
                 todayKey = todayKey,
                 baseHardwareRaw = baseHardwareRaw,
@@ -657,11 +765,16 @@ internal class WechatHooks(
                 currentDelivered = 0L
                 pendingSteps = 0L
                 baselineEstablished = false
+                emittedMinOutput = Float.NaN
+                emittedMaxOutput = Float.NaN
             }
+
+            // 每次处理均核对并结合微信本地 SportKv 数据
+            reconcileWithLocalWechatLocked(today, if (!isDetector) raw else 0f)
 
             // 设备重启检测（raw < lastHardwareRaw）：对齐硬件基准，维持当前输出不倒退
             if (!isDetector && raw > 0f && raw + 100f < lastHardwareRaw) {
-                baseHardwareRaw = maxOf(0f, lastOutput - currentDelivered)
+                baseHardwareRaw = lastOutput - currentDelivered.toFloat()
                 lastHardwareRaw = raw
             }
 
@@ -673,10 +786,8 @@ internal class WechatHooks(
                 if (isDetector) {
                     values[0] = 0f
                 } else {
-                    val total = currentDelivered.toFloat().coerceAtMost(maxCap.toFloat())
-                    var output = baseHardwareRaw + total
-                    if (output < lastOutput) output = lastOutput
-                    lastOutput = output
+                    val output = lastOutput
+                    recordEmittedOutputLocked(output)
                     values[0] = output
                     persistToStoreLocked()
                 }
@@ -699,23 +810,21 @@ internal class WechatHooks(
                 // 首帧事件仅建立微信计步基准锚点，不产生瞬间巨幅跳变，确保后续增量被微信 100% 计入今日步数
                 if (!baselineEstablished) {
                     baselineEstablished = true
-                    if (baseHardwareRaw <= 0f) {
-                        baseHardwareRaw = maxOf(lastOutput, raw)
+                    if (lastOutput <= 0f || lastOutput < raw) {
+                        lastOutput = maxOf(lastOutput, raw)
                     }
+                    baseHardwareRaw = lastOutput - currentDelivered.toFloat()
                     if (raw > 0f) {
                         lastHardwareRaw = raw
                     }
-                    val totalTodaySteps = currentDelivered.toFloat().coerceAtMost(maxCap.toFloat())
-                    var output = baseHardwareRaw + totalTodaySteps
-                    if (output < lastOutput) {
-                        output = lastOutput
-                    }
-                    lastOutput = output
+                    val output = lastOutput
+                    recordEmittedOutputLocked(output)
                     values[0] = output
                     persistToStoreLocked()
                     return
                 }
 
+                var gain = 0L
                 if (cfg.stepAuto) {
                     // 自动步数模式：每个传感器事件平滑递增增量
                     if (currentDelivered < maxCap) {
@@ -724,25 +833,25 @@ internal class WechatHooks(
                         } else {
                             multiplier
                         }
-                        val gain = stepPerEvent.coerceAtMost(maxCap - currentDelivered)
+                        gain = stepPerEvent.coerceAtMost(maxCap - currentDelivered)
                         currentDelivered += gain
                     } else {
                         logCapReached(maxCap)
                     }
                 } else {
                     // 真实步数倍率模式：当硬件产生有效步数时按 multiplier 倍率放大（含 1x 基础步数）
-                    val deltaRaw = (raw - lastHardwareRaw).coerceIn(0f, 10_000f)
+                    val deltaRaw = if (lastHardwareRaw > 0f) (raw - lastHardwareRaw).coerceIn(0f, 10_000f) else 0f
                     if (isLiveWechatHook) {
                         if (deltaRaw > 0f && deltaRaw < 500f) {
                             val realGain = (deltaRaw * multiplier).toLong().coerceAtLeast(0L)
                             pendingSteps = (pendingSteps + realGain).coerceAtMost((maxCap - currentDelivered).coerceAtLeast(0L))
                         }
                         if (pendingSteps > 0L && currentDelivered < maxCap) {
-                            val chunk = pendingSteps
+                            gain = pendingSteps
                                 .coerceAtMost(MAX_LIVE_EVENT_STEP_GAIN)
                                 .coerceAtMost(maxCap - currentDelivered)
-                            currentDelivered += chunk
-                            pendingSteps = (pendingSteps - chunk).coerceAtLeast(0L)
+                            currentDelivered += gain
+                            pendingSteps = (pendingSteps - gain).coerceAtLeast(0L)
                         } else if (currentDelivered >= maxCap) {
                             pendingSteps = 0L
                             logCapReached(maxCap)
@@ -750,7 +859,7 @@ internal class WechatHooks(
                     } else if (deltaRaw > 0f) {
                         val realGain = (deltaRaw * multiplier).toLong().coerceAtLeast(0L)
                         if (currentDelivered < maxCap) {
-                            val gain = realGain.coerceAtMost(maxCap - currentDelivered)
+                            gain = realGain.coerceAtMost(maxCap - currentDelivered)
                             currentDelivered += gain
                         } else {
                             logCapReached(maxCap)
@@ -761,13 +870,11 @@ internal class WechatHooks(
                     lastHardwareRaw = raw
                 }
 
-                // 核心输出：保证单调递增，且当日增量严格 <= maxCap
-                val totalTodaySteps = currentDelivered.toFloat().coerceAtMost(maxCap.toFloat())
-                var output = baseHardwareRaw + totalTodaySteps
-                if (output < lastOutput) {
-                    output = lastOutput
-                }
+                // 核心输出：从当前微信预期锚点单调累加本帧增量，并与本地已记步数协同封顶
+                val output = lastOutput + gain.toFloat()
                 lastOutput = output
+                baseHardwareRaw = lastOutput - currentDelivered.toFloat()
+                recordEmittedOutputLocked(output)
                 values[0] = output
                 persistToStoreLocked()
             }
@@ -1155,6 +1262,7 @@ internal class WechatHooks(
         const val KEY_STATE_DELIVERED = "step_current_delivered"
         const val KEY_STATE_LAST_OUTPUT = "step_last_output"
         const val KEY_STATE_BASELINE_ESTABLISHED = "step_baseline_established"
+        const val KEY_STATE_SAVED_AT = "step_state_saved_at_ms"
 
         val RECALL_MEDIA_TABLES = setOf("ImgInfo2", "videoinfo2", "voiceinfo", "voiceinfo2")
         const val FIELD_MSG_ID = "field_msgId"

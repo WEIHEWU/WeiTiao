@@ -722,10 +722,25 @@ fun FeatureDetailScreen(
                     onSwitchSubPage = { idx ->
                         onNavigatePage(if (idx == 0) FeaturePageId.WECHAT_STEPS else FeaturePageId.WECHAT_ANTI_RECALL)
                     },
-                    onUpdateTuning = ::updateTuning,
+                    onUpdateTuning = { toast, transform ->
+                        val updated = transform(tuning)
+                        updateTuning(toast, transform)
+                        if (updated.stepEnabled || updated.antiRecall) {
+                            scope.launch(Dispatchers.IO) {
+                                val targets = setOf("com.tencent.mm")
+                                val synced = hasRoot && LsposedScopeHelper.syncScopesWithRoot(context, targets)
+                                if (!synced) {
+                                    LsposedScopeHelper.requestScopesViaService(targets)
+                                }
+                            }
+                        }
+                    },
                     onRequestRestartWechat = {
                         if (!hasRoot) {
                             scope.launch {
+                                withContext(Dispatchers.IO) {
+                                    LsposedScopeHelper.requestScopesViaService(setOf("com.tencent.mm"))
+                                }
                                 snackbar.showSnackbar(
                                     if (isZh) "配置已自动保存，当前无 Root 权限，请手动划掉微信后台并重开"
                                     else "Saved. Without Root, please close and reopen WeChat manually.",
@@ -734,13 +749,18 @@ fun FeatureDetailScreen(
                         } else {
                             pendingRestartTitle = if (isZh) "立即重启微信？" else "Restart WeChat Now?"
                             pendingRestartMessage = if (isZh) {
-                                "将通过 Root 强制停止并重新启动微信以加载最新配置。"
+                                "将自动同步微信到 LSPosed 作用域，并通过 Root 强制停止并重新启动微信以加载最新配置。"
                             } else {
-                                "WeChat will be force-stopped and relaunched via Root to apply settings."
+                                "Will sync WeChat to LSPosed scope, force-stop and relaunch WeChat via Root."
                             }
                             pendingRestartConfirm = {
                                 scope.launch {
                                     val code = withContext(Dispatchers.IO) {
+                                        val targets = setOf("com.tencent.mm")
+                                        val synced = LsposedScopeHelper.syncScopesWithRoot(context, targets)
+                                        if (!synced) {
+                                            LsposedScopeHelper.requestScopesViaService(targets)
+                                        }
                                         RootShell.exec(
                                             "am force-stop com.tencent.mm && monkey -p com.tencent.mm -c android.intent.category.LAUNCHER 1",
                                         ).first

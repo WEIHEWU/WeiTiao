@@ -24,24 +24,25 @@ jobs:
 
       - name: Verify APK & Generate SHA-256 Checksum
         run: |
-          test -f releases/WeiTiao-v1.5.8.apk
+          test -f releases/WeiTiao-v1.5.9.apk
           cd releases
-          sha256sum WeiTiao-v1.5.8.apk > WeiTiao-v1.5.8.apk.sha256
-          cat WeiTiao-v1.5.8.apk.sha256
+          sha256sum WeiTiao-v1.5.9.apk > WeiTiao-v1.5.9.apk.sha256
+          cat WeiTiao-v1.5.9.apk.sha256
 
       - name: Create GitHub Release and Upload APK + Checksum
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.5.8
-          name: "微调 WeiTiao v1.5.8 (大幅降低亮屏快充 root sh 轮询 CPU 占用与缺页开销)"
+          tag_name: v1.5.9
+          name: "微调 WeiTiao v1.5.9 (微信步数引擎实时结合本地 SportKv 数据)"
           body: |
-            ### 微调 (WeiTiao) v1.5.8
+            ### 微调 (WeiTiao) v1.5.9
 
-            - **亮屏快充 root sh 子进程极致降耗优化 (`FastChargeController` / `BrightScreenFastChargeService`)**：
-              - `readBatteryMetrics()` 全程改用 `mksh` 内建 `read -r var < file` 替代外部 `$(cat ... | head -n 1)`；在持久化 `su` 会话中缓存 `__wt_uid` 与电池热区路径 `__wt_tzb`（消除每次轮询遍历 80+ 个 `thermal_zone*`），并将被 `0000` 屏蔽节点的临时提权与恢复合并为单次批量 `stat` + `chmod`，将每轮外部子进程派生从约 85 次降至 0~4 次。
-              - 将 `blockTemperatureNodes()`、`restoreTemperatureNodes()`、`areTemperatureNodesBlocked()` 与 `isAnyTemperatureNodeBlocked()` 合并为批量 `chmod` 与单次 `stat -c '%a:%n'` 解析，消除逐节点循环 `fork+execve`。
-              - `BrightScreenFastChargeService` 在 `100%` 满电未过热阶段自动将采样间隔降频至 15s、权限复核降频至 30s，并将小幅功率波动（`< 0.8W`）通知节流窗口调整为 15s，同时避免 `onResume` 重复下发系统设置。
-              - 真机 20s 对比实测：`root sh` 自身缺页降低约 98.9%，子进程缺页降低约 99.3%，CPU 占用降至约 0.6% 单核（降幅约 98%）。
+            - **微信步数与微信本地 `SportKv` 实时结合 (`WechatLocalStepReader` / `WechatHooks`)**：
+              - 每次初始化与处理计步事件时直接只读解析微信私有 MMKV 文件 `SportKv`（`KEY_STEP_DETAIL_INFO` 及 `KEY_LAST_UPLOAD_DEVICE_STEP_COUNT_LONG`），仅采纳当日有效记录，消除传统做法中“微调持久化状态与微信本地步数各走各的”的问题。
+              - 临时 Root 重启空窗期或未注入期间微信本地已经记录的真实步数，在恢复注入后会自动合并计入 `currentDelivered` 并按 `stepMaximum` 协同封顶，不再重复叠加突破每日上限。
+              - 若未注入期间硬件传感器重置或发生偏移，自动重新锚定微信当前真实传感器基准 `lastOutput`，防止沿用旧输出引发步数暴跳或二次累加；同时追踪本进程输出区间，避免因 `SportKv` 异步落盘滞后而回退。
+            - **微信作用域自动同步 (`FeatureScreens`)**：
+              - 开启微信步数 / 防撤回或点击「立即重启微信」时自动调用 `LsposedScopeHelper.syncScopesWithRoot`（无 Root 时回退 `requestScopesViaService`）确保 `com.tencent.mm` 在 LSPosed 作用域内。
           files: |
-            releases/WeiTiao-v1.5.8.apk
-            releases/WeiTiao-v1.5.8.apk.sha256
+            releases/WeiTiao-v1.5.9.apk
+            releases/WeiTiao-v1.5.9.apk.sha256
