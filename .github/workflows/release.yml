@@ -24,25 +24,26 @@ jobs:
 
       - name: Verify APK & Generate SHA-256 Checksum
         run: |
-          test -f releases/WeiTiao-v1.5.9.apk
+          test -f releases/WeiTiao-v1.6.0.apk
           cd releases
-          sha256sum WeiTiao-v1.5.9.apk > WeiTiao-v1.5.9.apk.sha256
-          cat WeiTiao-v1.5.9.apk.sha256
+          sha256sum WeiTiao-v1.6.0.apk > WeiTiao-v1.6.0.apk.sha256
+          cat WeiTiao-v1.6.0.apk.sha256
 
       - name: Create GitHub Release and Upload APK + Checksum
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.5.9
-          name: "微调 WeiTiao v1.5.9 (微信步数引擎实时结合本地 SportKv 数据)"
+          tag_name: v1.6.0
+          name: "微调 WeiTiao v1.6.0 (满电自动归还原生温控 & 芯片温控熔断收紧)"
           body: |
-            ### 微调 (WeiTiao) v1.5.9
+            ### 微调 (WeiTiao) v1.6.0
 
-            - **微信步数与微信本地 `SportKv` 实时结合 (`WechatLocalStepReader` / `WechatHooks`)**：
-              - 每次初始化与处理计步事件时直接只读解析微信私有 MMKV 文件 `SportKv`（`KEY_STEP_DETAIL_INFO` 及 `KEY_LAST_UPLOAD_DEVICE_STEP_COUNT_LONG`），仅采纳当日有效记录，消除传统做法中“微调持久化状态与微信本地步数各走各的”的问题。
-              - 临时 Root 重启空窗期或未注入期间微信本地已经记录的真实步数，在恢复注入后会自动合并计入 `currentDelivered` 并按 `stepMaximum` 协同封顶，不再重复叠加突破每日上限。
-              - 若未注入期间硬件传感器重置或发生偏移，自动重新锚定微信当前真实传感器基准 `lastOutput`，防止沿用旧输出引发步数暴跳或二次累加；同时追踪本进程输出区间，避免因 `SportKv` 异步落盘滞后而回退。
-            - **微信作用域自动同步 (`FeatureScreens`)**：
-              - 开启微信步数 / 防撤回或点击「立即重启微信」时自动调用 `LsposedScopeHelper.syncScopesWithRoot`（无 Root 时回退 `requestScopesViaService`）确保 `com.tencent.mm` 在 LSPosed 作用域内。
+            - **满电自动归还系统原生温控 (`FastChargeController` / `BrightScreenFastChargeService` / `FastChargeWatchdog`)**：
+              - 新增 `100%` 满电释放 / `98%` 滞回恢复策略（`nextFullChargeReleased` 与 `shouldBlockChargingNodes`），在 `99%～100%` 满电/USB 调试插电期间不再屏蔽电池温度 sysfs 节点，确保系统 `ThermalHAL` 的 `BAT`/`SKIN` 保持真实温度与官方温控降频曲线。
+              - 前台服务与兜底任务 `FastChargeFallback.applyNow` 共享同一满电释放判定，防止兜底触发时误锁温控节点。
+            - **芯片温度熔断收紧 (`FastChargeController.isOverheated`)**：
+              - 将 AP/PA/CHG 芯片熔断上限收紧至 `(clampedCutoff + 3).coerceAtMost(47)`（`3.0°C` 回落滞回），缩小与官方 `SKIN` 降频曲线的温差盲区。
+            - **常驻通知状态提示 (`FastChargeNotifier`)**：
+              - 满电保护态下常驻通知显示 `满电保护恢复原生温控 · 电量:...`，直观反馈当前已自动交还系统温控。
           files: |
-            releases/WeiTiao-v1.5.9.apk
-            releases/WeiTiao-v1.5.9.apk.sha256
+            releases/WeiTiao-v1.6.0.apk
+            releases/WeiTiao-v1.6.0.apk.sha256
