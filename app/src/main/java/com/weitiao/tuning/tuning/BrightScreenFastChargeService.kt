@@ -65,6 +65,7 @@ class BrightScreenFastChargeService : Service() {
     @Volatile private var rootSuccessState: Boolean? = null
     @Volatile private var lastVerifyElapsed = 0L
     @Volatile private var lastTickElapsed = 0L
+    @Volatile private var samsungSettingsApplied = false
 
     @Volatile private var latestMetrics = FastChargeController.BatteryMetrics(0, 0, 0.0, 0, 0)
     @Volatile private var hasFreshSysfsMetrics = false
@@ -103,7 +104,7 @@ class BrightScreenFastChargeService : Service() {
                     }
                     readMetricsAsync()
                     updateLiveNotification()
-                    handler.postDelayed(this, TICKER_ACTIVE_MS)
+                    handler.postDelayed(this, nextActiveTickIntervalMs())
                 } else {
                     // 息屏充电时强制交还官方温控，暂停 5s 高频采样，亮屏广播会立即恢复。
                     // 仍处于充电状态，因此保留同一条实时通知，但不做高频采样。
@@ -211,8 +212,13 @@ class BrightScreenFastChargeService : Service() {
             return START_NOT_STICKY
         }
 
-        postRoot {
-            logResult("启用三星快充系统设置", FastChargeController.enableSamsungFastChargingSettings())
+        if (!samsungSettingsApplied) {
+            samsungSettingsApplied = true
+            postRoot {
+                val res = FastChargeController.enableSamsungFastChargingSettings()
+                if (!res.success) samsungSettingsApplied = false
+                logResult("启用三星快充系统设置", res)
+            }
         }
 
         // 立即跑一轮，保证插电/开关切换后马上生效
@@ -315,7 +321,8 @@ class BrightScreenFastChargeService : Service() {
         desiredBlocked = desired
 
         val now = SystemClock.elapsedRealtime()
-        val needVerify = now - lastVerifyElapsed >= VERIFY_INTERVAL_MS
+        val verifyIntervalMs = if (currentLevel >= 100 && !isOverheated) VERIFY_INTERVAL_FULL_MS else VERIFY_INTERVAL_MS
+        val needVerify = now - lastVerifyElapsed >= verifyIntervalMs
         val forceRestore = !desired && forceRestoreRequested.get()
 
         if (desired) {
@@ -393,6 +400,7 @@ class BrightScreenFastChargeService : Service() {
         wasChargingLastTick = false
         desiredBlocked = false
         hasFreshSysfsMetrics = false
+        samsungSettingsApplied = false
         isOverheated = false
         isThermalCutoffActive = false
         lastNotifiedLevel = -1
@@ -450,9 +458,9 @@ class BrightScreenFastChargeService : Service() {
         val stateChanged = lastNotifiedScreenOn != isScreenOn ||
             lastNotifiedOverheated != isOverheated ||
             (lastNotifiedWatts <= 0.0 && metrics.powerWatts > 0.0)
-        // 节流机制：状态未发生切换、距离上次更新未满 5 秒，且电量未变、功率波动小于 0.8W，跳过重复更新，防止触发 SystemUI 120Hz 布局死循环与发热
+        // 节流机制：状态未发生切换、距离上次更新未满 15 秒，且电量未变、功率波动小于 0.8W，跳过重复更新，防止触发 SystemUI 布局重绘与发热
         val wattsDiff = Math.abs(metrics.powerWatts - lastNotifiedWatts)
-        if (!stateChanged && lastNotifyTime > 0L && now - lastNotifyTime < 5_000L && currentLevel == lastNotifiedLevel && wattsDiff < 0.8) {
+        if (!stateChanged && lastNotifyTime > 0L && now - lastNotifyTime < NOTIFY_THROTTLE_MS && currentLevel == lastNotifiedLevel && wattsDiff < 0.8) {
             return
         }
 
@@ -482,6 +490,7 @@ class BrightScreenFastChargeService : Service() {
     private fun restoreAndStop() {
         handler.removeCallbacks(tickerRunnable)
         desiredBlocked = false
+        samsungSettingsApplied = false
         postRoot {
             logResult("关闭亮屏快充，恢复官方温控", FastChargeController.restoreTemperatureNodes())
             appliedBlocked = false
@@ -518,6 +527,9 @@ class BrightScreenFastChargeService : Service() {
         runCatching { rootExecutor.execute(block) }
             .onFailure { Log.w(TAG, "后台任务提交失败（服务正在停止）", it) }
     }
+
+    private fun nextActiveTickIntervalMs(): Long =
+        if (currentLevel >= 100 && !isOverheated) TICKER_FULL_MS else TICKER_ACTIVE_MS
 
     private fun isEnabled(): Boolean = currentConfig().brightScreenFastCharge
 
@@ -581,8 +593,11 @@ class BrightScreenFastChargeService : Service() {
         private const val TAG = "TuningFastCharge"
 
         private const val TICKER_ACTIVE_MS = 5_000L
+        private const val TICKER_FULL_MS = 15_000L
         private const val TICKER_IDLE_MS = 30_000L
         private const val MIN_TICK_INTERVAL_MS = 3_000L
         private const val VERIFY_INTERVAL_MS = 15_000L // 每 15s 双向复核一次节点权限，防止被系统重置或异常锁死
+        private const val VERIFY_INTERVAL_FULL_MS = 30_000L // 100% 满电涓流阶段降频至 30s 复核
+        private const val NOTIFY_THROTTLE_MS = 15_000L // 小幅功率波动 (<0.8W) 至少间隔 15s 刷新一次通知
     }
 }

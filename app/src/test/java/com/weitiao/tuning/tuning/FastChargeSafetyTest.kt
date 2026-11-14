@@ -229,4 +229,64 @@ class FastChargeSafetyTest {
         assertEquals("fast_charge_service_hidden_v5", exhaustedPlan.obsoleteChannelIdToDeleteAfterBind)
         assertTrue(exhaustedPlan.useDegradedMinimalFallback)
     }
+
+    @Test
+    fun parseNodeBlockReportHandlesAllBlockedMixedOpenAndSocLocked() {
+        // 1. All existing charging nodes 0000, SoC nodes 0644/0755 -> blocked=true, any=true
+        val blockedReport = FastChargeController.parseNodeBlockReport(
+            """
+            __UID__0
+            0:/sys/class/power_supply/battery/temp
+            0000:/sys/class/power_supply/battery/batt_temp
+            644:/sys/class/sec/sec-ap-thermistor/temperature
+            755:/sys/class/thermal
+            __DONE__
+            """.trimIndent(),
+        )
+        assertEquals(true, blockedReport?.allChargingBlocked)
+        assertEquals(true, blockedReport?.anyNodeBlocked)
+
+        // 2. Partial reset by thermal daemon (temp=644, batt_temp=0) -> allChargingBlocked=false, anyNodeBlocked=true
+        val partialReport = FastChargeController.parseNodeBlockReport(
+            """
+            __UID__0
+            644:/sys/class/power_supply/battery/temp
+            0:/sys/class/power_supply/battery/batt_temp
+            644:/sys/class/sec/sec-ap-thermistor/temperature
+            __DONE__
+            """.trimIndent(),
+        )
+        assertEquals(false, partialReport?.allChargingBlocked)
+        assertEquals(true, partialReport?.anyNodeBlocked)
+
+        // 3. SoC safety node accidentally locked -> allChargingBlocked=false, anyNodeBlocked=true
+        val socLockedReport = FastChargeController.parseNodeBlockReport(
+            """
+            __UID__0
+            0:/sys/class/power_supply/battery/temp
+            0:/sys/class/sec/sec-ap-thermistor/temperature
+            __DONE__
+            """.trimIndent(),
+        )
+        assertEquals(false, socLockedReport?.allChargingBlocked)
+        assertEquals(true, socLockedReport?.anyNodeBlocked)
+
+        // 4. All restored -> allChargingBlocked=false, anyNodeBlocked=false
+        val restoredReport = FastChargeController.parseNodeBlockReport(
+            """
+            __UID__0
+            644:/sys/class/power_supply/battery/temp
+            644:/sys/class/power_supply/battery/batt_temp
+            644:/sys/class/sec/sec-ap-thermistor/temperature
+            755:/sys/class/thermal
+            __DONE__
+            """.trimIndent(),
+        )
+        assertEquals(false, restoredReport?.allChargingBlocked)
+        assertEquals(false, restoredReport?.anyNodeBlocked)
+
+        // 5. Missing root or incomplete output -> null
+        assertNull(FastChargeController.parseNodeBlockReport("__UID__10508\n__DONE__"))
+        assertNull(FastChargeController.parseNodeBlockReport("__UID__0\n0:/sys/class/power_supply/battery/temp"))
+    }
 }

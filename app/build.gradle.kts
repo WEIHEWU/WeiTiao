@@ -16,8 +16,8 @@ android {
         applicationId = "com.weitiao.tuning"
         minSdk = 26
         targetSdk = 37
-        versionCode = 37
-        versionName = "1.5.7"
+        versionCode = 38
+        versionName = "1.5.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

@@ -46,7 +46,22 @@ object FastChargeController {
         "/sys/class/thermal",
     )
 
+    private val CHARGING_TEMPERATURE_SET = CHARGING_TEMPERATURE_NODES.toSet()
+    private val SOC_THERMAL_SAFETY_SET = SOC_THERMAL_SAFETY_NODES.toSet()
     private val ALL_MANAGED_NODES = CHARGING_TEMPERATURE_NODES + SOC_THERMAL_SAFETY_NODES
+    private val ALL_MANAGED_SET = ALL_MANAGED_NODES.toSet()
+
+    /**
+     * 在持久化 su 会话中缓存 uid，避免每次 5s/15s 轮询都 fork 一次 `/system/bin/id`；
+     * 若回退到单次 su 进程，`__wt_uid` 为空仍会自动执行一次 `id -u`。
+     */
+    private const val UID_PREAMBLE =
+        "[ \"\${__wt_uid:-}\" = \"0\" ] || __wt_uid=\$(id -u); echo __UID__\$__wt_uid; "
+
+    internal data class NodeBlockReport(
+        val allChargingBlocked: Boolean?,
+        val anyNodeBlocked: Boolean,
+    )
 
     data class Result(val success: Boolean, val detail: String)
 
@@ -95,21 +110,24 @@ object FastChargeController {
     /**
      * 屏蔽三星充电限流温控节点（解除亮屏快充限流），
      * 同时强制确保 AP/PA/GPU/thermal 等核心芯片温控节点处于可读状态，保留系统 CPU/射频过热保护。
+     * 批量合并为最多三次 chmod 调用（0755 / 0644 / 0000），避免对 17 个节点逐个 fork。
      */
     fun blockTemperatureNodes(): Result {
         val command = buildString {
-            append("uid=$(id -u); echo __UID__\$uid; ")
+            append(UID_PREAMBLE)
+            append("d755=\"\"; f644=\"\"; f000=\"\"; ")
 
             for (node in SOC_THERMAL_SAFETY_NODES) {
-                val escaped = node.replace("'", "'\\''")
-                append("if [ -d '$escaped' ]; then chmod 0755 '$escaped' 2>/dev/null; elif [ -e '$escaped' ]; then chmod 0644 '$escaped' 2>/dev/null; fi; ")
+                append("if [ -d '$node' ]; then d755=\"\$d755 $node\"; elif [ -e '$node' ]; then f644=\"\$f644 $node\"; fi; ")
             }
 
             for (node in CHARGING_TEMPERATURE_NODES) {
-                val escaped = node.replace("'", "'\\''")
-                append("[ -e '$escaped' ] && chmod 0000 '$escaped' 2>/dev/null; ")
+                append("[ -e '$node' ] && f000=\"\$f000 $node\"; ")
             }
 
+            append("[ -n \"\$d755\" ] && chmod 0755 \$d755 2>/dev/null; ")
+            append("[ -n \"\$f644\" ] && chmod 0644 \$f644 2>/dev/null; ")
+            append("[ -n \"\$f000\" ] && chmod 0000 \$f000 2>/dev/null; ")
             append("echo __DONE__")
         }
         return runRootCommand(command)
@@ -117,17 +135,19 @@ object FastChargeController {
 
     /**
      * 恢复全部温控节点（含充电温控节点与旧版可能残留锁死的 AP/PA/WF/thermal 节点）。
-     * 目录使用 0755，sysfs 传感器文件使用 0644。
+     * 目录使用 0755，sysfs 传感器文件使用 0644，批量合并 chmod 调用。
      */
     fun restoreTemperatureNodes(): Result {
         val command = buildString {
-            append("uid=$(id -u); echo __UID__\$uid; ")
+            append(UID_PREAMBLE)
+            append("d755=\"\"; f644=\"\"; ")
 
             for (node in ALL_MANAGED_NODES) {
-                val escaped = node.replace("'", "'\\''")
-                append("if [ -d '$escaped' ]; then chmod 0755 '$escaped' 2>/dev/null; elif [ -e '$escaped' ]; then chmod 0644 '$escaped' 2>/dev/null; fi; ")
+                append("if [ -d '$node' ]; then d755=\"\$d755 $node\"; elif [ -e '$node' ]; then f644=\"\$f644 $node\"; fi; ")
             }
 
+            append("[ -n \"\$d755\" ] && chmod 0755 \$d755 2>/dev/null; ")
+            append("[ -n \"\$f644\" ] && chmod 0644 \$f644 2>/dev/null; ")
             append("echo __DONE__")
         }
         return runRootCommand(command)
@@ -135,53 +155,68 @@ object FastChargeController {
 
     /**
      * 复核充电温控节点当前是否全部处于被屏蔽状态（且 SoC 安全节点未被误锁）。
+     * 仅调用一次 `stat -c '%a:%n'` 批量探测全部节点，代替原来的 17 次逐节点 subshell+stat。
      */
-    fun areTemperatureNodesBlocked(): Boolean? {
-        val command = buildString {
-            append("uid=$(id -u); echo __UID__\$uid; ")
-            for (node in CHARGING_TEMPERATURE_NODES) {
-                val escaped = node.replace("'", "'\\''")
-                append("[ -e '$escaped' ] && { m=$(stat -c %a '$escaped' 2>/dev/null); ")
-                append("case \"\$m\" in 0|00|000|0000) echo __BLOCKED__ ;; \"\") ;; *) echo __OPEN__ ;; esac; }; ")
-            }
-            for (node in SOC_THERMAL_SAFETY_NODES) {
-                val escaped = node.replace("'", "'\\''")
-                append("[ -e '$escaped' ] && { m=$(stat -c %a '$escaped' 2>/dev/null); ")
-                append("case \"\$m\" in 0|00|000|0000) echo __SOC_LOCKED__ ;; esac; }; ")
-            }
-            append("echo __DONE__")
-        }
-        val (exitCode, stdout) = RootShell.exec(command, timeoutSeconds = 6)
-        if (exitCode != 0 || !stdout.contains("__UID__0")) return null
-        if (stdout.contains("__SOC_LOCKED__")) return false
-        val open = stdout.contains("__OPEN__")
-        val blocked = stdout.contains("__BLOCKED__")
-        if (!open && !blocked) return null
-        return blocked && !open
-    }
+    fun areTemperatureNodesBlocked(): Boolean? = queryNodeBlockReport()?.allChargingBlocked
 
     /**
      * 检查是否存在任何一个温控节点仍处于 0000 锁死状态（用于熔断/息屏/拔线待命态强校验自愈）。
      */
-    fun isAnyTemperatureNodeBlocked(): Boolean? {
+    fun isAnyTemperatureNodeBlocked(): Boolean? = queryNodeBlockReport()?.anyNodeBlocked
+
+    private fun queryNodeBlockReport(): NodeBlockReport? {
         val command = buildString {
-            append("uid=$(id -u); echo __UID__\$uid; ")
-            for (node in ALL_MANAGED_NODES) {
-                val escaped = node.replace("'", "'\\''")
-                append("[ -e '$escaped' ] && { m=$(stat -c %a '$escaped' 2>/dev/null); ")
-                append("case \"\$m\" in 0|00|000|0000) echo __ANY_BLOCKED__ ;; esac; }; ")
-            }
-            append("echo __DONE__")
+            append(UID_PREAMBLE)
+            append("stat -c '%a:%n' ")
+            ALL_MANAGED_NODES.joinTo(this, separator = " ") { "'${it.replace("'", "'\\''")}'" }
+            append(" 2>/dev/null; echo __DONE__")
         }
         val (exitCode, stdout) = RootShell.exec(command, timeoutSeconds = 6)
-        if (exitCode != 0 || !stdout.contains("__UID__0")) return null
-        return stdout.contains("__ANY_BLOCKED__")
+        if (exitCode != 0) return null
+        return parseNodeBlockReport(stdout)
+    }
+
+    internal fun parseNodeBlockReport(stdout: String): NodeBlockReport? {
+        if (!stdout.contains("__UID__0") || !stdout.contains("__DONE__")) return null
+        var anyBlocked = false
+        var hasBlockedCharging = false
+        var hasOpenCharging = false
+        var socLocked = false
+
+        stdout.lineSequence().forEach { rawLine ->
+            val line = rawLine.trim()
+            val sep = line.indexOf(':')
+            if (sep <= 0) return@forEach
+            val mode = line.substring(0, sep)
+            val path = line.substring(sep + 1)
+            if (path !in ALL_MANAGED_SET) return@forEach
+            val isZeroMode = mode == "0" || mode == "00" || mode == "000" || mode == "0000"
+            if (isZeroMode) {
+                anyBlocked = true
+            }
+            if (path in SOC_THERMAL_SAFETY_SET && isZeroMode) {
+                socLocked = true
+            }
+            if (path in CHARGING_TEMPERATURE_SET) {
+                if (isZeroMode) hasBlockedCharging = true else hasOpenCharging = true
+            }
+        }
+
+        val allChargingBlocked = when {
+            socLocked -> false
+            !hasOpenCharging && !hasBlockedCharging -> null
+            else -> hasBlockedCharging && !hasOpenCharging
+        }
+        return NodeBlockReport(
+            allChargingBlocked = allChargingBlocked,
+            anyNodeBlocked = anyBlocked,
+        )
     }
 
     /** 开启三星系统设置快充开关 */
     fun enableSamsungFastChargingSettings(): Result {
         val command = buildString {
-            append("echo __UID__$(id -u); ")
+            append(UID_PREAMBLE)
             append("settings put system adaptive_fast_charging '1'; ")
             append("settings put system wireless_fast_charging '1'; ")
             append("settings put system super_fast_charging '1'; ")
@@ -191,34 +226,61 @@ object FastChargeController {
         return runRootCommand(command)
     }
 
-    /** 真实硬件节点直读：利用 Root 毫秒级读取系统 /sys 真实电压、电流与多路真实温度并计算实际功率 (W) */
+    /**
+     * 真实硬件节点直读：利用 Root 在持久化 sh 内直接读取系统 /sys 真实电压、电流与多路真实温度并计算实际功率 (W)。
+     *
+     * 性能优化要点（避免 root sh 持续 fork/execve 导致高 CPU 与数万次缺页）：
+     * 1. 全程使用 mksh 内建 `read -r var < file` 替代外部 `$(cat ... | head -n 1)`，常规节点 0 fork；
+     * 2. 缓存电池 `thermal_zone` 路径至会话变量 `__wt_tzb`，避免每次轮询遍历 80+ 个热区并反复 `cat type`；
+     * 3. 被 `0000` 屏蔽的节点先直读，仅对未读出值的存在节点做单次批量 `stat` + `chmod 0444` + `read -r` + `chmod 0000`，
+     *    将每次轮询的外部进程派生从 ~85 次降至 0~4 次。
+     */
     fun readBatteryMetrics(context: Context): BatteryMetrics {
-        // 关键设计：
-        // 1. 定义 rd() 函数：兼容 stat 输出 0/00/000/0000 及不可读状态，若目标充电温度节点处于 0000 屏蔽态，
-        //    在同一亚毫秒 shell 内瞬时切换 0444 读取真实温度后立即恢复 0000，
-        //    彻底解决 SELinux 下 cat 0000 节点返回空值导致温控熔断器变成“瞎子”的致命缺陷。
-        // 2. 同时采集电池 (batt_temp/temp)、thermal_zone 电池热敏源、中框 (sec-cf-thermistor)、
-        //    处理器 (sec-ap-thermistor)、射频功放 (sec-pa-thermistor) 与充电IC (chg_temp/dchg_temp) 多路真实温度。
-        // 3. 彻底移除 batt_temp_raw（这是 NTC 热敏电阻原始 ADC 值而非摄氏度，升温时阻值反而下降！）。
         val (exitCode, stdout) = RootShell.exec(
-            "echo __UID__\$(id -u); " +
-                "rd() { p=\"\$1\"; if [ -e \"\$p\" ]; then m=\$(stat -c %a \"\$p\" 2>/dev/null); " +
-                "case \"\$m\" in 0|00|000|0000) chmod 0444 \"\$p\" 2>/dev/null; v=\$(cat \"\$p\" 2>/dev/null | head -n 1); chmod 0000 \"\$p\" 2>/dev/null; echo \"\$v\" ;; " +
-                "*) v=\$(cat \"\$p\" 2>/dev/null | head -n 1); if [ -z \"\$v\" ]; then chmod 0444 \"\$p\" 2>/dev/null; v=\$(cat \"\$p\" 2>/dev/null | head -n 1); [ -n \"\$m\" ] && chmod \"\$m\" \"\$p\" 2>/dev/null; fi; echo \"\$v\" ;; esac; fi; }; " +
-                "tzb=\"\"; for z in /sys/class/thermal/thermal_zone*; do [ -e \"\$z/type\" ] || continue; t=\$(cat \"\$z/type\" 2>/dev/null); " +
-                "case \"\$t\" in *battery*|*batt*|*BAT*|*sec-battery*) tv=\$(cat \"\$z/temp\" 2>/dev/null | head -n 1); case \"\$tv\" in \"\"|-*|0) ;; *) tzb=\"\$tv\"; break ;; esac ;; esac; done; " +
-                "echo C=\$(cat /sys/class/power_supply/battery/current_now 2>/dev/null); " +
-                "echo V=\$(cat /sys/class/power_supply/battery/voltage_now 2>/dev/null); " +
-                "echo TB1=\$(rd /sys/class/power_supply/battery/batt_temp); " +
-                "echo TB2=\$(rd /sys/class/power_supply/battery/temp); " +
-                "echo TB3=\$(rd /sys/class/sec/battery/batt_temp); " +
-                "echo TZB=\$tzb; " +
-                "echo TCF=\$(cat /sys/class/sec/sec-cf-thermistor/temperature 2>/dev/null); " +
-                "echo TTH=\$(cat /sys/class/sec/sec-thermistor/temperature 2>/dev/null); " +
-                "echo TAP=\$(cat /sys/class/sec/sec-ap-thermistor/temperature 2>/dev/null); " +
-                "echo TPA=\$(cat /sys/class/sec/sec-pa-thermistor/temperature 2>/dev/null); " +
-                "echo TCHG=\$(rd /sys/class/power_supply/battery/chg_temp); " +
-                "echo TDCHG=\$(rd /sys/class/power_supply/battery/dchg_temp); " +
+            UID_PREAMBLE +
+                "tzb=\"\"; " +
+                "if [ \"\${__wt_tzb:-}\" != \"none\" ]; then " +
+                "if [ -n \"\${__wt_tzb:-}\" ] && [ -e \"\$__wt_tzb/temp\" ]; then { read -r tzb < \"\$__wt_tzb/temp\"; } 2>/dev/null; fi; " +
+                "case \"\$tzb\" in \"\"|-*|0) tzb=\"\"; __wt_tzb=\"\"; matched=0; " +
+                "for z in /sys/class/thermal/thermal_zone*; do " +
+                "[ -e \"\$z/type\" ] || continue; t=\"\"; { read -r t < \"\$z/type\"; } 2>/dev/null; " +
+                "case \"\$t\" in *battery*|*batt*|*BAT*|*sec-battery*) matched=1; tv=\"\"; { read -r tv < \"\$z/temp\"; } 2>/dev/null; " +
+                "case \"\$tv\" in \"\"|-*|0) ;; *) tzb=\"\$tv\"; __wt_tzb=\"\$z\"; break ;; esac ;; esac; done; " +
+                "[ \"\$matched\" = \"0\" ] && [ -z \"\$__wt_tzb\" ] && __wt_tzb=\"none\"; ;; esac; " +
+                "fi; " +
+                "c=\"\"; { read -r c < /sys/class/power_supply/battery/current_now; } 2>/dev/null; " +
+                "v=\"\"; { read -r v < /sys/class/power_supply/battery/voltage_now; } 2>/dev/null; " +
+                "tcf=\"\"; { read -r tcf < /sys/class/sec/sec-cf-thermistor/temperature; } 2>/dev/null; " +
+                "tth=\"\"; { read -r tth < /sys/class/sec/sec-thermistor/temperature; } 2>/dev/null; " +
+                "tap=\"\"; { read -r tap < /sys/class/sec/sec-ap-thermistor/temperature; } 2>/dev/null; " +
+                "tpa=\"\"; { read -r tpa < /sys/class/sec/sec-pa-thermistor/temperature; } 2>/dev/null; " +
+                "p1=/sys/class/power_supply/battery/batt_temp; p2=/sys/class/power_supply/battery/temp; " +
+                "p3=/sys/class/sec/battery/batt_temp; p4=/sys/class/power_supply/battery/chg_temp; p5=/sys/class/power_supply/battery/dchg_temp; " +
+                "tb1=\"\"; tb2=\"\"; tb3=\"\"; tchg=\"\"; tdchg=\"\"; need=\"\"; " +
+                "if [ -e \"\$p1\" ]; then { read -r tb1 < \"\$p1\"; } 2>/dev/null; [ -z \"\$tb1\" ] && need=\"\$need \$p1\"; fi; " +
+                "if [ -e \"\$p2\" ]; then { read -r tb2 < \"\$p2\"; } 2>/dev/null; [ -z \"\$tb2\" ] && need=\"\$need \$p2\"; fi; " +
+                "if [ -e \"\$p3\" ]; then { read -r tb3 < \"\$p3\"; } 2>/dev/null; [ -z \"\$tb3\" ] && need=\"\$need \$p3\"; fi; " +
+                "if [ -e \"\$p4\" ]; then { read -r tchg < \"\$p4\"; } 2>/dev/null; [ -z \"\$tchg\" ] && need=\"\$need \$p4\"; fi; " +
+                "if [ -e \"\$p5\" ]; then { read -r tdchg < \"\$p5\"; } 2>/dev/null; [ -z \"\$tdchg\" ] && need=\"\$need \$p5\"; fi; " +
+                "if [ -n \"\$need\" ]; then " +
+                "relock=\"\"; for line in \$(stat -c \"%a:%n\" \$need 2>/dev/null); do " +
+                "m=\"\${line%%:*}\"; np=\"\${line#*:}\"; " +
+                "case \"\$m\" in 0|00|000|0000) relock=\"\$relock \$np\" ;; esac; " +
+                "done; " +
+                "if [ -n \"\$relock\" ]; then " +
+                "chmod 0444 \$relock 2>/dev/null; " +
+                "[ -z \"\$tb1\" ] && [ -e \"\$p1\" ] && { read -r tb1 < \"\$p1\"; } 2>/dev/null; " +
+                "[ -z \"\$tb2\" ] && [ -e \"\$p2\" ] && { read -r tb2 < \"\$p2\"; } 2>/dev/null; " +
+                "[ -z \"\$tb3\" ] && [ -e \"\$p3\" ] && { read -r tb3 < \"\$p3\"; } 2>/dev/null; " +
+                "[ -z \"\$tchg\" ] && [ -e \"\$p4\" ] && { read -r tchg < \"\$p4\"; } 2>/dev/null; " +
+                "[ -z \"\$tdchg\" ] && [ -e \"\$p5\" ] && { read -r tdchg < \"\$p5\"; } 2>/dev/null; " +
+                "chmod 0000 \$relock 2>/dev/null; " +
+                "fi; " +
+                "fi; " +
+                "echo \"C=\$c\"; echo \"V=\$v\"; " +
+                "echo \"TB1=\$tb1\"; echo \"TB2=\$tb2\"; echo \"TB3=\$tb3\"; echo \"TZB=\$tzb\"; " +
+                "echo \"TCF=\$tcf\"; echo \"TTH=\$tth\"; echo \"TAP=\$tap\"; echo \"TPA=\$tpa\"; " +
+                "echo \"TCHG=\$tchg\"; echo \"TDCHG=\$tdchg\"; " +
                 "echo __DONE__",
             timeoutSeconds = 4,
         )
