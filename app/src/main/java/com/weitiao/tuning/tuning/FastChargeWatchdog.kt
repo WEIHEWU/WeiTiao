@@ -184,6 +184,28 @@ object FastChargeFallback {
             return
         }
 
+        val fullReleased = FastChargeController.nextFullChargeReleased(
+            level = level,
+            previouslyReleased = BrightScreenFastChargeService.isFullChargeReleasedActive,
+        )
+        BrightScreenFastChargeService.isFullChargeReleasedActive = fullReleased
+        if (fullReleased) {
+            FastChargeController.restoreTemperatureNodes()
+            val metrics = FastChargeController.readBatteryMetrics(context)
+            BrightScreenFastChargeService.lastKnownMetrics = metrics
+            val tempC = String.format("%.1f°C", metrics.temperatureTenths / 10.0)
+            val statusText = FastChargeNotifier.formatChargingStatus(
+                isScreenOn = true,
+                isOverheated = false,
+                level = level,
+                metrics = metrics,
+                isFullReleased = true,
+            )
+            FastChargeNotifier.postLive(context, statusText, tempC)
+            Log.i(TAG, "兜底路径检测到满电 ($level%)，已恢复原生温控")
+            return
+        }
+
         // 先读取真实温度并执行与常驻服务完全一致的双重高温安全熔断判定
         val metrics = FastChargeController.readBatteryMetrics(context)
         BrightScreenFastChargeService.lastKnownMetrics = metrics

@@ -54,6 +54,7 @@ class BrightScreenFastChargeService : Service() {
     @Volatile private var wasChargingLastTick = false
     @Volatile private var isScreenOn = true
     @Volatile private var isOverheated = false
+    @Volatile private var isFullChargeReleased = false
     @Volatile private var currentLevel = 0
     @Volatile private var currentTempTenths = 320 // 默认 32.0°C 初始安全值
 
@@ -74,6 +75,7 @@ class BrightScreenFastChargeService : Service() {
     private var lastNotifyTime = 0L
     private var lastNotifiedScreenOn: Boolean? = null
     private var lastNotifiedOverheated: Boolean? = null
+    private var lastNotifiedFullReleased: Boolean? = null
 
     private val tickerRunnable: Runnable = object : Runnable {
         override fun run() {
@@ -98,8 +100,8 @@ class BrightScreenFastChargeService : Service() {
             if (isWiredCharging) {
                 wasChargingLastTick = true
                 if (isScreenOn) {
-                    // 若已有真实 sysfs 温度数据则立即评估策略；首次采样等待 readMetricsAsync 返回真实温度后再决定是否屏蔽节点
-                    if (hasFreshSysfsMetrics || isOverheated) {
+                    // 若已有真实 sysfs 温度数据、处于过热或满电释放态则立即评估策略；首次未满电采样等待 readMetricsAsync 返回真实温度后再决定是否屏蔽节点
+                    if (hasFreshSysfsMetrics || isOverheated || isFullChargeReleased) {
                         evaluatePolicy()
                     }
                     readMetricsAsync()
@@ -238,6 +240,20 @@ class BrightScreenFastChargeService : Service() {
             val plugged = battery.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0)
             isWiredCharging = plugged > 0
             currentLevel = battery.getIntExtra(BatteryManager.EXTRA_LEVEL, currentLevel)
+            val nextFullReleased = FastChargeController.nextFullChargeReleased(currentLevel, isFullChargeReleased)
+            if (nextFullReleased && !isFullChargeReleased) {
+                isFullChargeReleased = true
+                isFullChargeReleasedActive = true
+                forceRestoreRequested.set(true)
+                Log.i(TAG, "电量已达 ${currentLevel}%，满电保护自动恢复原生温控")
+            } else if (!nextFullReleased && isFullChargeReleased) {
+                isFullChargeReleased = false
+                isFullChargeReleasedActive = false
+                Log.i(TAG, "电量回落至 ${currentLevel}%，重新允许亮屏快充温控优化")
+            } else {
+                isFullChargeReleased = nextFullReleased
+                isFullChargeReleasedActive = nextFullReleased
+            }
             val tempExtra = FastChargeController.normalizeTemp(
                 battery.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0),
             )
@@ -315,13 +331,22 @@ class BrightScreenFastChargeService : Service() {
         }
     }
 
-    /** 核心策略：亮屏 + 有线充电 + 未过热 → 屏蔽充电温控节点，否则无条件恢复官方温控并定期复核 */
+    /** 核心策略：亮屏 + 有线充电 + 未过热 + 未触发满电释放 → 屏蔽充电温控节点，否则无条件恢复官方温控并定期复核 */
     private fun evaluatePolicy() {
-        val desired = isWiredCharging && isScreenOn && !isOverheated
+        val desired = FastChargeController.shouldBlockChargingNodes(
+            isWiredCharging = isWiredCharging,
+            isScreenOn = isScreenOn,
+            isOverheated = isOverheated,
+            fullChargeReleased = isFullChargeReleased,
+        )
         desiredBlocked = desired
 
         val now = SystemClock.elapsedRealtime()
-        val verifyIntervalMs = if (currentLevel >= 100 && !isOverheated) VERIFY_INTERVAL_FULL_MS else VERIFY_INTERVAL_MS
+        val verifyIntervalMs = if ((isFullChargeReleased || currentLevel >= 100) && !isOverheated) {
+            VERIFY_INTERVAL_FULL_MS
+        } else {
+            VERIFY_INTERVAL_MS
+        }
         val needVerify = now - lastVerifyElapsed >= verifyIntervalMs
         val forceRestore = !desired && forceRestoreRequested.get()
 
@@ -330,7 +355,7 @@ class BrightScreenFastChargeService : Service() {
                 scheduleNodeSync()
             }
         } else {
-            // 当处于过热熔断、息屏或拔电状态时：
+            // 当处于过热熔断、满电释放、息屏或拔电状态时：
             // 不仅在 appliedBlocked != false 时恢复，且每 VERIFY_INTERVAL_MS 强校验底层节点权限，
             // 彻底杜绝任何外部任务或状态不同步导致节点残留 0000 锁死！
             if (forceRestore || isOverheated || appliedBlocked != false || needVerify) {
@@ -339,9 +364,17 @@ class BrightScreenFastChargeService : Service() {
         }
     }
 
+    private fun shouldBlockCurrently(): Boolean =
+        isEnabled() && FastChargeController.shouldBlockChargingNodes(
+            isWiredCharging = isWiredCharging,
+            isScreenOn = isScreenOn,
+            isOverheated = isOverheated,
+            fullChargeReleased = isFullChargeReleased,
+        )
+
     /**
      * 在单线程 rootExecutor 上串行同步温控节点状态。
-     * 不再因前一次检测未完成而丢弃随后的「熔断/拔线/息屏解锁」指令！
+     * 不再因前一次检测未完成而丢弃随后的「熔断/满电释放/拔线/息屏解锁」指令！
      */
     private fun scheduleNodeSync() {
         if (!syncScheduled.compareAndSet(false, true)) return
@@ -349,7 +382,7 @@ class BrightScreenFastChargeService : Service() {
             try {
                 while (true) {
                     syncScheduled.set(false)
-                    val wantBlock = desiredBlocked && isEnabled() && isWiredCharging && isScreenOn && !isOverheated
+                    val wantBlock = desiredBlocked && shouldBlockCurrently()
                     val forceUnlock = forceRestoreRequested.getAndSet(false)
 
                     if (wantBlock && !forceUnlock) {
@@ -364,9 +397,10 @@ class BrightScreenFastChargeService : Service() {
                             logResult("亮屏启用充电温控优化", result)
                         }
                     } else {
-                        // 过热保护触发或强制解锁时无条件执行 restoreTemperatureNodes（强制 chmod 0644 全部温控节点）
+                        // 过热保护触发、满电释放或强制解锁时无条件执行 restoreTemperatureNodes（强制 chmod 0644 全部温控节点）
                         val shouldRestore = forceUnlock ||
                             isOverheated ||
+                            isFullChargeReleased ||
                             appliedBlocked != false ||
                             (FastChargeController.isAnyTemperatureNodeBlocked() != false)
                         if (shouldRestore) {
@@ -381,7 +415,7 @@ class BrightScreenFastChargeService : Service() {
                     lastVerifyElapsed = SystemClock.elapsedRealtime()
 
                     // 若在执行 root 命令期间 desiredBlocked 或 forceRestoreRequested 发生了变化，立即再跑一轮
-                    if (!syncScheduled.get() && !forceRestoreRequested.get() && appliedBlocked == (desiredBlocked && isEnabled() && isWiredCharging && isScreenOn && !isOverheated)) {
+                    if (!syncScheduled.get() && !forceRestoreRequested.get() && appliedBlocked == (desiredBlocked && shouldBlockCurrently())) {
                         break
                     }
                 }
@@ -403,11 +437,14 @@ class BrightScreenFastChargeService : Service() {
         samsungSettingsApplied = false
         isOverheated = false
         isThermalCutoffActive = false
+        isFullChargeReleased = false
+        isFullChargeReleasedActive = false
         lastNotifiedLevel = -1
         lastNotifiedWatts = -1.0
         lastNotifyTime = 0L
         lastNotifiedScreenOn = null
         lastNotifiedOverheated = null
+        lastNotifiedFullReleased = null
 
         FastChargeScheduler.enable(this)
         postRoot {
@@ -448,6 +485,7 @@ class BrightScreenFastChargeService : Service() {
             lastNotifyTime = 0L
             lastNotifiedScreenOn = null
             lastNotifiedOverheated = null
+            lastNotifiedFullReleased = null
             return
         }
         val metrics = latestMetrics
@@ -457,6 +495,7 @@ class BrightScreenFastChargeService : Service() {
         val now = SystemClock.elapsedRealtime()
         val stateChanged = lastNotifiedScreenOn != isScreenOn ||
             lastNotifiedOverheated != isOverheated ||
+            lastNotifiedFullReleased != isFullChargeReleased ||
             (lastNotifiedWatts <= 0.0 && metrics.powerWatts > 0.0)
         // 节流机制：状态未发生切换、距离上次更新未满 15 秒，且电量未变、功率波动小于 0.8W，跳过重复更新，防止触发 SystemUI 布局重绘与发热
         val wattsDiff = Math.abs(metrics.powerWatts - lastNotifiedWatts)
@@ -469,12 +508,14 @@ class BrightScreenFastChargeService : Service() {
         lastNotifyTime = now
         lastNotifiedScreenOn = isScreenOn
         lastNotifiedOverheated = isOverheated
+        lastNotifiedFullReleased = isFullChargeReleased
 
         val statusText = FastChargeNotifier.formatChargingStatus(
             isScreenOn = isScreenOn,
             isOverheated = isOverheated,
             level = currentLevel,
             metrics = metrics,
+            isFullReleased = isFullChargeReleased,
         )
         val posted = FastChargeNotifier.postLive(
             context = this,
@@ -491,6 +532,8 @@ class BrightScreenFastChargeService : Service() {
         handler.removeCallbacks(tickerRunnable)
         desiredBlocked = false
         samsungSettingsApplied = false
+        isFullChargeReleased = false
+        isFullChargeReleasedActive = false
         postRoot {
             logResult("关闭亮屏快充，恢复官方温控", FastChargeController.restoreTemperatureNodes())
             appliedBlocked = false
@@ -509,6 +552,7 @@ class BrightScreenFastChargeService : Service() {
                 lastNotifyTime = 0L
                 lastNotifiedScreenOn = null
                 lastNotifiedOverheated = null
+                lastNotifiedFullReleased = null
                 runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
                 foregroundStarted = false
                 stopSelf()
@@ -529,7 +573,7 @@ class BrightScreenFastChargeService : Service() {
     }
 
     private fun nextActiveTickIntervalMs(): Long =
-        if (currentLevel >= 100 && !isOverheated) TICKER_FULL_MS else TICKER_ACTIVE_MS
+        if ((isFullChargeReleased || currentLevel >= 100) && !isOverheated) TICKER_FULL_MS else TICKER_ACTIVE_MS
 
     private fun isEnabled(): Boolean = currentConfig().brightScreenFastCharge
 
@@ -588,6 +632,10 @@ class BrightScreenFastChargeService : Service() {
 
         @Volatile
         var isThermalCutoffActive: Boolean = false
+            internal set
+
+        @Volatile
+        var isFullChargeReleasedActive: Boolean = false
             internal set
 
         private const val TAG = "TuningFastCharge"

@@ -58,6 +58,30 @@ object FastChargeController {
     private const val UID_PREAMBLE =
         "[ \"\${__wt_uid:-}\" = \"0\" ] || __wt_uid=\$(id -u); echo __UID__\$__wt_uid; "
 
+    const val FULL_CHARGE_RELEASE_LEVEL = 100
+    const val FULL_CHARGE_RESUME_LEVEL = 98
+
+    /**
+     * 满电自动归还温控滞回判定：
+     * - 电量 >= 100% 时释放温控（返回 true），避免 100% 涓流或插电脑 USB 时仍锁死 `battery/temp`；
+     * - 已释放后在 99% 保持释放，直至回落至 <= 98%（2% 滞回）才重新允许屏蔽充电温控节点。
+     */
+    fun nextFullChargeReleased(level: Int, previouslyReleased: Boolean): Boolean = when {
+        level >= FULL_CHARGE_RELEASE_LEVEL -> true
+        previouslyReleased && level > FULL_CHARGE_RESUME_LEVEL -> true
+        else -> false
+    }
+
+    /**
+     * 统一策略判定：仅在有线充电、亮屏、未过热且未处于满电释放态时才允许屏蔽充电温控节点。
+     */
+    fun shouldBlockChargingNodes(
+        isWiredCharging: Boolean,
+        isScreenOn: Boolean,
+        isOverheated: Boolean,
+        fullChargeReleased: Boolean,
+    ): Boolean = isWiredCharging && isScreenOn && !isOverheated && !fullChargeReleased
+
     internal data class NodeBlockReport(
         val allChargingBlocked: Boolean?,
         val anyNodeBlocked: Boolean,
@@ -76,8 +100,8 @@ object FastChargeController {
     /**
      * 判定是否触发高温安全熔断：
      * 1. 电池/机身温度 >= 用户设定阈值（默认 42~44°C），降温 3.0°C 后恢复；
-     * 2. 充电IC (CHG/DC) / 处理器 (AP) / 射频功放 (PA) 任一芯片温度 >= min(阈值+6°C, 50°C)，
-     *    降温 4.0°C 后恢复，彻底杜绝电池尚在 43°C 但 AP/CHG 已飙升至 56~57°C 的热失控隐患。
+     * 2. 充电IC (CHG/DC) / 处理器 (AP) / 射频功放 (PA) 任一芯片温度 >= min(阈值+3°C, 47°C)，
+     *    降温 3.0°C 后恢复，缩小与三星官方 SKIN 温控区间的温差盲区。
      */
     fun isOverheated(
         metrics: BatteryMetrics,
@@ -91,9 +115,9 @@ object FastChargeController {
         val battOverheatTenths = clampedCutoff * 10
         val battCoolDownTenths = battOverheatTenths - 30 // 降温 3.0°C 恢复
 
-        val chipCutoffCelsius = (clampedCutoff + 6).coerceAtMost(50)
+        val chipCutoffCelsius = (clampedCutoff + 3).coerceAtMost(47)
         val chipOverheatTenths = chipCutoffCelsius * 10
-        val chipCoolDownTenths = chipOverheatTenths - 40 // 芯片降温 4.0°C 恢复
+        val chipCoolDownTenths = chipOverheatTenths - 30 // 芯片降温 3.0°C 恢复
 
         val battTemp = metrics.temperatureTenths
         val chipTemp = metrics.maxChipTempTenths

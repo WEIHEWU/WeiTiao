@@ -62,15 +62,114 @@ class FastChargeSafetyTest {
             FastChargeController.isOverheated(unreadableMetrics, cutoffCelsius = 44, previouslyOverheated = true),
         )
 
-        // Case 3: Battery at 44.0°C trips 44°C cutoff, stays overheated at 42.0°C, cools down at 40.5°C
-        val hotBatt = FastChargeController.BatteryMetrics(3000, 4200, 12.6, temperatureTenths = 440, maxChipTempTenths = 450)
+        // Case 3: Battery at 44.0°C trips 44°C cutoff, stays overheated at 42.0°C, cools down at 40.5°C (with chip <= 44.0°C)
+        val hotBatt = FastChargeController.BatteryMetrics(3000, 4200, 12.6, temperatureTenths = 440, maxChipTempTenths = 435)
         assertTrue(FastChargeController.isOverheated(hotBatt, cutoffCelsius = 44, previouslyOverheated = false))
 
-        val warmBatt = FastChargeController.BatteryMetrics(3000, 4200, 12.6, temperatureTenths = 420, maxChipTempTenths = 450)
+        val warmBatt = FastChargeController.BatteryMetrics(3000, 4200, 12.6, temperatureTenths = 420, maxChipTempTenths = 435)
         assertTrue(FastChargeController.isOverheated(warmBatt, cutoffCelsius = 44, previouslyOverheated = true))
 
-        val cooledBatt = FastChargeController.BatteryMetrics(3000, 4200, 12.6, temperatureTenths = 405, maxChipTempTenths = 450)
+        val cooledBatt = FastChargeController.BatteryMetrics(3000, 4200, 12.6, temperatureTenths = 405, maxChipTempTenths = 435)
         assertFalse(FastChargeController.isOverheated(cooledBatt, cutoffCelsius = 44, previouslyOverheated = true))
+    }
+
+    @Test
+    fun isOverheatedTripsOnTightenedChipCutoff() {
+        // 1. Default cutoff 44°C -> chip cutoff = min(44 + 3, 47) = 47.0°C (470), cooldown = 44.0°C (440)
+        val chipAt47 = FastChargeController.BatteryMetrics(3000, 4200, 12.6, temperatureTenths = 360, maxChipTempTenths = 470)
+        assertTrue(
+            "Chip at 47.0°C must trigger overheat under tightened default 44°C cutoff",
+            FastChargeController.isOverheated(chipAt47, cutoffCelsius = 44, previouslyOverheated = false),
+        )
+
+        val chipAt45 = FastChargeController.BatteryMetrics(3000, 4200, 12.6, temperatureTenths = 360, maxChipTempTenths = 450)
+        assertTrue(
+            "Chip at 45.0°C (> 44.0°C cooldown) must stay overheated",
+            FastChargeController.isOverheated(chipAt45, cutoffCelsius = 44, previouslyOverheated = true),
+        )
+
+        val chipCooledTo435 = FastChargeController.BatteryMetrics(3000, 4200, 12.6, temperatureTenths = 360, maxChipTempTenths = 435)
+        assertFalse(
+            "Chip cooled to 43.5°C (<= 44.0°C) should recover",
+            FastChargeController.isOverheated(chipCooledTo435, cutoffCelsius = 44, previouslyOverheated = true),
+        )
+
+        // 2. User cutoff 42°C -> chip cutoff = min(42 + 3, 47) = 45.0°C (450), cooldown = 42.0°C (420)
+        assertTrue(
+            "Chip at 45.0°C must trip when user sets 42°C cutoff",
+            FastChargeController.isOverheated(chipAt45, cutoffCelsius = 42, previouslyOverheated = false),
+        )
+        assertFalse(
+            "Chip at 44.5°C must not trip before 45.0°C when not previously overheated",
+            FastChargeController.isOverheated(
+                chipAt45.copy(maxChipTempTenths = 445),
+                cutoffCelsius = 42,
+                previouslyOverheated = false,
+            ),
+        )
+    }
+
+    @Test
+    fun fullChargeReleaseHoldsHysteresisUntil98Percent() {
+        // 100% -> triggers full-charge release
+        assertTrue(FastChargeController.nextFullChargeReleased(level = 100, previouslyReleased = false))
+        // 99% after release -> stays released (2% hysteresis prevents 99 <-> 100 flapping)
+        assertTrue(FastChargeController.nextFullChargeReleased(level = 99, previouslyReleased = true))
+        // 99% fresh (never reached 100%) -> not released yet
+        assertFalse(FastChargeController.nextFullChargeReleased(level = 99, previouslyReleased = false))
+        // 98% -> resumes fast charge
+        assertFalse(FastChargeController.nextFullChargeReleased(level = 98, previouslyReleased = true))
+
+        // Policy helper must never allow blocking charging nodes while fullChargeReleased is true
+        assertFalse(
+            FastChargeController.shouldBlockChargingNodes(
+                isWiredCharging = true,
+                isScreenOn = true,
+                isOverheated = false,
+                fullChargeReleased = true,
+            ),
+        )
+        assertTrue(
+            FastChargeController.shouldBlockChargingNodes(
+                isWiredCharging = true,
+                isScreenOn = true,
+                isOverheated = false,
+                fullChargeReleased = false,
+            ),
+        )
+    }
+
+    @Test
+    fun formatChargingStatusShowsRestoredNoticeWhenFullReleased() {
+        val withCurrent = FastChargeController.BatteryMetrics(
+            currentMa = 850,
+            voltageMv = 4450,
+            powerWatts = 3.78,
+            temperatureTenths = 335,
+            maxChipTempTenths = 345,
+        )
+        assertEquals(
+            "满电保护恢复原生温控 · 电量:100% 电流:850mA 电压:4.45V 功率:3.8W",
+            FastChargeNotifier.formatChargingStatus(
+                isScreenOn = true,
+                isOverheated = false,
+                level = 100,
+                metrics = withCurrent,
+                isFullReleased = true,
+            ),
+        )
+
+        val noCurrent = FastChargeController.BatteryMetrics(0, 4423, 0.0, 333, 344)
+        assertEquals(
+            "满电保护恢复原生温控 · 电量:100% 电压:4.42V",
+            FastChargeNotifier.formatChargingStatus(
+                isScreenOn = true,
+                isOverheated = false,
+                level = 100,
+                metrics = noCurrent,
+                isFullReleased = true,
+            ),
+        )
     }
 
     @Test

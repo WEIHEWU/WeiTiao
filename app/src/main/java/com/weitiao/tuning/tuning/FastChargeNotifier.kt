@@ -144,9 +144,27 @@ object FastChargeNotifier {
         isOverheated: Boolean,
         level: Int,
         metrics: FastChargeController.BatteryMetrics,
+        isFullReleased: Boolean = false,
     ): String = when {
         !isScreenOn -> String.format("息屏安全充 · 电量:%d%%", level)
         isOverheated -> String.format("高温保护恢复原生温控 · 电量:%d%%", level)
+        isFullReleased && metrics.currentMa > 0 && metrics.voltageMv > 0 -> {
+            String.format(
+                "满电保护恢复原生温控 · 电量:%d%% 电流:%dmA 电压:%.2fV 功率:%.1fW",
+                level,
+                metrics.currentMa,
+                metrics.voltageMv / 1000.0,
+                metrics.powerWatts,
+            )
+        }
+        isFullReleased && metrics.voltageMv > 0 -> {
+            String.format(
+                "满电保护恢复原生温控 · 电量:%d%% 电压:%.2fV",
+                level,
+                metrics.voltageMv / 1000.0,
+            )
+        }
+        isFullReleased -> String.format("满电保护恢复原生温控 · 电量:%d%%", level)
         metrics.currentMa > 0 && metrics.voltageMv > 0 -> {
             String.format(
                 "电量:%d%% 电流:%dmA 电压:%.2fV 功率:%.1fW",
