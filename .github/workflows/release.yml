@@ -24,26 +24,35 @@ jobs:
 
       - name: Verify APK & Generate SHA-256 Checksum
         run: |
-          test -f releases/WeiTiao-v1.6.0.apk
+          test -f releases/WeiTiao-v1.6.1.apk
           cd releases
-          sha256sum WeiTiao-v1.6.0.apk > WeiTiao-v1.6.0.apk.sha256
-          cat WeiTiao-v1.6.0.apk.sha256
+          sha256sum WeiTiao-v1.6.1.apk > WeiTiao-v1.6.1.apk.sha256
+          cat WeiTiao-v1.6.1.apk.sha256
 
       - name: Create GitHub Release and Upload APK + Checksum
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.6.0
-          name: "微调 WeiTiao v1.6.0 (满电自动归还原生温控 & 芯片温控熔断收紧)"
+          tag_name: v1.6.1
+          name: "微调 WeiTiao v1.6.1 (微信步数页简化、精确适配与配置同步诊断)"
           body: |
-            ### 微调 (WeiTiao) v1.6.0
+            ### 微调 (WeiTiao) v1.6.1 (`versionCode=41`)
 
-            - **满电自动归还系统原生温控 (`FastChargeController` / `BrightScreenFastChargeService` / `FastChargeWatchdog`)**：
-              - 新增 `100%` 满电释放 / `98%` 滞回恢复策略（`nextFullChargeReleased` 与 `shouldBlockChargingNodes`），在 `99%～100%` 满电/USB 调试插电期间不再屏蔽电池温度 sysfs 节点，确保系统 `ThermalHAL` 的 `BAT`/`SKIN` 保持真实温度与官方温控降频曲线。
-              - 前台服务与兜底任务 `FastChargeFallback.applyNow` 共享同一满电释放判定，防止兜底触发时误锁温控节点。
-            - **芯片温度熔断收紧 (`FastChargeController.isOverheated`)**：
-              - 将 AP/PA/CHG 芯片熔断上限收紧至 `(clampedCutoff + 3).coerceAtMost(47)`（`3.0°C` 回落滞回），缩小与官方 `SKIN` 降频曲线的温差盲区。
-            - **常驻通知状态提示 (`FastChargeNotifier`)**：
-              - 满电保护态下常驻通知显示 `满电保护恢复原生温控 · 电量:...`，直观反馈当前已自动交还系统温控。
+            - **微信步数页简化**：
+              - 主屏聚焦总开关、今日客户端步数与计划目标、目标中心设置以及手动「重启微信」按钮，一屏即可完成高频日常操作；
+              - 将「进阶参数」与「运行状态与排障」拆分为两张默认折叠卡片并支持独立展开；「每日计划」标为推荐，保留「真实步数倍率」与「旧版自动」并在非计划模式下于主屏展示当前模式参数与切回入口；
+              - 重启提示按实际生效规则说明，避免误导每次调整目标都必须重启微信。
+            - **快捷目标与数字输入**：
+              - 提供 `6,000 / 10,000 / 15,000 / 20,000` 快捷档与自定义数字输入框，键盘弹出前后快捷档及操作按钮均可直接使用；
+              - 自定义数字输入需显式点击「保存」才提交，点击「取消」立即恢复原值且不改动本地/远端配置与 `generation`。
+            - **配置同步诊断与客户端标注**：
+              - 细分配置同步、微信加载与当日计划更新状态（区分「仅本地保存，尚未同步到 LSPosed」「已同步到 LSPosed，微信待加载最新配置」「最新配置已加载，等待下一次计步读取」「配置同步状态未知」）；
+              - 主屏今日步数仅在存在今日有效快照时显示并明确标注「客户端」，不暗示服务端已接受。
+            - **Play 版微信 `8.0.80/3200` 精确模式（`EXACT`）已实测通过**：
+              - 基于 APK 摘要与实例方法签名校验启用精确适配，真机已验证：计划重建、首读无突跳、时间窗口内渐进增长，以及同签名覆盖安装与日常交互/取消编辑零漂移。
+            - **待验证项**：
+              - 显式「保存」改目标实机流程；
+              - 时间窗口结束后的自然增长与冻结行为；
+              - 微信运动上传入口与服务端排行榜结果。
           files: |
-            releases/WeiTiao-v1.6.0.apk
-            releases/WeiTiao-v1.6.0.apk.sha256
+            releases/WeiTiao-v1.6.1.apk
+            releases/WeiTiao-v1.6.1.apk.sha256
