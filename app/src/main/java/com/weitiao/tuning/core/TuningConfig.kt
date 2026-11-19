@@ -22,8 +22,67 @@ data class TuningConfig(
     val thermalCutoffCelsius: Int = 44,
     val passThrough: Boolean = false,
     val passThroughLimit: Int = 20,
+    val stepMode: String = if (stepAuto) MODE_PLAN else MODE_MULTIPLIER,
+    val stepTarget: Int = 20_000,
+    val stepJitter: Int = 10,
+    val stepWindowStart: Int = 420,
+    val stepWindowEnd: Int = 1230,
+    val stepAfterWindow: String = AFTER_NATURAL,
+    val stepGeneration: Long = 0L,
+    val stepBackend: String = BACKEND_SENSOR,
 ) {
+    fun normalized(): TuningConfig {
+        val start = stepWindowStart.coerceIn(0, 1439)
+        return copy(
+            stepMode = stepMode.takeIf { it in setOf(MODE_PLAN, MODE_MULTIPLIER, MODE_LEGACY_AUTO) }
+                ?: if (stepAuto) MODE_PLAN else MODE_MULTIPLIER,
+            stepTarget = stepTarget.coerceIn(1, 1_000_000),
+            stepJitter = stepJitter.coerceIn(0, 50),
+            stepWindowStart = start,
+            stepWindowEnd = stepWindowEnd.coerceIn(start + 1, 1440),
+            stepAfterWindow = if (stepAfterWindow == AFTER_FREEZE) AFTER_FREEZE else AFTER_NATURAL,
+            stepMultiplier = stepMultiplier.coerceIn(1, 10_000),
+            stepMaximum = stepMaximum.coerceIn(1, 1_000_000),
+            stepEndHour = stepEndHour.coerceIn(0, 24),
+            stepGeneration = stepGeneration.coerceAtLeast(0L),
+            stepBackend = stepBackend.takeIf { it in setOf(BACKEND_SENSOR, BACKEND_AUTO, BACKEND_EXACT) }
+                ?: BACKEND_SENSOR,
+        )
+    }
+
+    /** Ignore caller's stale generation; unrelated settings must retain the active daily plan. */
+    fun prepareForSave(previous: TuningConfig): TuningConfig {
+        val next = normalized()
+        val old = previous.normalized()
+        val changed = next.stepEnabled != old.stepEnabled || next.stepMode != old.stepMode ||
+            next.stepAuto != old.stepAuto || next.stepMultiplier != old.stepMultiplier ||
+            next.stepMaximum != old.stepMaximum || next.stepEndHour != old.stepEndHour ||
+            next.stepTarget != old.stepTarget || next.stepJitter != old.stepJitter ||
+            next.stepWindowStart != old.stepWindowStart || next.stepWindowEnd != old.stepWindowEnd ||
+            next.stepAfterWindow != old.stepAfterWindow || next.stepBackend != old.stepBackend
+        return next.copy(stepGeneration = if (changed) {
+            if (old.stepGeneration == Long.MAX_VALUE) 1L else old.stepGeneration + 1L
+        } else old.stepGeneration)
+    }
+
     companion object {
+        const val MODE_PLAN = "PLAN"
+        const val MODE_MULTIPLIER = "MULTIPLIER"
+        const val MODE_LEGACY_AUTO = "LEGACY_AUTO"
+        const val AFTER_NATURAL = "NATURAL"
+        const val AFTER_FREEZE = "FREEZE"
+        const val KEY_STEP_MODE = "tuning_wechat_step_mode"
+        const val KEY_STEP_TARGET = "tuning_wechat_step_target"
+        const val KEY_STEP_JITTER = "tuning_wechat_step_jitter"
+        const val KEY_STEP_WINDOW_START = "tuning_wechat_step_window_start"
+        const val KEY_STEP_WINDOW_END = "tuning_wechat_step_window_end"
+        const val KEY_STEP_AFTER_WINDOW = "tuning_wechat_step_after_window"
+        const val KEY_STEP_GENERATION = "tuning_wechat_step_generation"
+        const val BACKEND_SENSOR = "SENSOR"
+        const val BACKEND_AUTO = "AUTO"
+        const val BACKEND_EXACT = "EXACT"
+        const val KEY_STEP_BACKEND = "tuning_wechat_step_backend"
+
         const val MIN_THERMAL_CUTOFF_CELSIUS = 38
         const val MAX_THERMAL_CUTOFF_CELSIUS = 48
         const val DEFAULT_THERMAL_CUTOFF_CELSIUS = 44
@@ -45,15 +104,38 @@ data class TuningConfig(
             stepMultiplier = prefs.getInt(KEY_STEP_MULTIPLIER, 3).coerceIn(1, 10_000),
             stepMaximum = prefs.getInt(KEY_STEP_MAX, 28_000).coerceIn(1, 1_000_000),
             stepEndHour = prefs.getInt(KEY_STEP_END_HOUR, 24).coerceIn(0, 24),
+            stepMode = prefs.getString(KEY_STEP_MODE, null)
+                ?.takeIf { it in setOf(MODE_PLAN, MODE_MULTIPLIER, MODE_LEGACY_AUTO) }
+                ?: if (prefs.getBoolean(KEY_STEP_AUTO, true)) MODE_PLAN else MODE_MULTIPLIER,
+            stepTarget = prefs.getInt(KEY_STEP_TARGET, 20_000),
+            stepJitter = prefs.getInt(KEY_STEP_JITTER, 10),
+            stepWindowStart = prefs.getInt(KEY_STEP_WINDOW_START, 420),
+            stepWindowEnd = if (prefs.contains(KEY_STEP_WINDOW_END)) {
+                prefs.getInt(KEY_STEP_WINDOW_END, 1230)
+            } else if (prefs.contains(KEY_STEP_END_HOUR)) {
+                prefs.getInt(KEY_STEP_END_HOUR, 24).coerceIn(0, 24).let { if (it == 0) 1440 else it * 60 }
+            } else 1230,
+            stepAfterWindow = prefs.getString(KEY_STEP_AFTER_WINDOW, AFTER_NATURAL) ?: AFTER_NATURAL,
+            stepGeneration = prefs.getLong(KEY_STEP_GENERATION, 0L).coerceAtLeast(0L),
+            stepBackend = prefs.getString(KEY_STEP_BACKEND, BACKEND_SENSOR) ?: BACKEND_SENSOR,
             antiRecall = prefs.getBoolean(KEY_ANTI_RECALL, false),
             brightScreenFastCharge = prefs.getBoolean(KEY_FAST_CHARGE, false),
             thermalCutoffCelsius = prefs.getInt(KEY_THERMAL_CUTOFF, DEFAULT_THERMAL_CUTOFF_CELSIUS)
                 .coerceIn(MIN_THERMAL_CUTOFF_CELSIUS, MAX_THERMAL_CUTOFF_CELSIUS),
             passThrough = prefs.getBoolean(KEY_PASS_THROUGH, false),
             passThroughLimit = prefs.getInt(KEY_PASS_THROUGH_LIMIT, 20).coerceIn(0, 100),
-        )
+        ).normalized()
 
-        fun write(editor: SharedPreferences.Editor, config: TuningConfig) {
+        fun write(editor: SharedPreferences.Editor, value: TuningConfig) {
+            val config = value.normalized()
+            editor.putString(KEY_STEP_MODE, config.stepMode)
+            editor.putInt(KEY_STEP_TARGET, config.stepTarget)
+            editor.putInt(KEY_STEP_JITTER, config.stepJitter)
+            editor.putInt(KEY_STEP_WINDOW_START, config.stepWindowStart)
+            editor.putInt(KEY_STEP_WINDOW_END, config.stepWindowEnd)
+            editor.putString(KEY_STEP_AFTER_WINDOW, config.stepAfterWindow)
+            editor.putLong(KEY_STEP_GENERATION, config.stepGeneration)
+            editor.putString(KEY_STEP_BACKEND, config.stepBackend)
             editor.putBoolean(KEY_STEP_ENABLED, config.stepEnabled)
             editor.putBoolean(KEY_STEP_AUTO, config.stepAuto)
             editor.putInt(KEY_STEP_MULTIPLIER, config.stepMultiplier.coerceIn(1, 10_000))
@@ -71,9 +153,65 @@ data class TuningConfig(
     }
 }
 
+data class TuningSaveResult(
+    val config: TuningConfig,
+    val remoteSynced: Boolean,
+)
+
 object TuningPrefs {
     private const val APPS_PREFS = "tuning_pass_through_applications"
     private const val KEY_APPS = "tuning_pass_through_apps"
+    const val KEY_REMOTE_SYNC_OK = "local_config_remote_synced"
+
+    internal fun verifyRemoteConfigMatches(remote: SharedPreferences, expected: TuningConfig): Boolean {
+        if (!remote.contains(TuningConfig.KEY_STEP_GENERATION)) return false
+        val actual = TuningConfig.fromPrefs(remote)
+        return actual.stepEnabled == expected.stepEnabled &&
+            actual.stepMode == expected.stepMode &&
+            actual.stepBackend == expected.stepBackend &&
+            actual.stepTarget == expected.stepTarget &&
+            actual.stepJitter == expected.stepJitter &&
+            actual.stepWindowStart == expected.stepWindowStart &&
+            actual.stepWindowEnd == expected.stepWindowEnd &&
+            actual.stepAfterWindow == expected.stepAfterWindow &&
+            actual.stepMaximum == expected.stepMaximum &&
+            actual.stepMultiplier == expected.stepMultiplier &&
+            actual.stepGeneration == expected.stepGeneration &&
+            actual.antiRecall == expected.antiRecall
+    }
+
+    internal fun resolveRemoteSyncState(
+        local: SharedPreferences,
+        remote: SharedPreferences?,
+        expected: TuningConfig,
+    ): Boolean? {
+        if (remote != null) {
+            return local.getBoolean(KEY_REMOTE_SYNC_OK, true) && verifyRemoteConfigMatches(remote, expected)
+        }
+        return if (local.getLong(CscConstants.KEY_LOCAL_SAVED_AT, 0L) > 0L &&
+            !local.getBoolean(KEY_REMOTE_SYNC_OK, false)
+        ) {
+            false
+        } else {
+            null
+        }
+    }
+
+    fun remoteSyncState(context: Context, expected: TuningConfig = load(context)): Boolean? =
+        resolveRemoteSyncState(localPrefs(context), App.getRemotePrefs(), expected)
+
+    fun isRemoteSynced(context: Context, expected: TuningConfig = load(context)): Boolean {
+        val local = localPrefs(context)
+        val remote = App.getRemotePrefs()
+        if (remote != null) {
+            return local.getBoolean(KEY_REMOTE_SYNC_OK, true) && verifyRemoteConfigMatches(remote, expected)
+        }
+        return if (local.getLong(CscConstants.KEY_LOCAL_SAVED_AT, 0L) > 0L) {
+            local.getBoolean(KEY_REMOTE_SYNC_OK, false)
+        } else {
+            true
+        }
+    }
 
     fun load(context: Context): TuningConfig {
         // local 是用户在 App UI 操作的真相，优先使用。
@@ -93,23 +231,34 @@ object TuningPrefs {
         return TuningConfig()
     }
 
-    fun save(context: Context, config: TuningConfig) {
-        val previous = TuningConfig.fromPrefs(localPrefs(context))
-        App.getXposedService()?.getRemotePreferences(CscConstants.PREFS_NAME)?.edit()?.let { editor ->
-            TuningConfig.write(editor, config)
-            if (!editor.commit()) {
-                editor.apply()
-            }
+    fun saveWithStatus(context: Context, value: TuningConfig): TuningSaveResult {
+        val previous = load(context)
+        val config = value.prepareForSave(previous)
+        var remoteSynced = false
+        val remote = runCatching { App.getXposedService()?.getRemotePreferences(CscConstants.PREFS_NAME) }.getOrNull()
+        if (remote != null) {
+            remoteSynced = runCatching {
+                val editor = remote.edit()
+                TuningConfig.write(editor, config)
+                editor.commit() && verifyRemoteConfigMatches(remote, config)
+            }.onFailure {
+                android.util.Log.e("TuningPrefs", "写入 LSPosed remote preferences 失败", it)
+            }.getOrDefault(false)
         }
         localPrefs(context).edit().let { editor ->
             TuningConfig.write(editor, config)
             // 打上"本地被用户显式保存过"的标记。缺了它，App.onServiceBind 会认为
             // 本地是默认值而不敢拿它覆盖 remote，用户改的开关就推不到 hook。
             editor.putLong(CscConstants.KEY_LOCAL_SAVED_AT, System.currentTimeMillis())
+            editor.putBoolean(KEY_REMOTE_SYNC_OK, remoteSynced)
             editor.commit()
         }
         syncServices(context, previous, config)
+        return TuningSaveResult(config = config, remoteSynced = remoteSynced)
     }
+
+    fun save(context: Context, value: TuningConfig): TuningConfig =
+        saveWithStatus(context, value).config
 
     fun selectedApps(context: Context): Set<String> =
         context.getSharedPreferences(APPS_PREFS, Context.MODE_PRIVATE)

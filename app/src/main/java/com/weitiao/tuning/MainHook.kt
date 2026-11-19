@@ -54,19 +54,24 @@ class MainHook : XposedModule() {
         // 微信功能挂载：默认仅挂载微信步数与防撤回 Hook，绝不向微信注入 CSC / NativePropCow / Build 伪装
         // （除非用户显式将微信加入了分应用机型伪装目标）
         if (param.packageName == WECHAT_PACKAGE) {
-            WechatHooks(
-                install = { executable, interceptor ->
-                    hook(executable).intercept { chain -> interceptor(chain) }
-                },
-                config = { TuningConfigHolder.current(prefs) },
-                logger = { message, error ->
-                    log(
-                        if (error == null) Log.INFO else Log.WARN,
-                        TAG,
-                        if (error == null) "WeiTiao: $message" else "WeiTiao: $message: $error",
-                    )
-                },
-            ).register(param.classLoader, param.packageName)
+            val currentProcessName = WechatHooks.resolveCurrentProcessName(param.classLoader)
+            if (currentProcessName == WECHAT_PACKAGE) {
+                WechatHooks(
+                    install = { executable, interceptor ->
+                        hook(executable).intercept { chain -> interceptor(chain) }
+                    },
+                    config = { TuningConfigHolder.current(prefs) },
+                    logger = { message, error ->
+                        log(
+                            if (error == null) Log.INFO else Log.WARN,
+                            TAG,
+                            if (error == null) "WeiTiao: $message" else "WeiTiao: $message: $error",
+                        )
+                    },
+                ).register(param.classLoader, currentProcessName)
+            } else if (currentProcessName == null) {
+                log(Log.WARN, TAG, "WeiTiao: 无法获取当前进程名，跳过微信 Hook 安装")
+            }
             if (!isDeviceTarget(config, param.packageName)) {
                 return
             }

@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.ContentValues
 import android.content.Context
 import android.content.SharedPreferences
+import android.content.pm.PackageInfo
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -12,8 +13,19 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.SparseArray
+import com.weitiao.tuning.core.ApkDigestCache
+import com.weitiao.tuning.core.ApkDigestIdentity
 import com.weitiao.tuning.core.LocalWechatStepProvider
+import com.weitiao.tuning.core.SharedPrefsApkDigestStore
 import com.weitiao.tuning.core.SportKvStepReader
+import com.weitiao.tuning.core.ExactStepEngine
+import com.weitiao.tuning.core.ReviewedWechatAdaptations
+import com.weitiao.tuning.core.StepBackend
+import com.weitiao.tuning.core.StepBackendSelector
+import com.weitiao.tuning.core.ExactWechatResolver
+import com.weitiao.tuning.core.WechatVersion
+import com.weitiao.tuning.core.StepHookReporter
+import com.weitiao.tuning.core.StepPlanPolicy
 import com.weitiao.tuning.core.TuningConfig
 import dalvik.system.DexFile
 import io.github.libxposed.api.XposedInterface
@@ -59,7 +71,15 @@ internal class WechatHooks(
 
     @Volatile private var lastRawHardwareStep = 0f
 
-    private val stepEngine = WechatStepEngine(logger = logger)
+    @Volatile private var reporter: StepHookReporter? = null
+    @Volatile private var activeBackend = "SENSOR"
+    @Volatile private var backendReason = "通用传感器模式"
+    private val heartbeatStarted = AtomicBoolean()
+    @Volatile private var installedBackendRequest = "SENSOR"
+    private val stepEngine = WechatStepEngine(logger = { message, error ->
+        if (error != null) runCatching { reporter?.error(error) }
+        logger(message, error)
+    })
     @Volatile private var messageInsertMethod: Method? = null
     @Volatile private var messageStorage: Any? = null
 
@@ -70,7 +90,9 @@ internal class WechatHooks(
         @Volatile var templateEvent: SensorEvent? = null,
     )
 
-    fun register(classLoader: ClassLoader, processName: String) {
+    fun register(classLoader: ClassLoader, processName: String?) {
+        if (processName != "com.tencent.mm") return
+        if (config().stepBackend != "SENSOR") activeBackend = "PENDING"
         // 1. 传感器 Hook 立即安装（双层拦截，绝不等待 Application）
         installSensorManagerHook(classLoader)
         installSensorEventHook(classLoader)
@@ -103,6 +125,14 @@ internal class WechatHooks(
     private fun activate(context: Context, classLoader: ClassLoader, processName: String) {
         runCatching {
             val stepPrefs = context.getSharedPreferences(STEP_STATE_PREFS, Context.MODE_PRIVATE)
+            val info = context.packageManager.getPackageInfo(context.packageName, 0)
+            val versionCode = if (android.os.Build.VERSION.SDK_INT >= 28) info.longVersionCode else {
+                @Suppress("DEPRECATION")
+                info.versionCode.toLong()
+            }
+            reporter = StepHookReporter(stepPrefs, BuildConfig.VERSION_NAME, "${info.versionName}/$versionCode")
+            configureBackend(context, stepPrefs, classLoader, info, versionCode)
+            if (activeBackend == "EXACT") return@runCatching
             stepEngine.bindStateStore(PrefsStepStateStore(stepPrefs))
             val sportKvProvider = SportKvStepReader.fromFiles(
                 kvFile = File(context.filesDir, "mmkv/SportKv"),
@@ -112,14 +142,143 @@ internal class WechatHooks(
             if (restoredRaw > 0f && lastRawHardwareStep <= 0f) {
                 lastRawHardwareStep = restoredRaw
             }
-        }.onFailure { logger("初始化微信步数持久化状态失败", it) }
+        }.onFailure { activeBackend = "SENSOR"; backendReason = "初始化失败，已回退传感器"; logger("初始化微信步数持久化状态失败", it) }
 
+        startHeartbeat()
         installAntiRecallCore(classLoader)
         Thread({
             installMessageStorageHook(context, classLoader)
             installXmlParserHook(context, classLoader)
         }, "Tuning-WeChatScan").apply { isDaemon = true }.start()
         logger("微信防撤回与计步持久化已在 $processName 初始化", null)
+    }
+
+    private fun configureBackend(
+        context: Context,
+        prefs: SharedPreferences,
+        classLoader: ClassLoader,
+        packageInfo: PackageInfo,
+        versionCode: Long,
+    ) {
+        val versionName = packageInfo.versionName.orEmpty()
+        installedBackendRequest = config().stepBackend
+        val requested = runCatching { StepBackend.valueOf(installedBackendRequest) }.getOrDefault(StepBackend.SENSOR)
+        val version = WechatVersion(versionName, versionCode)
+        val descriptor = ReviewedWechatAdaptations.forVersion(version)
+        val digest = if (requested != StepBackend.SENSOR && descriptor != null) {
+            val apkFile = File(context.applicationInfo.sourceDir)
+            val identity = ApkDigestIdentity(
+                packageName = context.packageName.orEmpty(),
+                versionName = versionName,
+                versionCode = versionCode,
+                apkPath = apkFile.absolutePath,
+                lastUpdateTime = packageInfo.lastUpdateTime,
+                fileLength = apkFile.length(),
+                lastModified = apkFile.lastModified(),
+            )
+            // Cache only skips re-reading the APK stream when metadata matches; probe() always runs below.
+            ApkDigestCache.getOrCompute(identity, SharedPrefsApkDigestStore(prefs)) {
+                ApkDigestCache.sha256Hex(apkFile)
+            }
+        } else null
+        val resolution = if (requested != StepBackend.SENSOR) ExactWechatResolver().probe(classLoader, version, descriptor, digest) else null
+        val selection = StepBackendSelector.select(requested, resolution)
+        activeBackend = "SENSOR"
+        backendReason = selection.reason
+        if (!selection.installExact || config().stepMode != TuningConfig.MODE_PLAN) {
+            if (selection.installExact) backendReason = "精确模式当前仅支持每日计划，已回退传感器"
+            return
+        }
+        val candidate = resolution?.candidate ?: return
+        val localSteps = SportKvStepReader.fromFiles(File(context.filesDir, "mmkv/SportKv"))
+        val exact = ExactStepEngine(
+            load = {
+                val state = prefs.all.mapNotNull { (key, value) -> (value as? Long)?.let { key to it } }.toMap().toMutableMap()
+                val calendar = Calendar.getInstance()
+                val day = calendar.get(Calendar.YEAR) * 10000 + (calendar.get(Calendar.MONTH) + 1) * 100 + calendar.get(Calendar.DAY_OF_MONTH)
+                val local = localSteps.readToday(day)
+                if (local != null && local.todayKey == day) {
+                    if (state["plan_day"] != day.toLong()) state["step_current_delivered"] = 0L
+                    state["plan_day"] = day.toLong()
+                    state["step_current_delivered"] = maxOf(state["step_current_delivered"] ?: 0L, local.todaySteps)
+                    if (state["exact_day"] == day.toLong()) state["exact_peak"] = maxOf(state["exact_peak"] ?: 0L, local.todaySteps)
+                }
+                state
+            },
+            save = { state ->
+                val editor = prefs.edit()
+                state.forEach { (key, value) -> editor.putLong(key, value) }
+                check(editor.commit()) { "精确步数状态持久化失败" }
+            },
+        )
+        try {
+            install(candidate.read) { chain ->
+                val original = chain.proceed() as? Long ?: return@install null
+                if (activeBackend != "EXACT") return@install original
+                val cfg = config()
+                if (cfg.stepMode != TuningConfig.MODE_PLAN) return@install original
+                val effective = runCatching { exact.evaluate(original, cfg, true) }.getOrElse { error ->
+                    runCatching { reporter?.error(error) }; original
+                }
+                runCatching {
+                    reporter?.event(
+                        original.toFloat(),
+                        effective.toFloat(),
+                        false,
+                        cfg.stepMode,
+                        cfg.stepBackend,
+                        cfg.stepGeneration,
+                    )
+                }
+                effective
+            }
+            install(candidate.upload) { chain ->
+                val original = chain.getArg(0) as? Long ?: return@install chain.proceed()
+                if (activeBackend != "EXACT") return@install chain.proceed()
+                val cfg = config()
+                val effective = runCatching { exact.evaluate(original, cfg, false) }.getOrElse { error ->
+                    runCatching { reporter?.error(error) }; original
+                }
+                val args = chain.args.toTypedArray()
+                args[0] = effective
+                chain.proceed(args)
+            }
+            // Both callbacks are installed before enabling their write gate; sensor callbacks remain passthrough.
+            activeBackend = "EXACT"
+            backendReason = "Play 版微信 8.0.80 / 3200 已通过真机验证：计划重建、首读无突跳、窗口内渐进增长。"
+        } catch (error: Exception) {
+            activeBackend = "SENSOR"
+            backendReason = "精确Hook安装失败，已回退传感器：${error.javaClass.simpleName}"
+            runCatching { reporter?.error(error) }
+        }
+    }
+
+    private fun startHeartbeat() {
+        if (!heartbeatStarted.compareAndSet(false, true)) return
+        fun publish() = runCatching {
+            val cfg = config()
+            val reason = when {
+                cfg.stepBackend != installedBackendRequest -> "后端设置已变更，请重启微信应用；当前仍使用 $activeBackend"
+                activeBackend == "EXACT" && cfg.stepMode != TuningConfig.MODE_PLAN -> "精确模式仅支持每日计划；更改模式后请重启微信，当前业务Hook放行原值"
+                else -> backendReason
+            }
+            reporter?.heartbeat(
+                cfg.stepEnabled,
+                activeBackend,
+                reason,
+                activeBackend == "EXACT" || stepEngine.hasHardwareReading(),
+                cfg.stepMode,
+                cfg.stepBackend,
+                cfg.stepGeneration,
+            )
+        }
+        publish()
+        Thread({
+            while (!Thread.currentThread().isInterrupted) {
+                try { Thread.sleep(60_000L) } catch (_: InterruptedException) { break }
+                publish()
+            }
+        }, "WeiTiao-StepHeartbeat").apply { isDaemon = true }.start()
     }
 
     /**
@@ -259,7 +418,20 @@ internal class WechatHooks(
 
                 val cfg = config()
                 if (cfg.stepEnabled && processedInDispatchQueue.get() != true) {
-                    stepEngine.process(values, isStepDetector, cfg, isLiveWechatHook = true)
+                    if (activeBackend == "SENSOR") {
+                        val original = values[0]
+                        stepEngine.process(values, isStepDetector, cfg, isLiveWechatHook = true)
+                        runCatching {
+                            reporter?.event(
+                                original,
+                                values[0],
+                                syntheticDispatchInProgress.get() == true,
+                                cfg.stepMode,
+                                cfg.stepBackend,
+                                cfg.stepGeneration,
+                            )
+                        }
+                    }
                 }
                 chain.proceed()
             }
@@ -285,7 +457,7 @@ internal class WechatHooks(
                 try {
                     Thread.sleep(AUTO_TICK_INTERVAL_MS)
                     val cfg = config()
-                    if (!cfg.stepEnabled || !stepEngine.shouldDispatchAutoTick(cfg)) {
+                    if (activeBackend != "SENSOR" || !cfg.stepEnabled || !stepEngine.shouldDispatchAutoTick(cfg)) {
                         continue
                     }
                     val currentRawHw = lastRawHardwareStep.takeIf { it > 0f }
@@ -423,7 +595,20 @@ internal class WechatHooks(
                         return@install chain.proceed()
                     }
 
-                    stepEngine.process(values, isStepDetector, cfg, isLiveWechatHook = true)
+                    if (activeBackend == "SENSOR") {
+                        val original = values[0]
+                        stepEngine.process(values, isStepDetector, cfg, isLiveWechatHook = true)
+                        runCatching {
+                            reporter?.event(
+                                original,
+                                values[0],
+                                false,
+                                cfg.stepMode,
+                                cfg.stepBackend,
+                                cfg.stepGeneration,
+                            )
+                        }
+                    }
 
                     processedInDispatchQueue.set(true)
                     try {
@@ -453,6 +638,7 @@ internal class WechatHooks(
         fun getLong(key: String, default: Long): Long
         fun getFloat(key: String, default: Float): Float
         fun getBoolean(key: String, default: Boolean): Boolean
+        fun savePlan(values: Map<String, Long>) {}
         fun saveState(
             todayKey: Int,
             baseHardwareRaw: Float,
@@ -471,6 +657,12 @@ internal class WechatHooks(
         override fun getFloat(key: String, default: Float): Float = prefs.getFloat(key, default)
         override fun getBoolean(key: String, default: Boolean): Boolean = prefs.getBoolean(key, default)
 
+        private var pendingPlan: Map<String, Long> = emptyMap()
+
+        override fun savePlan(values: Map<String, Long>) {
+            pendingPlan = values.toMap()
+        }
+
         override fun saveState(
             todayKey: Int,
             baseHardwareRaw: Float,
@@ -479,7 +671,11 @@ internal class WechatHooks(
             lastOutput: Float,
             baselineEstablished: Boolean,
         ) {
-            prefs.edit()
+            val editor = prefs.edit()
+            pendingPlan.forEach { (key, value) -> editor.putLong(key, value) }
+            if (!pendingPlan.containsKey("step_real_today")) editor.remove("step_real_today")
+            if (!pendingPlan.containsKey("daily_target")) editor.remove("daily_target")
+            editor
                 .putInt(KEY_STATE_TODAY, todayKey)
                 .putFloat(KEY_STATE_BASE_RAW, baseHardwareRaw)
                 .putFloat(KEY_STATE_LAST_RAW, lastHardwareRaw)
@@ -503,6 +699,7 @@ internal class WechatHooks(
      */
     internal class WechatStepEngine(
         @Volatile private var stateStore: StepStateStore? = null,
+        private val clock: () -> Long = System::currentTimeMillis,
         private val logger: (String, Throwable?) -> Unit,
     ) {
         @Volatile private var localStepProvider: LocalWechatStepProvider? = null
@@ -520,13 +717,19 @@ internal class WechatHooks(
         @Volatile private var emittedMaxOutput = Float.NaN
         @Volatile private var lastLocalSyncLogKey = ""
 
+        private val plan = mutableMapOf<String, Long>()
+        private var policyErrorLogged = false
+        private var needsRecoveryAnchor = false
+
         init {
+            loadPlan()
             stateStore?.let { syncFromStoreLocked(it) }
         }
 
         @Synchronized
         fun bindStateStore(store: StepStateStore) {
             this.stateStore = store
+            loadPlan()
             syncFromStoreLocked(store)
             reconcileWithLocalWechatLocked(currentDayKey(), raw = 0f)
         }
@@ -569,19 +772,23 @@ internal class WechatHooks(
         fun shouldDispatchAutoTick(cfg: TuningConfig): Boolean {
             if (!cfg.stepEnabled) return false
             if (!hasHardwareReading()) return false
-            val calendar = Calendar.getInstance()
-            val currentHour = calendar.get(Calendar.HOUR_OF_DAY)
-            val endHour = if (cfg.stepEndHour <= 0) 24 else cfg.stepEndHour.coerceIn(1, 24)
-            if (currentHour >= endHour) return false
+            val calendar = Calendar.getInstance().apply { timeInMillis = clock() }
             val today = currentDayKey(calendar)
+            if (todayKey != today) return true // Let process reset the day before reconciling SportKv.
             stateStore?.let { syncFromStoreLocked(it, today) }
             reconcileWithLocalWechatLocked(today, raw = 0f)
-            val maxCap = cfg.stepMaximum.coerceAtLeast(1).toLong()
-            if (currentDelivered >= maxCap) return false
-            return cfg.stepAuto || pendingSteps > 0L || !baselineEstablished
+            if (currentDelivered >= cfg.stepMaximum.coerceAtLeast(1)) return false
+            if (cfg.stepMode == "PLAN") {
+                val minute = calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE)
+                return minute in cfg.stepWindowStart until cfg.stepWindowEnd ||
+                    (minute >= cfg.stepWindowEnd && (plan["plan_phase"] == 1L || currentDelivered < (plan["end_floor"] ?: 0L)))
+            }
+            val minute = calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE)
+            if (minute >= cfg.stepWindowEnd && cfg.stepAfterWindow == "FREEZE") return false
+            return (minute < cfg.stepWindowEnd && cfg.stepMode == "LEGACY_AUTO") || pendingSteps > 0L || !baselineEstablished
         }
 
-        private fun currentDayKey(calendar: Calendar = Calendar.getInstance()): Int =
+        private fun currentDayKey(calendar: Calendar = Calendar.getInstance().apply { timeInMillis = clock() }): Int =
             calendar.get(Calendar.YEAR) * 10000 +
                 (calendar.get(Calendar.MONTH) + 1) * 100 +
                 calendar.get(Calendar.DAY_OF_MONTH)
@@ -718,7 +925,8 @@ internal class WechatHooks(
         }
 
         private fun persistToStoreLocked() {
-            lastSavedAtMs = System.currentTimeMillis()
+            lastSavedAtMs = clock()
+            stateStore?.savePlan(plan)
             stateStore?.saveState(
                 todayKey = todayKey,
                 baseHardwareRaw = baseHardwareRaw,
@@ -729,17 +937,107 @@ internal class WechatHooks(
             )
         }
 
+        private fun loadPlan() {
+            val store = stateStore ?: return
+            for (key in listOf("plan_day", "plan_gen", "seed", "start_at", "end_at", "start_real", "start_value",
+                "daily_target", "natural_real", "step_real_today", "plan_schema", "plan_signature", "plan_phase", "end_floor")) {
+                plan[key] = store.getLong(key, 0L)
+            }
+        }
+
+        private fun planValue(cfg: TuningConfig, now: Long, today: Int, delta: Long): Long {
+            if (plan["plan_day"] != today.toLong()) {
+                val seed = plan["seed"] ?: 0L
+                plan.clear()
+                plan["seed"] = seed
+                plan["plan_day"] = today.toLong()
+            }
+            val real = ((plan["step_real_today"] ?: 0L) + delta).coerceAtLeast(0L)
+            plan["step_real_today"] = real
+            val cap = cfg.stepMaximum.coerceAtLeast(1)
+            val signature = listOf(cfg.stepMode, cfg.stepTarget, cfg.stepJitter, cfg.stepWindowStart,
+                cfg.stepWindowEnd, cfg.stepAfterWindow, cfg.stepMultiplier, cap).joinToString(":").hashCode().toLong()
+            val cal = Calendar.getInstance().apply { timeInMillis = now }
+            fun atMinute(minute: Int): Long = (cal.clone() as Calendar).apply {
+                set(Calendar.HOUR_OF_DAY, minute / 60); set(Calendar.MINUTE, minute % 60)
+                set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+            }.timeInMillis
+            val windowStart = atMinute(cfg.stepWindowStart.coerceIn(0, 1439))
+            val windowEnd = atMinute(cfg.stepWindowEnd.coerceIn(cfg.stepWindowStart.coerceIn(0, 1439) + 1, 1440))
+            val invalid = plan["plan_schema"] != 1L || plan["plan_gen"] != cfg.stepGeneration ||
+                plan["plan_signature"] != signature || (plan["daily_target"] ?: 0L) !in 1L..cap.toLong() ||
+                (plan["end_at"] ?: 0L) != windowEnd || (plan["start_at"] ?: 0L) !in windowStart..windowEnd ||
+                (plan["start_value"] ?: -1L) < 0L || (plan["start_real"] ?: -1L) < 0L ||
+                (plan["natural_real"] ?: -1L) < 0L
+            if (invalid) {
+                if ((plan["seed"] ?: 0L) == 0L) plan["seed"] = java.security.SecureRandom().nextLong().let { if (it == 0L) 1L else it }
+                plan["plan_schema"] = 1L
+                plan["plan_gen"] = cfg.stepGeneration
+                plan["plan_signature"] = signature
+                plan["start_at"] = maxOf(now, windowStart).coerceAtMost(windowEnd)
+                plan["end_at"] = windowEnd
+                plan["start_real"] = real
+                plan["start_value"] = currentDelivered
+                plan["natural_real"] = real
+                val epochDay = java.time.Instant.ofEpochMilli(now).atZone(java.time.ZoneId.systemDefault()).toLocalDate().toEpochDay()
+                plan["daily_target"] = StepPlanPolicy.dailyTarget(cfg.stepTarget, cfg.stepJitter, plan.getValue("seed"), epochDay, cap).toLong()
+                plan["end_floor"] = currentDelivered
+                plan["plan_phase"] = if (now < windowEnd) 1L else 2L
+                // A settings change must not swallow walking observed in this same event.
+                val naturalGain = if ((now < windowStart || now >= windowEnd) &&
+                    !(now >= windowEnd && cfg.stepAfterWindow == "FREEZE")) delta else 0L
+                val initial = (currentDelivered + naturalGain).coerceAtMost(cap.toLong())
+                plan["end_floor"] = maxOf(currentDelivered, initial)
+                return maxOf(currentDelivered, initial)
+            }
+            val result = if (now >= windowStart && now < windowEnd) {
+                plan["natural_real"] = real
+                StepPlanPolicy.planned(real, now, plan.getValue("start_at"), windowEnd,
+                    plan.getValue("start_real"), plan.getValue("start_value"), currentDelivered, plan.getValue("daily_target").toInt())
+            } else {
+                var peak = currentDelivered
+                if (now >= windowEnd && plan["plan_phase"] == 1L) {
+                    // Settle the last window interval, even when the first wake-up is after the cutoff.
+                    peak = maxOf(peak, plan.getValue("daily_target"))
+                    plan["end_floor"] = peak
+                    plan["plan_phase"] = 2L
+                }
+                if (now >= windowEnd) peak = maxOf(peak, plan["end_floor"] ?: 0L)
+                val value = if (now >= windowEnd && cfg.stepAfterWindow == "FREEZE") peak
+                    else StepPlanPolicy.natural(real, plan["natural_real"] ?: real, peak, 1, cap.toLong())
+                plan["natural_real"] = real
+                if (now >= windowEnd) plan["end_floor"] = value
+                value
+            }
+            return result.coerceAtMost(cap.toLong())
+        }
+
         @Synchronized
-        fun process(
+        fun process(values: FloatArray, isDetector: Boolean, cfg: TuningConfig, isLiveWechatHook: Boolean = false) {
+            if (values.isEmpty() || !values[0].isFinite()) return
+            val original = values[0]
+            try {
+                processInternal(values, isDetector, cfg, isLiveWechatHook)
+            } catch (error: Exception) {
+                values[0] = original
+                // Re-anchor on recovery instead of adding uncommitted gains to an old sensor value.
+                baselineEstablished = false
+                needsRecoveryAnchor = true
+                plan["plan_schema"] = 0L
+                if (!policyErrorLogged) { policyErrorLogged = true; logger("微信步数计算失败，已放行原始步数", error) }
+            }
+        }
+
+        private fun processInternal(
             values: FloatArray,
             isDetector: Boolean,
             cfg: TuningConfig,
             isLiveWechatHook: Boolean = false,
         ) {
             if (!cfg.stepEnabled) return
-            val calendar = Calendar.getInstance()
+            val calendar = Calendar.getInstance().apply { timeInMillis = clock() }
             val currentHour = calendar.get(Calendar.HOUR_OF_DAY)
-            val endHour = if (cfg.stepEndHour <= 0) 24 else cfg.stepEndHour.coerceIn(1, 24)
+            val minute = currentHour * 60 + calendar.get(Calendar.MINUTE)
             val today = currentDayKey(calendar)
 
             stateStore?.let { syncFromStoreLocked(it, today) }
@@ -761,7 +1059,7 @@ internal class WechatHooks(
             if (todayKey != today) {
                 todayKey = today
                 baseHardwareRaw = maxOf(lastOutput, raw)
-                lastHardwareRaw = raw
+                if (!isDetector) lastHardwareRaw = raw
                 currentDelivered = 0L
                 pendingSteps = 0L
                 baselineEstablished = false
@@ -778,8 +1076,45 @@ internal class WechatHooks(
                 lastHardwareRaw = raw
             }
 
+            if (needsRecoveryAnchor && !isDetector) {
+                lastOutput = raw
+                lastHardwareRaw = raw
+                baselineEstablished = false
+                needsRecoveryAnchor = false
+            }
+
+            if (cfg.stepMode == "PLAN") {
+                // Counter and detector are alternate sources; never count the same walk twice.
+                if (isDetector && hasHardwareReading()) { values[0] = 0f; return }
+                val delta = if (isDetector) 1L else if (baselineEstablished && lastHardwareRaw > 0f)
+                    (raw - lastHardwareRaw).takeIf { it > 0f && it < 500f }?.toLong() ?: 0L else 0L
+                if (!isDetector && !baselineEstablished) {
+                    baselineEstablished = true
+                    lastOutput = maxOf(lastOutput, raw)
+                    lastHardwareRaw = raw
+                }
+                val desired = planValue(cfg, calendar.timeInMillis, today, delta)
+                val gain = (desired - currentDelivered).coerceIn(0L, MAX_LIVE_EVENT_STEP_GAIN)
+                    .coerceAtMost((maxCap - currentDelivered).coerceAtLeast(0L))
+                currentDelivered += gain
+                if (isDetector) values[0] = gain.toFloat() else {
+                    lastHardwareRaw = raw
+                    lastOutput += gain.toFloat()
+                    baseHardwareRaw = lastOutput - currentDelivered.toFloat()
+                    values[0] = lastOutput
+                    recordEmittedOutputLocked(lastOutput)
+                }
+                persistToStoreLocked()
+                return
+            }
+
+            plan["plan_day"] = 0L
+            plan["plan_gen"] = cfg.stepGeneration
+            plan.remove("step_real_today")
+            plan.remove("daily_target")
+
             // 截止时间判定：到达或超过截止小时，冻结增加步数
-            if (currentHour >= endHour) {
+            if (minute >= cfg.stepWindowEnd && cfg.stepAfterWindow == "FREEZE") {
                 if (!isDetector && raw > 0f) {
                     lastHardwareRaw = raw
                 }
@@ -825,7 +1160,7 @@ internal class WechatHooks(
                 }
 
                 var gain = 0L
-                if (cfg.stepAuto) {
+                if (cfg.stepMode == "LEGACY_AUTO" && minute < cfg.stepWindowEnd) {
                     // 自动步数模式：每个传感器事件平滑递增增量
                     if (currentDelivered < maxCap) {
                         val stepPerEvent = if (isLiveWechatHook) {
@@ -1252,7 +1587,33 @@ internal class WechatHooks(
     }
 
     internal companion object {
-        const val AUTO_TICK_INTERVAL_MS = 1200L
+        internal fun forProcessTest(
+            config: () -> TuningConfig,
+            logger: (String, Throwable?) -> Unit,
+        ): WechatHooks = WechatHooks(
+            install = { _, _ -> },
+            config = config,
+            logger = logger,
+        )
+
+        fun resolveCurrentProcessName(classLoader: ClassLoader? = null): String? {
+            if (android.os.Build.VERSION.SDK_INT >= 28) {
+                runCatching { Application.getProcessName() }.getOrNull()?.takeIf { it.isNotBlank() }?.let { return it }
+            }
+            runCatching {
+                val atClass = Class.forName("android.app.ActivityThread", false, classLoader ?: WechatHooks::class.java.classLoader)
+                val method = atClass.getDeclaredMethod("currentProcessName").apply { isAccessible = true }
+                method.invoke(null) as? String
+            }.getOrNull()?.takeIf { it.isNotBlank() }?.let { return it }
+            runCatching {
+                val bytes = File("/proc/self/cmdline").readBytes()
+                val end = bytes.indexOf(0.toByte()).let { if (it >= 0) it else bytes.size }
+                String(bytes, 0, end, Charsets.UTF_8).trim()
+            }.getOrNull()?.takeIf { it.isNotBlank() }?.let { return it }
+            return null
+        }
+
+        const val AUTO_TICK_INTERVAL_MS = 30_000L
         const val MAX_LIVE_EVENT_STEP_GAIN = 2_000L
 
         const val STEP_STATE_PREFS = "weitiao_step_state"

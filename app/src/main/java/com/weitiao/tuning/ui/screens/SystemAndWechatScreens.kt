@@ -22,7 +22,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.filled.Apps
@@ -51,13 +53,19 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.drawable.toBitmap
 import com.weitiao.tuning.R
+import com.weitiao.tuning.WechatHooks
 import com.weitiao.tuning.core.CscConfig
+import com.weitiao.tuning.App
+import com.weitiao.tuning.core.LsposedScopeHelper
+import com.weitiao.tuning.core.StepHookStatus
+import com.weitiao.tuning.core.HeartbeatHealth
 import com.weitiao.tuning.core.RootShell
 import com.weitiao.tuning.core.TuningConfig
 import com.weitiao.tuning.core.TuningPrefs
@@ -106,7 +114,36 @@ internal fun WechatEnhancementDetailContent(
     val numberFmt = remember { NumberFormat.getIntegerInstance() }
     var multiplierDraft by remember(tuning.stepMultiplier) { mutableFloatStateOf(tuning.stepMultiplier.toFloat()) }
     var maxStepDraft by remember(tuning.stepMaximum) { mutableFloatStateOf(tuning.stepMaximum.toFloat()) }
-    var endHourDraft by remember(tuning.stepEndHour) { mutableFloatStateOf(tuning.stepEndHour.toFloat()) }
+    var targetInputText by remember(tuning.stepTarget) { mutableStateOf(tuning.stepTarget.toString()) }
+    var targetInputError by remember(tuning.stepTarget) { mutableStateOf<String?>(null) }
+    var jitterDraft by remember(tuning.stepJitter) { mutableFloatStateOf(tuning.stepJitter.toFloat()) }
+    var startDraft by remember(tuning.stepWindowStart) { mutableFloatStateOf(tuning.stepWindowStart.toFloat()) }
+    var endDraft by remember(tuning.stepWindowEnd) { mutableFloatStateOf(tuning.stepWindowEnd.toFloat()) }
+    var preview by remember { mutableStateOf<WechatStepPreview?>(null) }
+    var previewRefresh by remember { mutableStateOf(0) }
+    var statusNow by remember { mutableStateOf(System.currentTimeMillis()) }
+    var diagnostics by remember { mutableStateOf<StepHookStatus?>(null) }
+    var wechatInScope by remember { mutableStateOf<Boolean?>(null) }
+    var scopeMessage by remember { mutableStateOf("") }
+    var remoteSynced by remember { mutableStateOf<Boolean?>(null) }
+    var planUpdated by remember { mutableStateOf<Boolean?>(null) }
+    val coroutineScope = rememberCoroutineScope()
+    LaunchedEffect(hasRoot, tuning, previewRefresh) {
+        val currentConfig = withContext(Dispatchers.IO) { TuningPrefs.load(context) }
+        remoteSynced = withContext(Dispatchers.IO) { TuningPrefs.remoteSyncState(context, tuning) }
+        val persisted = if (hasRoot) withContext(Dispatchers.IO) { readWechatStepState() } else null
+        diagnostics = persisted?.status
+        preview = persisted?.preview(currentConfig)
+        planUpdated = persisted?.isTodayPlanUpdated(currentConfig)
+        wechatInScope = LsposedScopeHelper.isPackageInScope("com.tencent.mm")
+        statusNow = System.currentTimeMillis()
+    }
+    LaunchedEffect(hasRoot) {
+        while (hasRoot) {
+            kotlinx.coroutines.delay(30_000L)
+            previewRefresh++
+        }
+    }
 
     OneUiSegmentedControl(
         items = listOf(0, 1),
@@ -122,179 +159,536 @@ internal fun WechatEnhancementDetailContent(
     )
 
     if (initialSubTab == 0) {
+        val effectiveTargetForCap = parseStepTargetInput(targetInputText) ?: tuning.stepTarget
+        val capWarning = if (tuning.stepEnabled && tuning.stepMode == TuningConfig.MODE_PLAN) {
+            stepHardCapWarning(effectiveTargetForCap, jitterDraft.toInt(), maxStepDraft.toInt(), isZh)
+        } else {
+            null
+        }
+        val health = diagnostics?.heartbeatHealth(hasRoot, statusNow) ?: HeartbeatHealth.UNKNOWN
+
         OneUiIslandCard {
             OneUiItemRow(
                 title = if (isZh) "启用微信步数修改" else "Enable WeChat Step Modifier",
-                subtitle = if (tuning.stepEnabled) {
-                    if (isZh) {
-                        val modeLabel = if (tuning.stepAuto) "自动递增" else "固定放大"
-                        "已开启 · $modeLabel · ${tuning.stepMultiplier}倍（上限 ${numberFmt.format(tuning.stepMaximum)} 步）"
-                    } else {
-                        "Active · ${tuning.stepMultiplier}x (Cap ${numberFmt.format(tuning.stepMaximum)})"
-                    }
-                } else {
-                    if (isZh) "已关闭，微信运动读取系统原始计步传感器步数"
-                    else "Disabled. WeChat reads real step sensor data"
+                subtitle = if (tuning.stepEnabled) stepModeSummary(tuning, isZh) else {
+                    if (isZh) "已关闭，微信运动读取系统原始计步数据"
+                    else "Disabled. WeChat uses original step data"
                 },
                 icon = Icons.AutoMirrored.Filled.DirectionsRun,
                 iconTint = IosGlassTokens.IosGreen,
                 checked = tuning.stepEnabled,
                 onCheckedChange = { enabled ->
-                    onUpdateTuning(
-                        if (enabled) {
-                            if (isZh) "已开启微信步数修改" else "WeChat step modifier enabled"
-                        } else {
-                            if (isZh) "已关闭微信步数修改" else "WeChat step modifier disabled"
-                        },
-                    ) { it.copy(stepEnabled = enabled) }
+                    if (enabled != tuning.stepEnabled) {
+                        onUpdateTuning(
+                            if (enabled) {
+                                if (isZh) "已开启微信步数修改" else "WeChat step modifier enabled"
+                            } else {
+                                if (isZh) "已关闭微信步数修改" else "WeChat step modifier disabled"
+                            },
+                        ) { it.copy(stepEnabled = enabled) }
+                    }
                 },
             )
-        }
-
-        // 常用档位始终可见：支持一键点选直接开启并套用档位参数
-        OneUiIslandCard(
-            title = if (isZh) "常用档位一键选择" else "Quick Step Presets",
-            subtitle = if (tuning.stepEnabled) {
-                if (isZh) "自动匹配推荐倍率与每日封顶步数" else "Automatically sets recommended multiplier and daily cap"
-            } else {
-                if (isZh) "点击任意档位即可直接开启步数修改并套用参数" else "Tap any preset below to enable and apply in one step"
-            },
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                STEP_QUICK_TIERS.forEach { tier ->
-                    val isSelected = tuning.stepEnabled &&
-                        tuning.stepMultiplier == tier.multiplier &&
-                        tuning.stepMaximum == tier.recommendedCap
-                    FeatureSelectTile(
-                        title = if (isZh) tier.titleZh else tier.titleEn,
-                        subtitle = if (isZh) "上限 ${tier.recommendedCap / 10000.0}万" else "Cap ${tier.recommendedCap}",
-                        selected = isSelected,
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            multiplierDraft = tier.multiplier.toFloat()
-                            maxStepDraft = tier.recommendedCap.toFloat()
-                            onUpdateTuning(context.getString(R.string.saved_toast)) {
-                                it.copy(
-                                    stepEnabled = true,
-                                    stepMultiplier = tier.multiplier,
-                                    stepMaximum = tier.recommendedCap,
-                                )
-                            }
-                        },
-                    )
-                }
+            if (remoteSynced == false) {
+                Text(
+                    text = if (isZh) "仅本地保存，尚未同步到 LSPosed（请检查 LSPosed 模块状态）"
+                    else "Saved locally only; not synced to LSPosed (check LSPosed module status)",
+                    fontSize = 11.5.sp,
+                    color = IosGlassTokens.IosAmber,
+                )
+            }
+            val todayLine = if (tuning.stepEnabled) stepMainTodaySnapshotLine(preview, isZh, numberFmt) else null
+            if (todayLine != null) {
+                Text(
+                    text = todayLine,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = IosGlassTokens.IosGreen,
+                )
+                Text(
+                    text = if (isZh) "仅客户端读取记录，不代表服务器已接受" else "Client read record only; does not imply server acceptance",
+                    fontSize = 11.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
             }
         }
 
         if (tuning.stepEnabled) {
-            OneUiIslandCard(
-                title = if (isZh) "生效方式与每日上限" else "Mode & Daily Cap",
-            ) {
-                OneUiItemRow(
-                    title = if (isZh) "随时间平滑递增（推荐）" else "Smooth Time-Based Auto Increment",
-                    subtitle = if (tuning.stepAuto) {
-                        if (isZh) "根据全天时间进度结合真实走路自动平滑累加步数，更自然"
-                        else "Smoothly increments steps throughout the day alongside real walking"
-                    } else {
-                        if (isZh) "当前为固定倍率模式：每次真实走动直接乘上倍率"
-                        else "Fixed multiplier mode: multiplies each real step directly"
-                    },
-                    checked = tuning.stepAuto,
-                    onCheckedChange = { auto ->
-                        onUpdateTuning(null) { it.copy(stepAuto = auto) }
-                    },
-                )
+            val paramCardTitle = stepParameterCardTitle(tuning.stepMode, isZh)
+            if (tuning.stepMode == TuningConfig.MODE_PLAN) {
+                OneUiIslandCard(title = paramCardTitle) {
+                    Text(
+                        text = if (isZh) {
+                            "当前目标中心：${numberFmt.format(tuning.stepTarget)} 步（按时间窗口平滑推进，真实步数更高时保留较高值）"
+                        } else {
+                            "Current target center: ${numberFmt.format(tuning.stepTarget)} (smooth progression in window; higher real steps preserved)"
+                        },
+                        fontSize = 11.5.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        STEP_TARGET_PRESETS.forEach { preset ->
+                            val selected = tuning.stepTarget == preset
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(34.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (selected) IosGlassTokens.activeTileBg() else MiuixTheme.colorScheme.secondaryContainer)
+                                    .clickable {
+                                        targetInputText = preset.toString()
+                                        targetInputError = null
+                                        if (preset != tuning.stepTarget) {
+                                            onUpdateTuning(
+                                                if (isZh) "已设为 ${numberFmt.format(preset)} 步"
+                                                else "Target set to ${numberFmt.format(preset)}",
+                                            ) { it.copy(stepTarget = preset) }
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = numberFmt.format(preset),
+                                    fontSize = 12.sp,
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                    color = if (selected) IosGlassTokens.activeTileFg() else MiuixTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                )
+                            }
+                        }
+                    }
+                    TextField(
+                        value = targetInputText,
+                        onValueChange = { raw ->
+                            targetInputText = raw.filter(Char::isDigit).take(6)
+                            targetInputError = null
+                        },
+                        label = if (isZh) "自定义目标步数（如 10000）" else "Custom target steps (e.g. 10000)",
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        insideMargin = DpSize(12.dp, 10.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    val isDirty = targetInputText != tuning.stepTarget.toString()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        TextButton(
+                            text = if (isZh) "保存" else "Save",
+                            enabled = isDirty,
+                            onClick = {
+                                val parsed = parseStepTargetInput(targetInputText)
+                                when {
+                                    parsed == null -> {
+                                        targetInputError = if (isZh) {
+                                            "请输入 1,000–100,000 之间的整数"
+                                        } else {
+                                            "Enter an integer between 1,000 and 100,000"
+                                        }
+                                    }
+                                    parsed == tuning.stepTarget -> {
+                                        targetInputText = tuning.stepTarget.toString()
+                                        targetInputError = null
+                                    }
+                                    else -> {
+                                        targetInputError = null
+                                        onUpdateTuning(
+                                            if (isZh) "已保存目标中心 ${numberFmt.format(parsed)} 步"
+                                            else "Saved target ${numberFmt.format(parsed)}",
+                                        ) { it.copy(stepTarget = parsed) }
+                                    }
+                                }
+                            },
+                            colors = ButtonDefaults.textButtonColorsPrimary(),
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(
+                            text = if (isZh) "取消" else "Cancel",
+                            enabled = isDirty || targetInputError != null,
+                            onClick = {
+                                targetInputText = tuning.stepTarget.toString()
+                                targetInputError = null
+                            },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    if (targetInputError != null) {
+                        Text(
+                            text = targetInputError!!,
+                            fontSize = 11.5.sp,
+                            color = IosGlassTokens.IosRed,
+                        )
+                    }
+                    if (capWarning != null) {
+                        Text(
+                            text = capWarning,
+                            fontSize = 11.5.sp,
+                            color = IosGlassTokens.IosAmber,
+                        )
+                    }
+                }
+            } else {
+                OneUiIslandCard(title = paramCardTitle) {
+                    Text(
+                        text = if (tuning.stepMode == TuningConfig.MODE_MULTIPLIER) {
+                            if (isZh) "当前模式：真实步数倍率（按真实新增步数乘以指定倍率）。"
+                            else "Current mode: Real Step Multiplier (multiplies new real steps by this factor)."
+                        } else {
+                            if (isZh) "当前模式：旧版自动（兼容旧版自动递增逻辑，按倍率参与计算）。"
+                            else "Current mode: Legacy Auto (legacy auto-increment using the multiplier)."
+                        },
+                        fontSize = 11.5.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                    StepSettingSlider(
+                        label = if (isZh) "放大倍率" else "Multiplier",
+                        display = stepMultiplierDisplay(multiplierDraft.toInt(), isZh),
+                        value = multiplierDraft,
+                        range = 1f..200f,
+                        onChange = { multiplierDraft = it.roundToInt().toFloat() },
+                        onFinish = {
+                            val next = multiplierDraft.toInt()
+                            if (next != tuning.stepMultiplier) {
+                                onUpdateTuning(null) { it.copy(stepMultiplier = next) }
+                            }
+                        },
+                    )
+                    TextButton(
+                        text = if (isZh) "切回「每日计划（推荐）」" else "Switch back to Daily Plan (Recommended)",
+                        onClick = {
+                            onUpdateTuning(
+                                if (isZh) "已切换为每日计划" else "Switched to Daily Plan",
+                            ) { it.copy(stepMode = TuningConfig.MODE_PLAN, stepAuto = true) }
+                        },
+                        colors = ButtonDefaults.textButtonColorsPrimary(),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+        }
 
-                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+        OneUiIslandCard(
+            title = if (isZh) "重启微信" else "Restart WeChat",
+        ) {
+            Text(
+                text = stepRestartGuidanceText(hasRoot, isZh),
+                fontSize = 11.5.sp,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+            TextButton(
+                text = if (isZh) "重启微信" else "Restart WeChat",
+                enabled = hasRoot,
+                onClick = onRequestRestartWechat,
+                colors = ButtonDefaults.textButtonColorsPrimary(),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
 
+        val advancedSubtitle = if (isZh) {
+            "模式：${stepModeLabel(tuning.stepMode, true)} · 底层：${stepBackendLabel(tuning.stepBackend, true)} · ${formatStepMinute(tuning.stepWindowStart)}–${formatStepMinute(tuning.stepWindowEnd)} · 上限 ${numberFmt.format(tuning.stepMaximum)}"
+        } else {
+            "Mode: ${stepModeLabel(tuning.stepMode, false)} · Backend: ${stepBackendLabel(tuning.stepBackend, false)} · ${formatStepMinute(tuning.stepWindowStart)}–${formatStepMinute(tuning.stepWindowEnd)} · Cap ${numberFmt.format(tuning.stepMaximum)}"
+        }
+
+        OneUiCollapsibleCard(
+            title = if (isZh) "进阶参数" else "Advanced Settings",
+            subtitle = advancedSubtitle,
+            initiallyExpanded = false,
+        ) {
+            Text(
+                text = if (isZh) "步数模式" else "Step Mode",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MiuixTheme.colorScheme.onSurface,
+            )
+            val modeOptions = listOf(
+                TuningConfig.MODE_PLAN to if (isZh) "按时间窗口平滑推进至每日目标，真实步数更高时保留较高值。" else "Smoothly progresses toward the daily target in the window.",
+                TuningConfig.MODE_MULTIPLIER to if (isZh) "按真实新增步数乘以指定倍率。" else "Multiplies newly added real steps by the chosen factor.",
+                TuningConfig.MODE_LEGACY_AUTO to if (isZh) "兼容旧版自动递增逻辑，按倍率参与计算。" else "Compatible legacy auto increment using the multiplier.",
+            )
+            modeOptions.forEach { (mode, desc) ->
+                val selected = tuning.stepMode == mode
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (selected) IosGlassTokens.activeTileBg() else MiuixTheme.colorScheme.secondaryContainer)
+                        .clickable {
+                            if (mode != tuning.stepMode) {
+                                onUpdateTuning(null) { it.copy(stepMode = mode, stepAuto = mode != TuningConfig.MODE_MULTIPLIER) }
+                            }
+                        }
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Text(
-                        text = if (isZh) "每日最高步数封顶" else "Daily Step Cap",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MiuixTheme.colorScheme.onSurface,
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (selected) IosGlassTokens.activeTileFg()
+                                else MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.35f),
+                            ),
                     )
-                    Text(
-                        text = if (isZh) "${numberFmt.format(maxStepDraft.toInt())} 步"
-                        else "${numberFmt.format(maxStepDraft.toInt())} steps",
-                        fontSize = 12.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = IosGlassTokens.IosGreen,
-                    )
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Text(
+                            text = stepModeOptionLabel(mode, isZh),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (selected) IosGlassTokens.activeTileFg() else MiuixTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            text = desc,
+                            fontSize = 11.sp,
+                            color = if (selected) IosGlassTokens.activeTileFg().copy(alpha = 0.85f) else MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                    }
                 }
-                Slider(
-                    value = maxStepDraft,
-                    onValueChange = { maxStepDraft = (it / 1000f).toInt() * 1000f },
-                    onValueChangeFinished = {
-                        onUpdateTuning(null) { it.copy(stepMaximum = maxStepDraft.toInt().coerceIn(5000, 98800)) }
-                    },
-                    valueRange = 5000f..98800f,
-                )
             }
 
-            OneUiCollapsibleCard(
-                title = if (isZh) "高级设置：自定义倍率与截止时间" else "Advanced: Multiplier & Cutoff Hour",
-                subtitle = if (isZh) "当前倍率 ${tuning.stepMultiplier}x · 每日 ${tuning.stepEndHour}:00 停止递增"
-                else "Multiplier ${tuning.stepMultiplier}x · Stops at ${tuning.stepEndHour}:00",
-                initiallyExpanded = false,
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text(
-                        text = if (isZh) "步数放大倍率" else "Step Multiplier",
-                        fontSize = 12.5.sp,
-                        color = MiuixTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = "${multiplierDraft.toInt()}x",
-                        fontSize = 12.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = IosGlassTokens.IosBlue,
-                    )
-                }
-                Slider(
-                    value = multiplierDraft,
-                    onValueChange = { multiplierDraft = it.toInt().toFloat() },
-                    onValueChangeFinished = {
-                        onUpdateTuning(null) { it.copy(stepMultiplier = multiplierDraft.toInt().coerceIn(1, 200)) }
-                    },
-                    valueRange = 1f..200f,
-                )
+            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text(
-                        text = if (isZh) "每日停止增长时间" else "Daily Stop Hour",
-                        fontSize = 12.5.sp,
-                        color = MiuixTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = "${endHourDraft.toInt()}:00",
-                        fontSize = 12.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = IosGlassTokens.IosBlue,
-                    )
-                }
-                Slider(
-                    value = endHourDraft,
-                    onValueChange = { endHourDraft = it.toInt().toFloat() },
-                    onValueChangeFinished = {
-                        onUpdateTuning(null) { it.copy(stepEndHour = endHourDraft.toInt().coerceIn(18, 24)) }
+            Text(
+                text = if (isZh) "底层方式" else "Step Backend",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MiuixTheme.colorScheme.onSurface,
+            )
+            OneUiSegmentedControl(
+                items = listOf(TuningConfig.BACKEND_AUTO, TuningConfig.BACKEND_EXACT, TuningConfig.BACKEND_SENSOR),
+                selectedItem = tuning.stepBackend,
+                onSelect = { backend ->
+                    if (backend != tuning.stepBackend) {
+                        onUpdateTuning(null) { it.copy(stepBackend = backend) }
+                    }
+                },
+                label = { backend -> stepBackendLabel(backend, isZh) },
+            )
+            Text(
+                text = if (isZh) "自动：优先精确适配，不匹配时回退传感器；精确：仅在已校验版本启用精确模式；传感器：使用计步传感器路径。切换底层方式后请重启微信。"
+                else "Auto: prefers verified exact adapter and falls back to sensor; Exact: uses exact adapter when verified; Sensor: uses step sensor path. Restart WeChat after switching backend.",
+                fontSize = 11.5.sp,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+            if (tuning.stepMode == TuningConfig.MODE_PLAN) {
+                Text(
+                    text = if (isZh) "每日浮动" else "Daily Variation",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MiuixTheme.colorScheme.onSurface,
+                )
+                StepSettingSlider(
+                    label = if (isZh) "浮动幅度" else "Variation",
+                    display = "±${jitterDraft.toInt()}%",
+                    value = jitterDraft,
+                    range = 0f..50f,
+                    onChange = { jitterDraft = it.roundToInt().toFloat() },
+                    onFinish = {
+                        val next = jitterDraft.toInt()
+                        if (next != tuning.stepJitter) {
+                            onUpdateTuning(null) { it.copy(stepJitter = next) }
+                        }
                     },
-                    valueRange = 18f..24f,
+                )
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+            }
+
+            Text(
+                text = if (isZh) "时间窗口与窗口后行为" else "Time Window & After Window",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MiuixTheme.colorScheme.onSurface,
+            )
+            StepSettingSlider(
+                label = if (isZh) "开始时间" else "Start Time",
+                display = formatStepMinute(startDraft.toInt()),
+                value = startDraft,
+                range = 0f..1439f,
+                onChange = { startDraft = it.roundToInt().coerceAtMost(endDraft.toInt() - 1).coerceAtLeast(0).toFloat() },
+                onFinish = {
+                    val next = startDraft.toInt()
+                    if (next != tuning.stepWindowStart) {
+                        onUpdateTuning(null) { it.copy(stepWindowStart = next) }
+                    }
+                },
+            )
+            StepSettingSlider(
+                label = if (isZh) "结束时间" else "End Time",
+                display = formatStepMinute(endDraft.toInt()),
+                value = endDraft,
+                range = 1f..1440f,
+                onChange = { endDraft = it.roundToInt().coerceAtLeast(startDraft.toInt() + 1).coerceAtMost(1440).toFloat() },
+                onFinish = {
+                    val next = endDraft.toInt()
+                    if (next != tuning.stepWindowEnd) {
+                        onUpdateTuning(null) { it.copy(stepWindowEnd = next) }
+                    }
+                },
+            )
+            OneUiSegmentedControl(
+                items = listOf(TuningConfig.AFTER_NATURAL, TuningConfig.AFTER_FREEZE),
+                selectedItem = tuning.stepAfterWindow,
+                onSelect = { after ->
+                    if (after != tuning.stepAfterWindow) {
+                        onUpdateTuning(null) { it.copy(stepAfterWindow = after) }
+                    }
+                },
+                label = { after -> stepAfterWindowLabel(after, isZh) },
+            )
+            Text(
+                text = if (isZh) "自然增长：窗口结束后仅随后续新增步数增长；冻结：保持窗口结束值，不再继续累加。"
+                else "Natural: adds only subsequent steps after the window. Freeze: holds the window end value.",
+                fontSize = 11.5.sp,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+            Text(
+                text = if (isZh) "每日硬上限" else "Daily Hard Cap",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MiuixTheme.colorScheme.onSurface,
+            )
+            StepSettingSlider(
+                label = if (isZh) "硬上限" else "Hard Cap",
+                display = if (isZh) "${numberFmt.format(maxStepDraft.toInt())} 步" else numberFmt.format(maxStepDraft.toInt()),
+                value = maxStepDraft,
+                range = 1000f..100000f,
+                onChange = { maxStepDraft = (it / 100f).roundToInt() * 100f },
+                onFinish = {
+                    val next = maxStepDraft.toInt()
+                    if (next != tuning.stepMaximum) {
+                        onUpdateTuning(null) { it.copy(stepMaximum = next) }
+                    }
+                },
+            )
+            if (capWarning != null) {
+                Text(
+                    text = capWarning,
+                    fontSize = 11.5.sp,
+                    color = IosGlassTokens.IosAmber,
                 )
             }
+        }
+
+        OneUiCollapsibleCard(
+            title = if (isZh) "运行状态与排障" else "Runtime Status & Diagnostics",
+            subtitle = stepDiagnosticsCardSubtitle(diagnostics, hasRoot, health, statusNow, isZh),
+            initiallyExpanded = false,
+        ) {
+            Text(
+                text = if (isZh) "运行状态" else "Runtime Status",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MiuixTheme.colorScheme.onSurface,
+            )
+            val (loadLine, readLine, uploadLine) = stepRuntimeStatusLines(
+                status = diagnostics,
+                hasRoot = hasRoot,
+                nowMillis = statusNow,
+                isZh = isZh,
+            )
+            Text(
+                text = loadLine,
+                fontSize = 12.sp,
+                color = when (health) {
+                    HeartbeatHealth.HEALTHY -> IosGlassTokens.IosGreen
+                    HeartbeatHealth.STALE -> IosGlassTokens.IosAmber
+                    HeartbeatHealth.DEAD -> IosGlassTokens.IosRed
+                    HeartbeatHealth.UNKNOWN -> MiuixTheme.colorScheme.onSurfaceVariantSummary
+                },
+            )
+            Text(
+                text = "$readLine\n$uploadLine",
+                fontSize = 11.5.sp,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+            Text(
+                text = stepPreviewSummary(preview, diagnostics, hasRoot, isZh, numberFmt),
+                fontSize = 11.5.sp,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+            TextButton(
+                text = if (isZh) "刷新状态" else "Refresh State",
+                enabled = hasRoot,
+                onClick = { previewRefresh++ },
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+            Text(
+                text = if (isZh) "微信作用域检查" else "WeChat Scope Check",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MiuixTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = (if (isZh) "微信作用域：" else "WeChat scope: ") + when (wechatInScope) {
+                    true -> if (isZh) "已勾选" else "Included"
+                    false -> if (isZh) "未勾选" else "Missing"
+                    null -> if (isZh) "未知（服务未连接）" else "Unknown (service unavailable)"
+                } + if (scopeMessage.isBlank()) "" else "\n$scopeMessage",
+                fontSize = 11.5.sp,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+            TextButton(
+                text = if (isZh) "检查并修复微信作用域" else "Check / Repair WeChat Scope",
+                onClick = {
+                    coroutineScope.launch {
+                        val alreadyInScope = LsposedScopeHelper.isPackageInScope("com.tencent.mm") == true
+                        if (alreadyInScope) {
+                            wechatInScope = true
+                            scopeMessage = if (isZh) "微信已在 LSPosed 作用域中。" else "WeChat is already in LSPosed scope."
+                            previewRefresh++
+                        } else if (!LsposedScopeHelper.isServiceConnected()) {
+                            scopeMessage = if (isZh) "LSPosed 服务未连接，无法自动申请作用域；请在 LSPosed 管理器中手动勾选微信。"
+                            else "LSPosed service unavailable; please enable WeChat in LSPosed Manager manually."
+                        } else {
+                            scopeMessage = if (isZh) "正在通过框架申请微信作用域…" else "Requesting WeChat scope from framework…"
+                            LsposedScopeHelper.requestScopesViaService(setOf("com.tencent.mm")) { approved ->
+                                coroutineScope.launch {
+                                    scopeMessage = if (approved) {
+                                        if (isZh) "微信作用域申请已通过；请刷新确认并重启微信应用。"
+                                        else "WeChat scope approved. Refresh to verify, then restart WeChat."
+                                    } else {
+                                        if (isZh) "作用域申请未通过；请在 LSPosed 管理器中手动勾选微信。"
+                                        else "Scope request not approved; please enable WeChat in LSPosed Manager manually."
+                                    }
+                                    previewRefresh++
+                                }
+                            }
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+            Text(
+                text = if (isZh) "诊断详情" else "Diagnostic Details",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MiuixTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = stepHookDetail(diagnostics, hasRoot, isZh, tuning, remoteSynced, planUpdated),
+                fontSize = 11.sp,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
         }
     } else {
         OneUiIslandCard {
@@ -311,13 +705,15 @@ internal fun WechatEnhancementDetailContent(
                 iconTint = IosGlassTokens.IosBlue,
                 checked = tuning.antiRecall,
                 onCheckedChange = { enabled ->
-                    onUpdateTuning(
-                        if (enabled) {
-                            if (isZh) "已开启微信消息防撤回" else "WeChat anti-recall enabled"
-                        } else {
-                            if (isZh) "已关闭微信消息防撤回" else "WeChat anti-recall disabled"
-                        },
-                    ) { it.copy(antiRecall = enabled) }
+                    if (enabled != tuning.antiRecall) {
+                        onUpdateTuning(
+                            if (enabled) {
+                                if (isZh) "已开启微信消息防撤回" else "WeChat anti-recall enabled"
+                            } else {
+                                if (isZh) "已关闭微信消息防撤回" else "WeChat anti-recall disabled"
+                            },
+                        ) { it.copy(antiRecall = enabled) }
+                    }
                 },
             )
         }
@@ -332,29 +728,69 @@ internal fun WechatEnhancementDetailContent(
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
         }
-    }
 
-    OneUiIslandCard(
-        title = if (isZh) "生效操作" else "Apply to WeChat",
-    ) {
-        Text(
-            text = if (hasRoot) {
-                if (isZh) "请确保已在 LSPosed 作用域中勾选「微信 (com.tencent.mm)」。点击下方按钮可通过 Root 立即重启微信生效。"
-                else "Ensure WeChat (com.tencent.mm) is checked in LSPosed scope. Tap below to restart WeChat via Root."
-            } else {
-                if (isZh) "配置已自动保存；当前无 Root 权限，请确认已在 LSPosed 中勾选微信，然后手动划掉微信后台并重新打开即可生效。"
-                else "Configuration saved. Without Root, ensure WeChat is checked in LSPosed and restart WeChat manually."
-            },
-            fontSize = 11.5.sp,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-        )
-        TextButton(
-            text = if (isZh) "立即重启微信" else "Restart WeChat Now",
-            enabled = hasRoot,
-            onClick = onRequestRestartWechat,
-            colors = ButtonDefaults.textButtonColorsPrimary(),
-            modifier = Modifier.fillMaxWidth(),
-        )
+        OneUiIslandCard(
+            title = if (isZh) "一键重启微信生效" else "Restart WeChat to Apply",
+        ) {
+            Text(
+                text = (if (isZh) "微信作用域：" else "WeChat scope: ") + when (wechatInScope) {
+                    true -> if (isZh) "已勾选" else "Included"
+                    false -> if (isZh) "未勾选" else "Missing"
+                    null -> if (isZh) "未知（服务未连接）" else "Unknown (service unavailable)"
+                } + if (scopeMessage.isBlank()) "" else "\n$scopeMessage",
+                fontSize = 11.5.sp,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+            TextButton(
+                text = if (isZh) "检查并修复微信作用域" else "Check / Repair WeChat Scope",
+                onClick = {
+                    coroutineScope.launch {
+                        val alreadyInScope = LsposedScopeHelper.isPackageInScope("com.tencent.mm") == true
+                        if (alreadyInScope) {
+                            wechatInScope = true
+                            scopeMessage = if (isZh) "微信已在 LSPosed 作用域中。" else "WeChat is already in LSPosed scope."
+                            previewRefresh++
+                        } else if (!LsposedScopeHelper.isServiceConnected()) {
+                            scopeMessage = if (isZh) "LSPosed 服务未连接，无法自动申请作用域；请在 LSPosed 管理器中手动勾选微信。"
+                            else "LSPosed service unavailable; please enable WeChat in LSPosed Manager manually."
+                        } else {
+                            scopeMessage = if (isZh) "正在通过框架申请微信作用域…" else "Requesting WeChat scope from framework…"
+                            LsposedScopeHelper.requestScopesViaService(setOf("com.tencent.mm")) { approved ->
+                                coroutineScope.launch {
+                                    scopeMessage = if (approved) {
+                                        if (isZh) "微信作用域申请已通过；请刷新确认并重启微信应用。"
+                                        else "WeChat scope approved. Refresh to verify, then restart WeChat."
+                                    } else {
+                                        if (isZh) "作用域申请未通过；请在 LSPosed 管理器中手动勾选微信。"
+                                        else "Scope request not approved; please enable WeChat in LSPosed Manager manually."
+                                    }
+                                    previewRefresh++
+                                }
+                            }
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                text = if (hasRoot) {
+                    if (isZh) "修改设置后需重启微信生效。点击下方按钮将强制关闭并重新启动微信，会中断当前聊天、通话或页面；不会自动执行。"
+                    else "Restart WeChat to apply changes. Tapping below force-stops and relaunches WeChat, interrupting active chats or calls; it will never run automatically."
+                } else {
+                    if (isZh) "配置已自动保存；当前无 Root 权限，请手动划掉微信后台并重新打开以生效。"
+                    else "Configuration saved. Without Root, close and reopen WeChat manually to apply."
+                },
+                fontSize = 11.5.sp,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+            TextButton(
+                text = if (isZh) "一键重启微信生效" else "Restart WeChat to Apply",
+                enabled = hasRoot,
+                onClick = onRequestRestartWechat,
+                colors = ButtonDefaults.textButtonColorsPrimary(),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 
@@ -1264,4 +1700,457 @@ internal fun PassThroughAppPickerSheet(
             }
         }
     }
+}
+
+
+internal val STEP_TARGET_PRESETS = listOf(6_000, 10_000, 15_000, 20_000)
+
+internal fun parseStepTargetInput(raw: String, min: Int = 1_000, max: Int = 100_000): Int? =
+    raw.trim().toIntOrNull()?.takeIf { it in min..max }
+
+internal fun stepModeLabel(mode: String, isZh: Boolean): String = when (mode) {
+    TuningConfig.MODE_MULTIPLIER -> if (isZh) "真实步数倍率" else "Real Step Multiplier"
+    TuningConfig.MODE_LEGACY_AUTO -> if (isZh) "旧版自动" else "Legacy Auto"
+    else -> if (isZh) "每日计划" else "Daily Plan"
+}
+
+internal fun stepModeOptionLabel(mode: String, isZh: Boolean): String = when (mode) {
+    TuningConfig.MODE_PLAN -> if (isZh) "每日计划（推荐）" else "Daily Plan (Recommended)"
+    TuningConfig.MODE_MULTIPLIER -> if (isZh) "真实步数倍率" else "Real Step Multiplier"
+    TuningConfig.MODE_LEGACY_AUTO -> if (isZh) "旧版自动" else "Legacy Auto"
+    else -> stepModeLabel(mode, isZh)
+}
+
+internal fun stepMainTodaySnapshotLine(
+    preview: WechatStepPreview?,
+    isZh: Boolean,
+    numberFmt: NumberFormat = NumberFormat.getIntegerInstance(),
+): String? {
+    if (preview == null) return null
+    return if (preview.target != null) {
+        if (isZh) {
+            "今日客户端生效 ${numberFmt.format(preview.effective)} 步 · 计划目标 ${numberFmt.format(preview.target)} 步"
+        } else {
+            "Client today effective ${numberFmt.format(preview.effective)} · Plan target ${numberFmt.format(preview.target)}"
+        }
+    } else {
+        if (isZh) "今日客户端生效 ${numberFmt.format(preview.effective)} 步"
+        else "Client today effective ${numberFmt.format(preview.effective)}"
+    }
+}
+
+internal fun stepRestartGuidanceText(hasRoot: Boolean, isZh: Boolean): String = if (hasRoot) {
+    if (isZh) {
+        "调整目标、浮动、时间窗口或硬上限通常无需每次重启，微信收到同步配置后会在下次读取时生效；仅在首次启用、切换模式/底层方式，或状态提示「微信待加载最新配置」时，再手动点击重启。重启会中断当前聊天、通话或页面，不会自动执行。"
+    } else {
+        "Changes to target, variation, window, or hard cap usually apply on the next read without restarting. Restart manually after first enabling, switching mode/backend, or when diagnostics show WeChat is pending the latest config. Restarting interrupts active chats or calls and never runs automatically."
+    }
+} else {
+    if (isZh) "配置已保存；若切换了模式或底层方式，或微信尚未加载最新配置，请手动划掉微信后台并重新打开。"
+    else "Configuration saved. If you switched mode/backend or WeChat has not loaded the latest config, force-close and reopen WeChat manually."
+}
+
+internal fun stepParameterCardTitle(mode: String, isZh: Boolean): String = when (mode) {
+    TuningConfig.MODE_PLAN -> if (isZh) "每日计划目标" else "Daily Plan Target"
+    TuningConfig.MODE_MULTIPLIER -> if (isZh) "真实步数倍率" else "Real Step Multiplier"
+    TuningConfig.MODE_LEGACY_AUTO -> if (isZh) "旧版自动倍率" else "Legacy Auto Multiplier"
+    else -> if (isZh) "步数倍率" else "Step Multiplier"
+}
+
+internal fun stepBackendLabel(backend: String, isZh: Boolean): String = when (backend) {
+    TuningConfig.BACKEND_AUTO -> if (isZh) "自动" else "Auto"
+    TuningConfig.BACKEND_EXACT -> if (isZh) "精确" else "Exact"
+    else -> if (isZh) "传感器" else "Sensor"
+}
+
+internal fun stepAfterWindowLabel(afterWindow: String, isZh: Boolean): String =
+    if (afterWindow == TuningConfig.AFTER_FREEZE) {
+        if (isZh) "冻结" else "Freeze"
+    } else {
+        if (isZh) "自然增长" else "Natural"
+    }
+
+internal fun stepMultiplierDisplay(multiplier: Int, isZh: Boolean): String =
+    if (isZh) "${multiplier}倍" else "${multiplier}x"
+
+internal fun stepModeSummary(config: TuningConfig, isZh: Boolean): String {
+    val mode = stepModeLabel(config.stepMode, isZh)
+    return if (config.stepMode == TuningConfig.MODE_PLAN) {
+        if (isZh) "$mode · 目标 ${config.stepTarget} ±${config.stepJitter}%"
+        else "$mode · Target ${config.stepTarget} ±${config.stepJitter}%"
+    } else {
+        if (isZh) "$mode · ${stepMultiplierDisplay(config.stepMultiplier, true)} · 硬上限 ${config.stepMaximum}"
+        else "$mode · ${stepMultiplierDisplay(config.stepMultiplier, false)} · Cap ${config.stepMaximum}"
+    }
+}
+
+/** Warn without silently raising or removing the hard cap when varied target can exceed it. */
+internal fun stepHardCapWarning(target: Int, jitter: Int, hardCap: Int, isZh: Boolean): String? {
+    val base = target.coerceIn(1, 1_000_000).toLong()
+    val span = base * jitter.coerceIn(0, 50) / 100L
+    val maxVaried = base + span
+    val cap = hardCap.coerceAtLeast(1).toLong()
+    if (maxVaried <= cap) return null
+    val fmt = NumberFormat.getIntegerInstance()
+    return if (isZh) {
+        "目标受上限限制：浮动最高可达 ${fmt.format(maxVaried)} 步，超过当前硬上限 ${fmt.format(cap)} 步，实际目标将按硬上限截断。"
+    } else {
+        "Target capped by hard limit: varied maximum ${fmt.format(maxVaried)} exceeds current hard cap ${fmt.format(cap)}."
+    }
+}
+
+private fun formatStepMinute(minute: Int): String =
+    java.lang.String.format(java.util.Locale.ROOT, "%02d:%02d", minute / 60, minute % 60)
+
+@Composable
+private fun StepSettingSlider(
+    label: String, display: String, value: Float, range: ClosedFloatingPointRange<Float>,
+    onChange: (Float) -> Unit, onFinish: () -> Unit,
+) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(text = label, fontSize = 12.5.sp, color = MiuixTheme.colorScheme.onSurface)
+        Text(text = display, fontSize = 12.5.sp, color = IosGlassTokens.IosGreen)
+    }
+    Slider(value = value.coerceIn(range.start, range.endInclusive), onValueChange = onChange,
+        onValueChangeFinished = onFinish, valueRange = range)
+}
+
+internal data class WechatStepPreview(val real: Long?, val effective: Long, val target: Long?)
+
+internal data class WechatStepState(val longs: Map<String, Long>, val status: StepHookStatus) {
+    fun isTodayPlanUpdated(config: TuningConfig, today: Long = currentDayLong()): Boolean {
+        if (config.stepMode != TuningConfig.MODE_PLAN) return true
+        return longs["plan_day"] == today && longs["plan_gen"] == config.stepGeneration
+    }
+
+    fun preview(config: TuningConfig, today: Long = currentDayLong()): WechatStepPreview? {
+        return if (config.stepMode == TuningConfig.MODE_PLAN) {
+            if (longs["plan_day"] != today || longs["plan_gen"] != config.stepGeneration) return null
+            val real = longs["step_real_today"]?.takeIf { it >= 0L } ?: return null
+            val effective = longs[WechatHooks.KEY_STATE_DELIVERED]?.takeIf { it >= 0L } ?: return null
+            val target = longs["daily_target"]?.takeIf { it > 0L } ?: return null
+            WechatStepPreview(real = real, effective = effective, target = target)
+        } else {
+            if (longs[WechatHooks.KEY_STATE_TODAY] != today) return null
+            // Do not display a PLAN snapshot from today as a MULTIPLIER/LEGACY_AUTO preview before WeChat applies the mode switch.
+            if (longs["plan_day"] == today) return null
+            if (longs.containsKey("plan_gen") && longs["plan_gen"] != config.stepGeneration) return null
+            val effective = longs[WechatHooks.KEY_STATE_DELIVERED]?.takeIf { it >= 0L } ?: return null
+            WechatStepPreview(real = null, effective = effective, target = null)
+        }
+    }
+
+    private companion object {
+        fun currentDayLong(): Long = java.util.Calendar.getInstance().let {
+            (it.get(java.util.Calendar.YEAR) * 10000 +
+                (it.get(java.util.Calendar.MONTH) + 1) * 100 +
+                it.get(java.util.Calendar.DAY_OF_MONTH)).toLong()
+        }
+    }
+}
+
+/** Read one Root XML snapshot for both diagnostics and daily preview. */
+internal fun readWechatStepHookStatus(): StepHookStatus? = readWechatStepState()?.status
+
+internal fun buildWechatStepStateReadCommand(): String =
+    "wt_preview_user=\$(am get-current-user); case \"\$wt_preview_user\" in ''|*[!0-9]*) false;; *) " +
+        "wt_rel=\"com.tencent.mm/shared_prefs/weitiao_step_state.xml\"; " +
+        "if [ -f \"/data_mirror/data_ce/null/\$wt_preview_user/\$wt_rel\" ]; then cat \"/data_mirror/data_ce/null/\$wt_preview_user/\$wt_rel\"; " +
+        "elif [ -f \"/data/user/\$wt_preview_user/\$wt_rel\" ]; then cat \"/data/user/\$wt_preview_user/\$wt_rel\"; " +
+        "else nsenter -t 1 -m -- cat \"/data/user/\$wt_preview_user/\$wt_rel\"; fi;; esac"
+
+private fun readWechatStepState(): WechatStepState? = runCatching {
+    val (code, xml) = RootShell.exec(
+        buildWechatStepStateReadCommand(),
+        timeoutSeconds = 4,
+    )
+    if (code != 0 || xml.isBlank()) return null
+    val parser = android.util.Xml.newPullParser()
+    parser.setInput(java.io.StringReader(xml))
+    val longs = mutableMapOf<String, Long>()
+    val strings = mutableMapOf<String, String>()
+    val booleans = mutableMapOf<String, Boolean>()
+    while (parser.eventType != org.xmlpull.v1.XmlPullParser.END_DOCUMENT) {
+        if (parser.eventType == org.xmlpull.v1.XmlPullParser.START_TAG) {
+            val name = parser.getAttributeValue(null, "name")
+            if (name != null) when (parser.name) {
+                "long", "int" -> parser.getAttributeValue(null, "value")?.toLongOrNull()?.let { longs[name] = it }
+                "string" -> strings[name] = parser.nextText()
+                "boolean" -> booleans[name] = parser.getAttributeValue(null, "value") == "true"
+            }
+        }
+        parser.next()
+    }
+    WechatStepState(longs, StepHookStatus.fromValues(strings, longs, booleans))
+}.getOrNull()
+
+internal fun stepHeartbeatSummary(health: HeartbeatHealth, isZh: Boolean): String = when (health) {
+    HeartbeatHealth.UNKNOWN -> if (isZh) "模块状态未知" else "Module status unknown"
+    HeartbeatHealth.HEALTHY -> if (isZh) "模块已加载（不代表步数已生效）" else "Module loaded (does not confirm modified steps)"
+    HeartbeatHealth.STALE -> if (isZh) "模块心跳超过 5 分钟未更新" else "Module heartbeat older than 5 minutes"
+    HeartbeatHealth.DEAD -> if (isZh) "模块心跳超过 15 分钟未更新" else "Module heartbeat older than 15 minutes"
+}
+
+/** Format event timestamp and relative age without allowing negative durations under clock skew. */
+internal fun formatStepEventRecency(
+    eventAtMillis: Long,
+    nowMillis: Long,
+    isZh: Boolean,
+    timeZone: java.util.TimeZone = java.util.TimeZone.getDefault(),
+): String {
+    val eventCal = java.util.Calendar.getInstance(timeZone).apply { timeInMillis = eventAtMillis }
+    val nowCal = java.util.Calendar.getInstance(timeZone).apply { timeInMillis = nowMillis }
+    val sameDay = eventCal.get(java.util.Calendar.YEAR) == nowCal.get(java.util.Calendar.YEAR) &&
+        eventCal.get(java.util.Calendar.DAY_OF_YEAR) == nowCal.get(java.util.Calendar.DAY_OF_YEAR)
+    val pattern = if (sameDay) "HH:mm" else "MM-dd HH:mm"
+    val timeStr = java.text.SimpleDateFormat(pattern, java.util.Locale.ROOT).apply {
+        this.timeZone = timeZone
+    }.format(java.util.Date(eventAtMillis))
+    if (nowMillis < eventAtMillis) return timeStr
+    val diffMs = nowMillis - eventAtMillis
+    val rel = when {
+        diffMs < 60_000L -> if (isZh) "刚刚" else "just now"
+        diffMs < 3_600_000L -> {
+            val mins = diffMs / 60_000L
+            if (isZh) "${mins}分钟前" else "${mins}m ago"
+        }
+        diffMs < 86_400_000L -> {
+            val hours = diffMs / 3_600_000L
+            if (isZh) "${hours}小时前" else "${hours}h ago"
+        }
+        else -> {
+            val days = diffMs / 86_400_000L
+            if (isZh) "${days}天前" else "${days}d ago"
+        }
+    }
+    return if (isZh) "$timeStr，$rel" else "$timeStr, $rel"
+}
+
+internal fun stepDashboardStatusText(
+    summaryLine: String,
+    status: StepHookStatus?,
+    hasRoot: Boolean,
+    nowMillis: Long,
+    isZh: Boolean,
+    timeZone: java.util.TimeZone = java.util.TimeZone.getDefault(),
+): String {
+    val health = status?.heartbeatHealth(hasRoot, nowMillis) ?: HeartbeatHealth.UNKNOWN
+    val heartbeatLine = stepHeartbeatSummary(health, isZh)
+    val eventLine = when {
+        !hasRoot || status == null -> if (isZh) "事件记录未知" else "Event record unknown"
+        !status.hasStepEvent -> if (isZh) "尚无事件记录" else "No event recorded yet"
+        status.lastBackend == TuningConfig.BACKEND_EXACT -> {
+            val recency = formatStepEventRecency(status.lastEventAt, nowMillis, isZh, timeZone)
+            if (isZh) "最近读取已执行（$recency）" else "Recent read executed ($recency)"
+        }
+        else -> {
+            val recency = formatStepEventRecency(status.lastEventAt, nowMillis, isZh, timeZone)
+            if (isZh) "最近计步事件已处理（$recency）" else "Recent step event processed ($recency)"
+        }
+    }
+    return "$summaryLine\n$heartbeatLine\n$eventLine"
+}
+
+internal fun stepCompactLoadLabel(
+    status: StepHookStatus?,
+    hasRoot: Boolean,
+    health: HeartbeatHealth,
+    isZh: Boolean,
+): String = when {
+    !hasRoot || status == null -> if (isZh) "状态未知" else "Unknown"
+    status.hookStatus == "DISABLED" -> if (isZh) "步数已关闭" else "Step Off"
+    health == HeartbeatHealth.HEALTHY -> if (isZh) "模块已加载" else "Module Loaded"
+    health == HeartbeatHealth.STALE -> if (isZh) "心跳滞后" else "Stale"
+    health == HeartbeatHealth.DEAD -> if (isZh) "心跳超时" else "Timed Out"
+    else -> if (isZh) "状态未知" else "Unknown"
+}
+
+internal fun stepDiagnosticsCardSubtitle(
+    status: StepHookStatus?,
+    hasRoot: Boolean,
+    health: HeartbeatHealth,
+    nowMillis: Long,
+    isZh: Boolean,
+    timeZone: java.util.TimeZone = java.util.TimeZone.getDefault(),
+): String {
+    val load = stepCompactLoadLabel(status, hasRoot, health, isZh)
+    if (hasRoot && status?.hasStepEvent == true) {
+        val recency = formatStepEventRecency(status.lastEventAt, nowMillis, isZh, timeZone)
+        val ev = if (status.lastBackend == TuningConfig.BACKEND_EXACT) {
+            if (isZh) "最近读取" else "Last read"
+        } else {
+            if (isZh) "最近事件" else "Last event"
+        }
+        return "$load · $ev $recency"
+    }
+    return load
+}
+
+/**
+ * Separate module load status, recent read execution, and client upload record so heartbeats
+ * are never conflated with modified steps or server acceptance.
+ */
+internal fun stepRuntimeStatusLines(
+    status: StepHookStatus?,
+    hasRoot: Boolean,
+    nowMillis: Long,
+    isZh: Boolean,
+): Triple<String, String, String> {
+    fun time(value: Long) = if (value > 0L) java.text.DateFormat.getDateTimeInstance().format(java.util.Date(value)) else "—"
+    val health = status?.heartbeatHealth(hasRoot, nowMillis) ?: HeartbeatHealth.UNKNOWN
+    val loadLine = when {
+        !hasRoot -> if (isZh) "模块已加载状态：未知（需要 Root 权限读取微信状态）"
+        else "Module status: Unknown (Root required to read WeChat state)"
+        status == null -> if (isZh) "模块已加载状态：未知（尚未生成或未能读取微信状态文件）"
+        else "Module status: Unknown (state file not yet created or unreadable)"
+        status.hookStatus == "DISABLED" -> if (isZh) "模块已加载（当前步数修改已关闭）"
+        else "Module loaded (step modifier disabled)"
+        status.hookStatus == "WAITING_FOR_SENSOR" && health == HeartbeatHealth.HEALTHY ->
+            if (isZh) "模块已加载（等待传感器事件，不代表步数已生效）"
+            else "Module loaded (waiting for sensor; does not confirm modified steps)"
+        health == HeartbeatHealth.HEALTHY -> if (isZh) "模块已加载（心跳正常，不代表步数已生效或服务器已接受）"
+        else "Module loaded (heartbeat active; does not imply modified steps or server acceptance)"
+        health == HeartbeatHealth.STALE -> if (isZh) "模块心跳超过 5 分钟未更新"
+        else "Module heartbeat older than 5 minutes"
+        health == HeartbeatHealth.DEAD -> if (isZh) "模块心跳超过 15 分钟未更新"
+        else "Module heartbeat older than 15 minutes"
+        else -> if (isZh) "模块已加载状态：未知" else "Module status: Unknown"
+    }
+
+    val readLine = when {
+        !hasRoot || status == null -> if (isZh) "最近读取记录：未知" else "Recent read: Unknown"
+        !status.hasStepEvent -> if (isZh) "最近读取记录：尚未观察到读取事件（心跳独立于计步事件）"
+        else "Recent read: No read event observed yet (heartbeat is independent)"
+        status.lastBackend == TuningConfig.BACKEND_EXACT -> if (isZh) {
+            "最近读取已执行（${time(status.lastEventAt)}）：微信原始业务步数 ${status.lastOriginal} → 生效步数 ${status.lastEffective}"
+        } else {
+            "Recent read executed (${time(status.lastEventAt)}): WeChat original business steps ${status.lastOriginal} → effective steps ${status.lastEffective}"
+        }
+        else -> if (isZh) {
+            "最近计步事件已处理（${time(status.lastEventAt)} · ${if (status.lastEventSynthetic) "合成事件" else "真实传感器"}）：传感器累计原始值 ${status.lastOriginal} → 输出值 ${status.lastEffective}"
+        } else {
+            "Recent step event processed (${time(status.lastEventAt)} · ${if (status.lastEventSynthetic) "synthetic" else "sensor"}): Cumulative sensor original ${status.lastOriginal} → output ${status.lastEffective}"
+        }
+    }
+
+    val uploadLine = if (isZh) "上报验证：尚未采集" else "Upload verification: Not captured yet"
+    return Triple(loadLine, readLine, uploadLine)
+}
+
+internal fun stepPreviewSummary(
+    preview: WechatStepPreview?,
+    status: StepHookStatus?,
+    hasRoot: Boolean,
+    isZh: Boolean,
+    numberFmt: NumberFormat = NumberFormat.getIntegerInstance(),
+): String = when {
+    !hasRoot -> if (isZh) "客户端今日快照：不可用（未获得 Root 权限）" else "Client snapshot: unavailable (Root required)"
+    preview == null -> if (isZh) "客户端今日快照：尚无今日有效状态，或微信尚未应用当前设置" else "Client snapshot: no valid state for today, or settings not yet applied in WeChat"
+    else -> {
+        val realText = preview.real?.let {
+            if (isZh) "${numberFmt.format(it)} 步" else numberFmt.format(it)
+        } ?: if (isZh) "不可用" else "Unavailable"
+        val target = preview.target?.let { numberFmt.format(it) }
+            ?: if (isZh) "不适用" else "N/A"
+        if (status?.lastBackend == TuningConfig.BACKEND_EXACT) {
+            if (isZh) "客户端今日快照：微信原始业务步数 $realText → 生效步数 ${numberFmt.format(preview.effective)} 步\n今日浮动目标 $target（仅客户端记录，不代表服务器已接受）"
+            else "Client snapshot: WeChat original business steps $realText → effective steps ${numberFmt.format(preview.effective)}\nToday's target $target (client record only; does not imply server acceptance)"
+        } else {
+            if (isZh) "客户端今日快照：传感器累计原始值 $realText → 输出值 ${numberFmt.format(preview.effective)} 步\n今日目标 $target（仅客户端记录，不代表服务器已接受）"
+            else "Client snapshot: Cumulative sensor original $realText → output ${numberFmt.format(preview.effective)}\nToday's target $target (client record only; does not imply server acceptance)"
+        }
+    }
+}
+
+internal fun stepConfigSyncStatusLine(
+    status: StepHookStatus?,
+    hasRoot: Boolean,
+    isZh: Boolean,
+    expectedConfig: TuningConfig?,
+    remoteSynced: Boolean?,
+    planUpdated: Boolean? = null,
+): String {
+    val localSummary = expectedConfig?.let {
+        if (isZh) "（本地：mode=${it.stepMode} · backend=${it.stepBackend} · gen=${it.stepGeneration}）"
+        else " (Local: mode=${it.stepMode} · backend=${it.stepBackend} · gen=${it.stepGeneration})"
+    }.orEmpty()
+    return when {
+        remoteSynced == false -> if (isZh) {
+            "仅本地保存，尚未同步到 LSPosed$localSummary"
+        } else {
+            "Saved locally only; not synced to LSPosed$localSummary"
+        }
+        remoteSynced == null -> if (isZh) "配置同步状态未知" else "Config sync status unknown"
+        expectedConfig == null -> ""
+        !hasRoot || status == null -> if (isZh) "配置同步状态未知" else "Config sync status unknown"
+        status.configMode.isBlank() || status.configBackend.isBlank() || status.configGeneration == null ->
+            if (isZh) "配置同步状态未知" else "Config sync status unknown"
+        !status.isConfigApplied(expectedConfig) -> if (isZh) {
+            "已同步到 LSPosed，微信待加载最新配置$localSummary"
+        } else {
+            "Synced to LSPosed; WeChat pending latest config$localSummary"
+        }
+        expectedConfig.stepMode == TuningConfig.MODE_PLAN && planUpdated == false -> if (isZh) {
+            "最新配置已加载，等待下一次计步读取"
+        } else {
+            "Latest config loaded; waiting for next step read"
+        }
+        else -> ""
+    }
+}
+
+internal fun stepHookDetail(
+    status: StepHookStatus?,
+    hasRoot: Boolean,
+    isZh: Boolean,
+    expectedConfig: TuningConfig? = null,
+    remoteSynced: Boolean? = true,
+    planUpdated: Boolean? = null,
+): String {
+    val syncLine = stepConfigSyncStatusLine(status, hasRoot, isZh, expectedConfig, remoteSynced, planUpdated)
+    val syncSuffix = if (syncLine.isBlank()) "" else "\n$syncLine"
+    if (!hasRoot) {
+        return (if (isZh) "Hook 状态未知；需要 Root 读取微信状态。" else "Hook status unknown; Root is required to read WeChat state.") + syncSuffix
+    }
+    if (status == null) {
+        return (if (isZh) "Hook 状态未知；已获得 Root，但尚未生成或未能读取微信状态文件。" else "Hook status unknown; Root granted, but WeChat state file is not yet created or could not be read.") + syncSuffix
+    }
+    fun time(value: Long) = if (value > 0L) java.text.DateFormat.getDateTimeInstance().format(java.util.Date(value)) else "—"
+    val event = if (status.hasStepEvent) {
+        if (status.lastBackend == TuningConfig.BACKEND_EXACT) {
+            if (isZh) "最近读取已执行：${time(status.lastEventAt)} · EXACT\n微信原始业务步数 ${status.lastOriginal} → 生效步数 ${status.lastEffective}"
+            else "Last read executed: ${time(status.lastEventAt)} · EXACT\nWeChat original business steps ${status.lastOriginal} → effective steps ${status.lastEffective}"
+        } else {
+            if (isZh) "最近计步事件已处理：${time(status.lastEventAt)} · ${if (status.lastEventSynthetic) "合成" else "传感器"}\n传感器累计原始值 ${status.lastOriginal} → 输出值 ${status.lastEffective}"
+            else "Last step event processed: ${time(status.lastEventAt)} · ${if (status.lastEventSynthetic) "synthetic" else "sensor"}\nCumulative sensor original ${status.lastOriginal} → output ${status.lastEffective}"
+        }
+    } else if (isZh) "尚未观察到计步事件；心跳独立于计步事件。" else "No step event observed; heartbeat runs independently of step events."
+    val displayReason = if (status.lastBackend == TuningConfig.BACKEND_EXACT && status.backendReason.contains("尚未真机运行验证")) {
+        if (isZh) "Play 版微信 8.0.80 / 3200 已通过真机验证：计划重建、首读无突跳、窗口内渐进增长。"
+        else "Play WeChat 8.0.80 / 3200 verified on device: plan rebuild, zero initial jump, and smooth in-window progression."
+    } else {
+        status.backendReason
+    }
+    val exactPendingLine = if (status.lastBackend == TuningConfig.BACKEND_EXACT) {
+        if (isZh) "\n上传入口、服务端排行榜及窗口结束后的行为待验证"
+        else "\nPending verification: upload entry, server leaderboard, and post-window behavior"
+    } else {
+        ""
+    }
+    val actualMode = status.configMode.ifBlank { if (isZh) "未知" else "Unknown" }
+    val actualBackend = status.configBackend.ifBlank { if (isZh) "未知" else "Unknown" }
+    val actualGen = status.configGeneration?.toString() ?: if (isZh) "未知" else "Unknown"
+    val configLine = if (isZh) {
+        "\n微信实际读取：mode=$actualMode · backend=$actualBackend · gen=$actualGen"
+    } else {
+        "\nWeChat config read: mode=$actualMode · backend=$actualBackend · gen=$actualGen"
+    }
+    val newerActivity = maxOf(status.lastEventAt, status.hookAliveAt) > status.lastErrorAt && status.lastErrorAt > 0L
+    val error = if (status.lastError.isBlank()) "" else if (isZh) {
+        "\n最近历史异常（${time(status.lastErrorAt)}）：${status.lastError}" +
+            if (newerActivity) "\n异常后仍有心跳或事件记录。" else "\n尚无更新活动记录，请刷新检查。"
+    } else "\nLast recorded error (${time(status.lastErrorAt)}): ${status.lastError}" +
+        if (newerActivity) "\nA heartbeat or event was recorded after this error." else "\nNo newer activity recorded; refresh to check."
+    return if (isZh) "Hook：${status.hookStatus.ifBlank { "未知" }} · 心跳 ${time(status.hookAliveAt)}\n模块 ${status.hookVersion.ifBlank { "未知" }} · 微信 ${status.wechatVersion.ifBlank { "未知" }}\n后端 ${status.lastBackend.ifBlank { "未知" }} · $displayReason$exactPendingLine$configLine$syncSuffix\n$event$error"
+    else "Hook: ${status.hookStatus.ifBlank { "Unknown" }} · Heartbeat ${time(status.hookAliveAt)}\nModule ${status.hookVersion.ifBlank { "Unknown" }} · WeChat ${status.wechatVersion.ifBlank { "Unknown" }}\nBackend ${status.lastBackend.ifBlank { "Unknown" }} · $displayReason$exactPendingLine$configLine$syncSuffix\n$event$error"
 }

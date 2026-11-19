@@ -47,6 +47,8 @@ import com.weitiao.tuning.core.CscPrefs
 import com.weitiao.tuning.core.LsposedScopeHelper
 import com.weitiao.tuning.core.RegionApplyState
 import com.weitiao.tuning.core.RootShell
+import com.weitiao.tuning.core.StepHookStatus
+import com.weitiao.tuning.core.HeartbeatHealth
 import com.weitiao.tuning.core.StoreCleaner
 import com.weitiao.tuning.core.TuningConfig
 import com.weitiao.tuning.core.TuningPrefs
@@ -93,6 +95,15 @@ fun DashboardScreen(
         mutableStateOf(App.getXposedService() != null || App.getRemotePrefs() != null)
     }
     var hasRoot by remember { mutableStateOf(false) }
+    var stepHookStatus by remember { mutableStateOf<StepHookStatus?>(null) }
+    var stepStatusNow by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(hasRoot, refreshTrigger) {
+        while (isActive) {
+            stepHookStatus = if (hasRoot) withContext(Dispatchers.IO) { readWechatStepHookStatus() } else null
+            stepStatusNow = System.currentTimeMillis()
+            delay(30_000L)
+        }
+    }
     var batteryRestricted by remember {
         mutableStateOf(TuningPrefs.isBatteryOptimizationRestricted(context))
     }
@@ -185,8 +196,7 @@ fun DashboardScreen(
 
     fun updateTuning(toastMessage: String? = null, block: (TuningConfig) -> TuningConfig) {
         val next = block(tuning)
-        tuning = next
-        TuningPrefs.save(context, next)
+        tuning = TuningPrefs.save(context, next)
         onConfigChanged()
         toastMessage?.let { msg -> scope.launch { snackbar.showSnackbar(msg) } }
     }
@@ -408,12 +418,11 @@ fun DashboardScreen(
             // (3) 微信增强
             val wechatStatusText = when {
                 tuning.stepEnabled && tuning.antiRecall -> {
-                    if (isZh) "已开启：步数 ${tuning.stepMultiplier}倍 + 消息防撤回"
-                    else "On: ${tuning.stepMultiplier}x Steps + Anti-Recall"
+                    if (isZh) "${stepModeSummary(tuning, true)} + 消息防撤回"
+                    else "${stepModeSummary(tuning, false)} + Anti-Recall"
                 }
                 tuning.stepEnabled -> {
-                    if (isZh) "已开启：步数修改（${tuning.stepMultiplier}倍 · 上限 ${tuning.stepMaximum}）"
-                    else "On: Step Modifier (${tuning.stepMultiplier}x)"
+                    stepModeSummary(tuning, isZh)
                 }
                 tuning.antiRecall -> {
                     if (isZh) "已开启：消息防撤回（步数修改未开启）"
@@ -423,13 +432,22 @@ fun DashboardScreen(
             }
             OneUiHomeFeatureCard(
                 title = if (isZh) "微信增强" else "WeChat Enhancement",
-                description = if (isZh) "自动递增或放大今日微信运动步数，并阻止对方撤回聊天消息"
+                description = if (isZh) "按每日计划或倍率调整微信运动步数，并阻止对方撤回聊天消息"
                 else "Modify daily WeChat steps and prevent others from recalling messages",
-                statusText = wechatStatusText,
+                statusText = if (tuning.stepEnabled) {
+                    stepDashboardStatusText(
+                        summaryLine = wechatStatusText,
+                        status = stepHookStatus,
+                        hasRoot = hasRoot,
+                        nowMillis = stepStatusNow,
+                        isZh = isZh,
+                    )
+                } else wechatStatusText,
                 icon = Icons.AutoMirrored.Filled.DirectionsRun,
                 accentColor = IosGlassTokens.IosGreen,
                 isActive = wechatActive,
-                isWarning = wechatActive && !xposedReady,
+                isWarning = wechatActive && (!xposedReady || (tuning.stepEnabled &&
+                    stepHookStatus?.heartbeatHealth(hasRoot, stepStatusNow) in setOf(HeartbeatHealth.STALE, HeartbeatHealth.DEAD))),
                 onClick = {
                     if (!tuning.stepEnabled && tuning.antiRecall) {
                         onOpenFeature(FeaturePageId.WECHAT_ANTI_RECALL)

@@ -29,9 +29,12 @@ class WechatStepEngineTest {
         val engine = createTestEngine()
         val config = TuningConfig(
             stepEnabled = true,
+            stepWindowStart = 0,
+            stepWindowEnd = 1440,
             stepMultiplier = 100, // 100x multiplier
             stepMaximum = 80_000,
             stepAuto = false,
+            stepMode = "MULTIPLIER",
             stepEndHour = 24,
         )
 
@@ -65,9 +68,12 @@ class WechatStepEngineTest {
         val engine = createTestEngine()
         val config = TuningConfig(
             stepEnabled = true,
+            stepWindowStart = 0,
+            stepWindowEnd = 1440,
             stepMultiplier = 10,
             stepMaximum = 60_000,
             stepAuto = false,
+            stepMode = "MULTIPLIER",
         )
 
         var raw = 15000f
@@ -99,9 +105,12 @@ class WechatStepEngineTest {
         val engine = createTestEngine()
         val config = TuningConfig(
             stepEnabled = true,
+            stepWindowStart = 0,
+            stepWindowEnd = 1440,
             stepMultiplier = 100,
             stepMaximum = 50_000,
             stepAuto = true,
+            stepMode = "LEGACY_AUTO",
             stepEndHour = 24,
         )
 
@@ -121,12 +130,15 @@ class WechatStepEngineTest {
     }
 
     @Test
-    fun stepEngineFreezesAtEndHour() {
+    fun legacyAutoWithNoCutoffKeepsIncreasing() {
         val engine = createTestEngine()
         val config = TuningConfig(
             stepEnabled = true,
+            stepWindowStart = 0,
+            stepWindowEnd = 1440,
             stepMultiplier = 50,
             stepMaximum = 50_000,
+            stepMode = "LEGACY_AUTO",
             stepEndHour = 0, // 0 = don't stop / 24h
         )
 
@@ -143,9 +155,12 @@ class WechatStepEngineTest {
         val engine1x = createTestEngine()
         val config1x = TuningConfig(
             stepEnabled = true,
+            stepWindowStart = 0,
+            stepWindowEnd = 1440,
             stepMultiplier = 1,
             stepMaximum = 50_000,
             stepAuto = false,
+            stepMode = "MULTIPLIER",
             stepEndHour = 24,
         )
         val base1 = engine1x.processStepCounter(1000f, config1x)
@@ -155,9 +170,12 @@ class WechatStepEngineTest {
         val engine10x = createTestEngine()
         val config10x = TuningConfig(
             stepEnabled = true,
+            stepWindowStart = 0,
+            stepWindowEnd = 1440,
             stepMultiplier = 10,
             stepMaximum = 50_000,
             stepAuto = false,
+            stepMode = "MULTIPLIER",
             stepEndHour = 24,
         )
         val base10 = engine10x.processStepCounter(1000f, config10x)
@@ -170,9 +188,12 @@ class WechatStepEngineTest {
         val engine = createTestEngine()
         val config = TuningConfig(
             stepEnabled = true,
+            stepWindowStart = 0,
+            stepWindowEnd = 1440,
             stepMultiplier = 50,
             stepMaximum = 20_000,
             stepAuto = true,
+            stepMode = "LEGACY_AUTO",
             stepEndHour = 24,
         )
 
@@ -202,9 +223,12 @@ class WechatStepEngineTest {
         val engine = createTestEngine()
         val config = TuningConfig(
             stepEnabled = true,
+            stepWindowStart = 0,
+            stepWindowEnd = 1440,
             stepMultiplier = 500,
             stepMaximum = 50_000,
             stepAuto = false,
+            stepMode = "MULTIPLIER",
             stepEndHour = 24,
         )
 
@@ -256,9 +280,12 @@ class WechatStepEngineTest {
 
         val config = TuningConfig(
             stepEnabled = true,
+            stepWindowStart = 0,
+            stepWindowEnd = 1440,
             stepMultiplier = 3,
             stepMaximum = 28_000,
             stepAuto = true,
+            stepMode = "LEGACY_AUTO",
             stepEndHour = 24,
         )
 
@@ -395,9 +422,12 @@ class WechatStepEngineTest {
 
         val config = TuningConfig(
             stepEnabled = true,
+            stepWindowStart = 0,
+            stepWindowEnd = 1440,
             stepMultiplier = 3,
             stepMaximum = 28_000,
             stepAuto = true,
+            stepMode = "LEGACY_AUTO",
             stepEndHour = 24,
         )
 
@@ -449,9 +479,12 @@ class WechatStepEngineTest {
 
         val config = TuningConfig(
             stepEnabled = true,
+            stepWindowStart = 0,
+            stepWindowEnd = 1440,
             stepMultiplier = 3,
             stepMaximum = 28_000,
             stepAuto = true,
+            stepMode = "LEGACY_AUTO",
             stepEndHour = 24,
         )
 
@@ -495,9 +528,12 @@ class WechatStepEngineTest {
 
         val config = TuningConfig(
             stepEnabled = true,
+            stepWindowStart = 0,
+            stepWindowEnd = 1440,
             stepMultiplier = 3,
             stepMaximum = 28_000,
             stepAuto = true,
+            stepMode = "LEGACY_AUTO",
             stepEndHour = 24,
         )
 
@@ -541,9 +577,12 @@ class WechatStepEngineTest {
 
         val config = TuningConfig(
             stepEnabled = true,
+            stepWindowStart = 0,
+            stepWindowEnd = 1440,
             stepMultiplier = 10,
             stepMaximum = 28_000,
             stepAuto = true,
+            stepMode = "LEGACY_AUTO",
             stepEndHour = 24,
         )
 

@@ -481,10 +481,15 @@ fun FeatureDetailScreen(
 
     fun updateTuning(toastMessage: String? = null, block: (TuningConfig) -> TuningConfig) {
         val next = block(tuning)
-        tuning = next
-        TuningPrefs.save(context, next)
+        val result = TuningPrefs.saveWithStatus(context, next)
+        tuning = result.config
         onConfigChanged()
-        toastMessage?.let { msg -> scope.launch { snackbar.showSnackbar(msg) } }
+        val msg = if (!result.remoteSynced) {
+            if (isZh) "仅本地保存，尚未同步到 LSPosed" else "Saved locally only; not synced to LSPosed"
+        } else {
+            toastMessage
+        }
+        msg?.let { text -> scope.launch { snackbar.showSnackbar(text) } }
     }
 
     val pageTitle = when (pageId) {
@@ -504,7 +509,7 @@ fun FeatureDetailScreen(
         FeaturePageId.STORE_REGION -> if (isZh) "切换三星应用商店与主题商店所在地区，不影响物理 SIM 卡与信号" else "Switch Galaxy Store region without affecting physical SIM or signal"
         FeaturePageId.DEVICE_SPOOF -> if (isZh) "修改应用识别到的手机型号（如社交平台小尾巴、游戏高帧率）" else "Modify device model identity visible to target apps"
         FeaturePageId.PER_APP_MODEL -> if (isZh) "为不同应用单独指定伪装机型，未单独设置的应用跟随默认机型" else "Set individual models per app; others follow the default model"
-        FeaturePageId.WECHAT_STEPS -> if (isZh) "自动递增或按倍率放大今日微信运动步数，达到上限自动停止" else "Auto-increment or multiply daily WeChat steps up to your cap"
+        FeaturePageId.WECHAT_STEPS -> if (isZh) "按每日计划或真实步数倍率调整今日微信运动步数，达到硬上限自动停止" else "Adjust daily WeChat steps by daily plan or multiplier up to your hard cap"
         FeaturePageId.WECHAT_ANTI_RECALL -> if (isZh) "阻止对方撤回微信消息，保留撤回的文字、图片、语音和视频" else "Prevent others from recalling WeChat messages and media"
         FeaturePageId.FAST_CHARGE -> if (isZh) "亮屏边用边充时解除充电限流，达到安全温度自动恢复系统温控" else "Unlock full charging speed while screen is on with thermal safety cutoff"
         FeaturePageId.BYPASS_POWER -> if (isZh) "运行指定游戏时由充电器直接给主板供电，减少电池发热与损耗" else "Power motherboard directly while gaming to reduce heat and battery wear"
@@ -652,8 +657,7 @@ fun FeatureDetailScreen(
                                 scope.launch {
                                     val count = withContext(Dispatchers.IO) {
                                         if (combinedTargets.isNotEmpty()) {
-                                            val synced = LsposedScopeHelper.syncScopesWithRoot(context, combinedTargets)
-                                            if (!synced) LsposedScopeHelper.requestScopesViaService(combinedTargets)
+                                            LsposedScopeHelper.requestScopesViaService(combinedTargets)
                                         }
                                         val toRestart = LsposedScopeHelper.resolveRestartableTargetPackages(combinedTargets)
                                         StoreCleaner.forceStopPackages(toRestart)
@@ -695,8 +699,7 @@ fun FeatureDetailScreen(
                             pendingRestartConfirm = {
                                 scope.launch {
                                     val ok = withContext(Dispatchers.IO) {
-                                        val allTargets = csc.deviceTargetPackages + csc.perAppDeviceModels.keys + pkg
-                                        LsposedScopeHelper.syncScopesWithRoot(context, allTargets)
+                                        LsposedScopeHelper.requestScopesViaService(listOf(pkg))
                                         StoreCleaner.forceStopPackages(listOf(pkg)) > 0
                                     }
                                     snackbar.showSnackbar(
@@ -723,44 +726,26 @@ fun FeatureDetailScreen(
                         onNavigatePage(if (idx == 0) FeaturePageId.WECHAT_STEPS else FeaturePageId.WECHAT_ANTI_RECALL)
                     },
                     onUpdateTuning = { toast, transform ->
-                        val updated = transform(tuning)
                         updateTuning(toast, transform)
-                        if (updated.stepEnabled || updated.antiRecall) {
-                            scope.launch(Dispatchers.IO) {
-                                val targets = setOf("com.tencent.mm")
-                                val synced = hasRoot && LsposedScopeHelper.syncScopesWithRoot(context, targets)
-                                if (!synced) {
-                                    LsposedScopeHelper.requestScopesViaService(targets)
-                                }
-                            }
-                        }
                     },
                     onRequestRestartWechat = {
                         if (!hasRoot) {
                             scope.launch {
-                                withContext(Dispatchers.IO) {
-                                    LsposedScopeHelper.requestScopesViaService(setOf("com.tencent.mm"))
-                                }
                                 snackbar.showSnackbar(
                                     if (isZh) "配置已自动保存，当前无 Root 权限，请手动划掉微信后台并重开"
                                     else "Saved. Without Root, please close and reopen WeChat manually.",
                                 )
                             }
                         } else {
-                            pendingRestartTitle = if (isZh) "立即重启微信？" else "Restart WeChat Now?"
+                            pendingRestartTitle = if (isZh) "一键重启微信生效？" else "Restart WeChat to Apply?"
                             pendingRestartMessage = if (isZh) {
-                                "将自动同步微信到 LSPosed 作用域，并通过 Root 强制停止并重新启动微信以加载最新配置。"
+                                "将通过 Root 强制关闭并重新启动微信，会中断当前聊天、通话或未保存页面。请确认已在 LSPosed 中勾选「微信」。"
                             } else {
-                                "Will sync WeChat to LSPosed scope, force-stop and relaunch WeChat via Root."
+                                "Will force-stop and relaunch WeChat via Root, interrupting active chats or calls. Ensure WeChat is enabled in LSPosed scope."
                             }
                             pendingRestartConfirm = {
                                 scope.launch {
                                     val code = withContext(Dispatchers.IO) {
-                                        val targets = setOf("com.tencent.mm")
-                                        val synced = LsposedScopeHelper.syncScopesWithRoot(context, targets)
-                                        if (!synced) {
-                                            LsposedScopeHelper.requestScopesViaService(targets)
-                                        }
                                         RootShell.exec(
                                             "am force-stop com.tencent.mm && monkey -p com.tencent.mm -c android.intent.category.LAUNCHER 1",
                                         ).first

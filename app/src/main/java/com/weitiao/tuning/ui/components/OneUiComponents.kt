@@ -1045,6 +1045,7 @@ fun OneUiHomeFeatureCard(
     checked: Boolean? = null,
     onCheckedChange: ((Boolean) -> Unit)? = null,
     onClick: () -> Unit,
+    statusMaxLines: Int = 4,
     modifier: Modifier = Modifier,
 ) {
     val haptics = rememberOneUiHaptics()
@@ -1112,12 +1113,13 @@ fun OneUiHomeFeatureCard(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Row(
-                    verticalAlignment = Alignment.CenterVertically,
+                    verticalAlignment = Alignment.Top,
                     horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    modifier = Modifier.padding(top = 1.dp),
+                    modifier = Modifier.padding(top = 2.dp),
                 ) {
                     Box(
                         modifier = Modifier
+                            .padding(top = 5.dp)
                             .size(6.dp)
                             .clip(CircleShape)
                             .background(statusDotColor),
@@ -1125,9 +1127,10 @@ fun OneUiHomeFeatureCard(
                     Text(
                         text = statusText,
                         fontSize = 11.5.sp,
+                        lineHeight = 15.5.sp,
                         fontWeight = FontWeight.Medium,
                         color = statusTextColor,
-                        maxLines = 1,
+                        maxLines = statusMaxLines,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }

@@ -673,17 +673,17 @@ internal fun DeviceSpoofDetailContent(
             showTargetScopePicker = false
             if (updatedTargets.isNotEmpty()) {
                 scope.launch(Dispatchers.IO) {
-                    val allScopeTargets = updatedTargets + csc.perAppDeviceModels.keys
-                    val synced = LsposedScopeHelper.syncScopesWithRoot(context, allScopeTargets)
-                    if (!synced) {
-                        val newlyAdded = updatedTargets - prevTargets
-                        if (newlyAdded.isNotEmpty()) {
-                            LsposedScopeHelper.requestScopesViaService(newlyAdded)
-                        }
-                    }
-                    if (synced) {
-                        withContext(Dispatchers.Main) {
-                            onShowSnackbar(if (isZh) "已通过 Root 自动同步 LSPosed 作用域" else "Synced LSPosed scope via Root")
+                    val newlyAdded = updatedTargets - prevTargets
+                    if (newlyAdded.isNotEmpty()) {
+                        LsposedScopeHelper.requestScopesViaService(newlyAdded) { approved ->
+                            if (!approved) {
+                                scope.launch {
+                                    onShowSnackbar(
+                                        if (isZh) "未自动加入作用域，请在 LSPosed 管理器中手动勾选目标应用"
+                                        else "Scope not added automatically; please enable target apps in LSPosed Manager",
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -722,17 +722,13 @@ internal fun PerAppModelDetailContent(
 
     fun syncAppScopeInBackground(pkg: String) {
         scope.launch(Dispatchers.IO) {
-            val allTargets = csc.deviceTargetPackages + csc.perAppDeviceModels.keys + pkg
-            val synced = LsposedScopeHelper.syncScopesWithRoot(context, allTargets)
-            if (!synced) {
-                LsposedScopeHelper.requestScopesViaService(setOf(pkg)) { approved ->
-                    if (!approved) {
-                        scope.launch {
-                            onShowSnackbar(
-                                if (isZh) "请在 LSPosed 中勾选该应用作用域以使伪装生效"
-                                else "Please enable this app in LSPosed scope"
-                            )
-                        }
+            LsposedScopeHelper.requestScopesViaService(setOf(pkg)) { approved ->
+                if (!approved) {
+                    scope.launch {
+                        onShowSnackbar(
+                            if (isZh) "请在 LSPosed 管理器中手动勾选该应用作用域以使伪装生效"
+                            else "Please enable this app in LSPosed Manager scope",
+                        )
                     }
                 }
             }

@@ -123,11 +123,12 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
             val editor = local.edit()
             var written = 0
             remote.all.forEach { (key, value) ->
-                if (key == CscConstants.KEY_LOCAL_SAVED_AT) return@forEach
+                if (key == CscConstants.KEY_LOCAL_SAVED_AT || key == TuningPrefs.KEY_REMOTE_SYNC_OK) return@forEach
                 if (putValue(editor, key, value)) written++
             }
             // 回填后打上标记：从此本地不再是"默认值"，可以正常正向覆盖 remote 了
             editor.putLong(CscConstants.KEY_LOCAL_SAVED_AT, System.currentTimeMillis())
+            editor.putBoolean(TuningPrefs.KEY_REMOTE_SYNC_OK, true)
             val committed = editor.commit()
             Log.i(TAG, "同步方向 remote -> local（本地无保存标记，以 hook 现值为准）：写入 $written 项 commit=$committed")
             return
@@ -137,12 +138,13 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
         var written = 0
         local.all.forEach { (key, value) ->
             // 标记只属于本地进程，不能污染 remote（否则下次启动的方向判断会失真）
-            if (key == CscConstants.KEY_LOCAL_SAVED_AT) return@forEach
+            if (key == CscConstants.KEY_LOCAL_SAVED_AT || key == TuningPrefs.KEY_REMOTE_SYNC_OK) return@forEach
             if (putValue(editor, key, value)) written++
         }
         val committed = editor.commit()
         Log.i(TAG, "同步方向 local -> remote（本地保存于 $localSavedAt）：写入 $written 项 commit=$committed")
-        verifySync(local, remote)
+        val verified = verifySync(local, remote)
+        local.edit().putBoolean(TuningPrefs.KEY_REMOTE_SYNC_OK, committed && verified).commit()
     }
 
     /**
@@ -151,10 +153,10 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
      * 静默的同步失败是这类模块最难排查的故障——UI 显示正常、hook 读到的却是旧值，
      * 用户只能看到"功能没生效"这一个现象。这里把差异摊到 logcat 里。
      */
-    private fun verifySync(local: SharedPreferences, remote: SharedPreferences) {
+    private fun verifySync(local: SharedPreferences, remote: SharedPreferences): Boolean {
         val mismatches = mutableListOf<String>()
         local.all.forEach { (key, value) ->
-            if (key == CscConstants.KEY_LOCAL_SAVED_AT) return@forEach
+            if (key == CscConstants.KEY_LOCAL_SAVED_AT || key == TuningPrefs.KEY_REMOTE_SYNC_OK) return@forEach
             if (!remote.contains(key)) {
                 mismatches += "$key(remote 缺失)"
                 return@forEach
@@ -166,8 +168,10 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
         }
         if (mismatches.isEmpty()) {
             Log.i(TAG, "同步校验通过（local -> remote）")
+            return true
         } else {
             Log.w(TAG, "同步校验不一致（local -> remote）：${mismatches.joinToString("; ")}")
+            return false
         }
     }
 
