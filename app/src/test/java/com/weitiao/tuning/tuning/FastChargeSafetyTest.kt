@@ -1,6 +1,7 @@
 package com.weitiao.tuning.tuning
 
 import android.app.NotificationManager
+import com.weitiao.tuning.core.RootShell
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -387,5 +388,112 @@ class FastChargeSafetyTest {
         // 5. Missing root or incomplete output -> null
         assertNull(FastChargeController.parseNodeBlockReport("__UID__10508\n__DONE__"))
         assertNull(FastChargeController.parseNodeBlockReport("__UID__0\n0:/sys/class/power_supply/battery/temp"))
+    }
+
+    @Test
+    fun nodeSyncLoopTerminatesImmediatelyOnFailureAndMaxAttempts() {
+        // 1. 失败场景（如无 Root 权限返回 appliedBlocked=null，与 targetBlocked=false 不相等）必须立刻退出循环
+        assertFalse(
+            BrightScreenFastChargeService.shouldContinueNodeSyncLoop(
+                attempts = 1,
+                syncFailed = true,
+                syncScheduled = true,
+                forceRestoreRequested = true,
+                appliedBlocked = null,
+                targetBlocked = false,
+            ),
+        )
+
+        // 2. 达到最大轮次上限时即使状态尚未对齐也必须退出，杜绝无限自旋
+        assertFalse(
+            BrightScreenFastChargeService.shouldContinueNodeSyncLoop(
+                attempts = 4,
+                syncFailed = false,
+                syncScheduled = false,
+                forceRestoreRequested = false,
+                appliedBlocked = true,
+                targetBlocked = false,
+            ),
+        )
+
+        // 3. 正常有 Root 且首轮成功对齐目标状态 -> 退出循环
+        assertFalse(
+            BrightScreenFastChargeService.shouldContinueNodeSyncLoop(
+                attempts = 1,
+                syncFailed = false,
+                syncScheduled = false,
+                forceRestoreRequested = false,
+                appliedBlocked = true,
+                targetBlocked = true,
+            ),
+        )
+
+        // 4. 正常有 Root 但执行期间发生策略翻转（如切为强制恢复或状态未对齐）-> 继续同步一轮
+        assertTrue(
+            BrightScreenFastChargeService.shouldContinueNodeSyncLoop(
+                attempts = 1,
+                syncFailed = false,
+                syncScheduled = false,
+                forceRestoreRequested = true,
+                appliedBlocked = true,
+                targetBlocked = true,
+            ),
+        )
+        assertTrue(
+            BrightScreenFastChargeService.shouldContinueNodeSyncLoop(
+                attempts = 1,
+                syncFailed = false,
+                syncScheduled = false,
+                forceRestoreRequested = false,
+                appliedBlocked = true,
+                targetBlocked = false,
+            ),
+        )
+    }
+
+    @Test
+    fun rootRetryCooldownAndErrorLogThrottleWorkWithoutMainThreadBlock() {
+        // 1. 失败后在 60s 冷却期内且后台缓存尚未恢复 Root -> 保持冷却跳过重复尝试
+        assertTrue(
+            BrightScreenFastChargeService.isRootRetryInCooldown(
+                rootSuccessState = false,
+                lastRootFailureElapsed = 10_000L,
+                nowElapsed = 45_000L,
+                cachedHasRoot = false,
+            ),
+        )
+        assertTrue(
+            BrightScreenFastChargeService.isRootRetryInCooldown(
+                rootSuccessState = false,
+                lastRootFailureElapsed = 10_000L,
+                nowElapsed = 45_000L,
+                cachedHasRoot = null,
+            ),
+        )
+
+        // 2. 后台周期探针已检测到用户重新授予 Root（cachedHasRoot == true）-> 立即解除冷却
+        assertFalse(
+            BrightScreenFastChargeService.isRootRetryInCooldown(
+                rootSuccessState = false,
+                lastRootFailureElapsed = 10_000L,
+                nowElapsed = 20_000L,
+                cachedHasRoot = true,
+            ),
+        )
+
+        // 3. 超过 60s 冷却期 -> 解除冷却允许再探一次
+        assertFalse(
+            BrightScreenFastChargeService.isRootRetryInCooldown(
+                rootSuccessState = false,
+                lastRootFailureElapsed = 10_000L,
+                nowElapsed = 70_000L,
+                cachedHasRoot = false,
+            ),
+        )
+
+        // 4. RootShell 异常日志 30s 节流保护
+        assertTrue(RootShell.shouldLogSuFailure(nowElapsedMs = 5_000L, lastLoggedElapsedMs = 0L))
+        assertFalse(RootShell.shouldLogSuFailure(nowElapsedMs = 20_000L, lastLoggedElapsedMs = 5_000L))
+        assertTrue(RootShell.shouldLogSuFailure(nowElapsedMs = 35_000L, lastLoggedElapsedMs = 5_000L))
     }
 }

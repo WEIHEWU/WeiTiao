@@ -244,6 +244,7 @@ class PassThroughService : Service() {
     }
 
     private fun readForegroundPackage(): String {
+        if (!RootShell.hasRoot()) return ""
         val (code, out) = RootShell.exec("dumpsys window displays | grep -E 'mCurrentFocus'", timeoutSeconds = 2)
         if (code == 0 && out.isNotBlank()) {
             val matcher = FOCUSED_WINDOW_PATTERN.matcher(out)
@@ -291,7 +292,9 @@ class PassThroughService : Service() {
         handler.removeCallbacks(pollRunnable)
         FastChargeScheduler.enable(this)
         postWorker {
-            setPassThroughSysfs(false)
+            if (appliedState == true || RootShell.hasRoot()) {
+                setPassThroughSysfs(false)
+            }
             appliedState = false
             handler.post {
                 refreshBatteryState()
@@ -311,7 +314,9 @@ class PassThroughService : Service() {
         pollRunning = false
         handler.removeCallbacks(pollRunnable)
         postWorker {
-            setPassThroughSysfs(false)
+            if (appliedState == true || RootShell.hasRoot()) {
+                setPassThroughSysfs(false)
+            }
             appliedState = false
             handler.post {
                 // 关 sysfs 是异步的，这期间用户可能又把开关打开了。

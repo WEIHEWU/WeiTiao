@@ -13,6 +13,7 @@ import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
+import com.weitiao.tuning.core.RootShell
 import com.weitiao.tuning.core.TuningConfig
 import com.weitiao.tuning.core.TuningPrefs
 import java.util.concurrent.Executors
@@ -65,6 +66,7 @@ class BrightScreenFastChargeService : Service() {
     @Volatile private var appliedBlocked: Boolean? = null
     @Volatile private var rootSuccessState: Boolean? = null
     @Volatile private var lastVerifyElapsed = 0L
+    @Volatile private var lastRootFailureElapsed = 0L
     @Volatile private var lastTickElapsed = 0L
     @Volatile private var samsungSettingsApplied = false
 
@@ -214,9 +216,13 @@ class BrightScreenFastChargeService : Service() {
             return START_NOT_STICKY
         }
 
-        if (!samsungSettingsApplied) {
+        if (!samsungSettingsApplied && !isRootRetryInCooldown(rootSuccessState, lastRootFailureElapsed, SystemClock.elapsedRealtime(), RootShell.peekCachedHasRoot())) {
             samsungSettingsApplied = true
             postRoot {
+                if (!RootShell.hasRoot()) {
+                    samsungSettingsApplied = false
+                    return@postRoot
+                }
                 val res = FastChargeController.enableSamsungFastChargingSettings()
                 if (!res.success) samsungSettingsApplied = false
                 logResult("启用三星快充系统设置", res)
@@ -342,6 +348,10 @@ class BrightScreenFastChargeService : Service() {
         desiredBlocked = desired
 
         val now = SystemClock.elapsedRealtime()
+        if (isRootRetryInCooldown(rootSuccessState, lastRootFailureElapsed, now, RootShell.peekCachedHasRoot())) {
+            return
+        }
+
         val verifyIntervalMs = if ((isFullChargeReleased || currentLevel >= 100) && !isOverheated) {
             VERIFY_INTERVAL_FULL_MS
         } else {
@@ -374,18 +384,27 @@ class BrightScreenFastChargeService : Service() {
 
     /**
      * 在单线程 rootExecutor 上串行同步温控节点状态。
-     * 不再因前一次检测未完成而丢弃随后的「熔断/满电释放/拔线/息屏解锁」指令！
+     * 不再因前一次检测未完成而丢弃随后的「熔断/满电释放/拔线/息屏解锁」指令；
+     * 同时在无 Root 或同步失败时立即退出循环，防止 `appliedBlocked == null` 引发 10ms 级 CPU 死循环。
      */
     private fun scheduleNodeSync() {
         if (!syncScheduled.compareAndSet(false, true)) return
         postRoot {
             try {
+                var attempts = 0
                 while (true) {
+                    attempts++
                     syncScheduled.set(false)
                     val wantBlock = desiredBlocked && shouldBlockCurrently()
                     val forceUnlock = forceRestoreRequested.getAndSet(false)
+                    var syncFailed = false
 
-                    if (wantBlock && !forceUnlock) {
+                    if (!forceUnlock && appliedBlocked != true && !RootShell.hasRoot()) {
+                        rootSuccessState = false
+                        appliedBlocked = null
+                        syncFailed = true
+                        lastRootFailureElapsed = SystemClock.elapsedRealtime()
+                    } else if (wantBlock && !forceUnlock) {
                         val blocked = FastChargeController.areTemperatureNodesBlocked()
                         if (blocked == true) {
                             appliedBlocked = true
@@ -393,20 +412,35 @@ class BrightScreenFastChargeService : Service() {
                         } else {
                             val result = FastChargeController.blockTemperatureNodes()
                             rootSuccessState = result.success
-                            appliedBlocked = if (result.success) true else null
+                            if (result.success) {
+                                appliedBlocked = true
+                            } else {
+                                appliedBlocked = null
+                                syncFailed = true
+                                lastRootFailureElapsed = SystemClock.elapsedRealtime()
+                            }
                             logResult("亮屏启用充电温控优化", result)
                         }
                     } else {
-                        // 过热保护触发、满电释放或强制解锁时无条件执行 restoreTemperatureNodes（强制 chmod 0644 全部温控节点）
+                        val anyBlocked = FastChargeController.isAnyTemperatureNodeBlocked()
+                        // 过热保护触发、满电释放或强制解锁时无条件执行 restoreTemperatureNodes（强制 chmod 0644 全部温控节点）；
+                        // 无 Root 时不陷入重复失败死循环
                         val shouldRestore = forceUnlock ||
                             isOverheated ||
                             isFullChargeReleased ||
                             appliedBlocked != false ||
-                            (FastChargeController.isAnyTemperatureNodeBlocked() != false)
+                            anyBlocked == true ||
+                            (anyBlocked == null && rootSuccessState != false)
                         if (shouldRestore) {
                             val result = FastChargeController.restoreTemperatureNodes()
                             rootSuccessState = result.success
-                            appliedBlocked = if (result.success) false else null
+                            if (result.success) {
+                                appliedBlocked = false
+                            } else {
+                                appliedBlocked = null
+                                syncFailed = true
+                                lastRootFailureElapsed = SystemClock.elapsedRealtime()
+                            }
                             logResult("恢复官方原生温控", result)
                         } else {
                             appliedBlocked = false
@@ -414,8 +448,16 @@ class BrightScreenFastChargeService : Service() {
                     }
                     lastVerifyElapsed = SystemClock.elapsedRealtime()
 
-                    // 若在执行 root 命令期间 desiredBlocked 或 forceRestoreRequested 发生了变化，立即再跑一轮
-                    if (!syncScheduled.get() && !forceRestoreRequested.get() && appliedBlocked == (desiredBlocked && shouldBlockCurrently())) {
+                    val targetBlocked = desiredBlocked && shouldBlockCurrently()
+                    if (!shouldContinueNodeSyncLoop(
+                            attempts = attempts,
+                            syncFailed = syncFailed,
+                            syncScheduled = syncScheduled.get(),
+                            forceRestoreRequested = forceRestoreRequested.get(),
+                            appliedBlocked = appliedBlocked,
+                            targetBlocked = targetBlocked,
+                        )
+                    ) {
                         break
                     }
                 }
@@ -448,9 +490,12 @@ class BrightScreenFastChargeService : Service() {
 
         FastChargeScheduler.enable(this)
         postRoot {
-            logResult("未充电待命，恢复官方温控", FastChargeController.restoreTemperatureNodes())
+            if (RootShell.hasRoot() || appliedBlocked == true) {
+                logResult("未充电待命，恢复官方温控", FastChargeController.restoreTemperatureNodes())
+            }
             appliedBlocked = false
             rootSuccessState = null
+            lastRootFailureElapsed = 0L
             handler.post {
                 if (isEnabled() && FastChargeScheduler.isPluggedIn(this)) {
                     Log.i(TAG, "待命退出取消：已重新连接电源")
@@ -535,9 +580,12 @@ class BrightScreenFastChargeService : Service() {
         isFullChargeReleased = false
         isFullChargeReleasedActive = false
         postRoot {
-            logResult("关闭亮屏快充，恢复官方温控", FastChargeController.restoreTemperatureNodes())
+            if (RootShell.hasRoot() || appliedBlocked == true) {
+                logResult("关闭亮屏快充，恢复官方温控", FastChargeController.restoreTemperatureNodes())
+            }
             appliedBlocked = false
             rootSuccessState = null
+            lastRootFailureElapsed = 0L
             handler.post {
                 // 恢复温控是异步的，这期间用户完全可能又把开关打开了。
                 // 若不重新判断就直接 stopSelf()，刚被重新启用的常驻服务会被这次延迟回调杀掉，
@@ -609,7 +657,9 @@ class BrightScreenFastChargeService : Service() {
         }
         runCatching {
             rootExecutor.execute {
-                FastChargeController.restoreTemperatureNodes()
+                if (RootShell.hasRoot() || appliedBlocked == true) {
+                    FastChargeController.restoreTemperatureNodes()
+                }
             }
         }
         rootExecutor.shutdown()
@@ -646,6 +696,41 @@ class BrightScreenFastChargeService : Service() {
         private const val MIN_TICK_INTERVAL_MS = 3_000L
         private const val VERIFY_INTERVAL_MS = 15_000L // 每 15s 双向复核一次节点权限，防止被系统重置或异常锁死
         private const val VERIFY_INTERVAL_FULL_MS = 30_000L // 100% 满电涓流阶段降频至 30s 复核
+        private const val NO_ROOT_RETRY_COOLDOWN_MS = 60_000L // 无 Root 或执行失败后冷却 60s 再试，避免高频重试空转
+        private const val MAX_SYNC_LOOP_ITERATIONS = 4
         private const val NOTIFY_THROTTLE_MS = 15_000L // 小幅功率波动 (<0.8W) 至少间隔 15s 刷新一次通知
+
+        /**
+         * 判断是否处于无 Root / 执行失败后的冷却期内（纯时间与无阻塞缓存判定，不在主线程触发 su）。
+         * 若后台线程已刷新到 `cachedHasRoot == true`（用户刚授予 Root），则立即解除冷却。
+         */
+        internal fun isRootRetryInCooldown(
+            rootSuccessState: Boolean?,
+            lastRootFailureElapsed: Long,
+            nowElapsed: Long,
+            cachedHasRoot: Boolean?,
+        ): Boolean {
+            if (cachedHasRoot == true) return false
+            return rootSuccessState == false &&
+                lastRootFailureElapsed > 0L &&
+                (nowElapsed - lastRootFailureElapsed < NO_ROOT_RETRY_COOLDOWN_MS)
+        }
+
+        /**
+         * 判断节点同步循环是否需要继续下一轮。
+         * 当一次同步已经失败（如无 Root 权限导致 `appliedBlocked == null`）或达到最大重试轮次时，
+         * 必须立刻终止循环，绝不能因 `null != false` 陷入无限自旋。
+         */
+        internal fun shouldContinueNodeSyncLoop(
+            attempts: Int,
+            syncFailed: Boolean,
+            syncScheduled: Boolean,
+            forceRestoreRequested: Boolean,
+            appliedBlocked: Boolean?,
+            targetBlocked: Boolean,
+        ): Boolean {
+            if (syncFailed || attempts >= MAX_SYNC_LOOP_ITERATIONS) return false
+            return syncScheduled || forceRestoreRequested || appliedBlocked != targetBlocked
+        }
     }
 }

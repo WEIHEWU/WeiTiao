@@ -260,83 +260,85 @@ object FastChargeController {
      *    将每次轮询的外部进程派生从 ~85 次降至 0~4 次。
      */
     fun readBatteryMetrics(context: Context): BatteryMetrics {
-        val (exitCode, stdout) = RootShell.exec(
-            UID_PREAMBLE +
-                "tzb=\"\"; " +
-                "if [ \"\${__wt_tzb:-}\" != \"none\" ]; then " +
-                "if [ -n \"\${__wt_tzb:-}\" ] && [ -e \"\$__wt_tzb/temp\" ]; then { read -r tzb < \"\$__wt_tzb/temp\"; } 2>/dev/null; fi; " +
-                "case \"\$tzb\" in \"\"|-*|0) tzb=\"\"; __wt_tzb=\"\"; matched=0; " +
-                "for z in /sys/class/thermal/thermal_zone*; do " +
-                "[ -e \"\$z/type\" ] || continue; t=\"\"; { read -r t < \"\$z/type\"; } 2>/dev/null; " +
-                "case \"\$t\" in *battery*|*batt*|*BAT*|*sec-battery*) matched=1; tv=\"\"; { read -r tv < \"\$z/temp\"; } 2>/dev/null; " +
-                "case \"\$tv\" in \"\"|-*|0) ;; *) tzb=\"\$tv\"; __wt_tzb=\"\$z\"; break ;; esac ;; esac; done; " +
-                "[ \"\$matched\" = \"0\" ] && [ -z \"\$__wt_tzb\" ] && __wt_tzb=\"none\"; ;; esac; " +
-                "fi; " +
-                "c=\"\"; { read -r c < /sys/class/power_supply/battery/current_now; } 2>/dev/null; " +
-                "v=\"\"; { read -r v < /sys/class/power_supply/battery/voltage_now; } 2>/dev/null; " +
-                "tcf=\"\"; { read -r tcf < /sys/class/sec/sec-cf-thermistor/temperature; } 2>/dev/null; " +
-                "tth=\"\"; { read -r tth < /sys/class/sec/sec-thermistor/temperature; } 2>/dev/null; " +
-                "tap=\"\"; { read -r tap < /sys/class/sec/sec-ap-thermistor/temperature; } 2>/dev/null; " +
-                "tpa=\"\"; { read -r tpa < /sys/class/sec/sec-pa-thermistor/temperature; } 2>/dev/null; " +
-                "p1=/sys/class/power_supply/battery/batt_temp; p2=/sys/class/power_supply/battery/temp; " +
-                "p3=/sys/class/sec/battery/batt_temp; p4=/sys/class/power_supply/battery/chg_temp; p5=/sys/class/power_supply/battery/dchg_temp; " +
-                "tb1=\"\"; tb2=\"\"; tb3=\"\"; tchg=\"\"; tdchg=\"\"; need=\"\"; " +
-                "if [ -e \"\$p1\" ]; then { read -r tb1 < \"\$p1\"; } 2>/dev/null; [ -z \"\$tb1\" ] && need=\"\$need \$p1\"; fi; " +
-                "if [ -e \"\$p2\" ]; then { read -r tb2 < \"\$p2\"; } 2>/dev/null; [ -z \"\$tb2\" ] && need=\"\$need \$p2\"; fi; " +
-                "if [ -e \"\$p3\" ]; then { read -r tb3 < \"\$p3\"; } 2>/dev/null; [ -z \"\$tb3\" ] && need=\"\$need \$p3\"; fi; " +
-                "if [ -e \"\$p4\" ]; then { read -r tchg < \"\$p4\"; } 2>/dev/null; [ -z \"\$tchg\" ] && need=\"\$need \$p4\"; fi; " +
-                "if [ -e \"\$p5\" ]; then { read -r tdchg < \"\$p5\"; } 2>/dev/null; [ -z \"\$tdchg\" ] && need=\"\$need \$p5\"; fi; " +
-                "if [ -n \"\$need\" ]; then " +
-                "relock=\"\"; for line in \$(stat -c \"%a:%n\" \$need 2>/dev/null); do " +
-                "m=\"\${line%%:*}\"; np=\"\${line#*:}\"; " +
-                "case \"\$m\" in 0|00|000|0000) relock=\"\$relock \$np\" ;; esac; " +
-                "done; " +
-                "if [ -n \"\$relock\" ]; then " +
-                "chmod 0444 \$relock 2>/dev/null; " +
-                "[ -z \"\$tb1\" ] && [ -e \"\$p1\" ] && { read -r tb1 < \"\$p1\"; } 2>/dev/null; " +
-                "[ -z \"\$tb2\" ] && [ -e \"\$p2\" ] && { read -r tb2 < \"\$p2\"; } 2>/dev/null; " +
-                "[ -z \"\$tb3\" ] && [ -e \"\$p3\" ] && { read -r tb3 < \"\$p3\"; } 2>/dev/null; " +
-                "[ -z \"\$tchg\" ] && [ -e \"\$p4\" ] && { read -r tchg < \"\$p4\"; } 2>/dev/null; " +
-                "[ -z \"\$tdchg\" ] && [ -e \"\$p5\" ] && { read -r tdchg < \"\$p5\"; } 2>/dev/null; " +
-                "chmod 0000 \$relock 2>/dev/null; " +
-                "fi; " +
-                "fi; " +
-                "echo \"C=\$c\"; echo \"V=\$v\"; " +
-                "echo \"TB1=\$tb1\"; echo \"TB2=\$tb2\"; echo \"TB3=\$tb3\"; echo \"TZB=\$tzb\"; " +
-                "echo \"TCF=\$tcf\"; echo \"TTH=\$tth\"; echo \"TAP=\$tap\"; echo \"TPA=\$tpa\"; " +
-                "echo \"TCHG=\$tchg\"; echo \"TDCHG=\$tdchg\"; " +
-                "echo __DONE__",
-            timeoutSeconds = 4,
-        )
-
         var currentMa = 0
         var voltageMv = 0
         var tempTenths = 0
         var maxChipTempTenths = 0
 
-        if (exitCode == 0 && stdout.contains("__UID__0")) {
-            var rawCurrent = abs(taggedInt(stdout, "C") ?: 0)
-            if (rawCurrent > 100_000) rawCurrent /= 1_000      // 部分内核以 µA 上报
-            currentMa = rawCurrent
+        if (RootShell.hasRoot()) {
+            val (exitCode, stdout) = RootShell.exec(
+                UID_PREAMBLE +
+                    "tzb=\"\"; " +
+                    "if [ \"\${__wt_tzb:-}\" != \"none\" ]; then " +
+                    "if [ -n \"\${__wt_tzb:-}\" ] && [ -e \"\$__wt_tzb/temp\" ]; then { read -r tzb < \"\$__wt_tzb/temp\"; } 2>/dev/null; fi; " +
+                    "case \"\$tzb\" in \"\"|-*|0) tzb=\"\"; __wt_tzb=\"\"; matched=0; " +
+                    "for z in /sys/class/thermal/thermal_zone*; do " +
+                    "[ -e \"\$z/type\" ] || continue; t=\"\"; { read -r t < \"\$z/type\"; } 2>/dev/null; " +
+                    "case \"\$t\" in *battery*|*batt*|*BAT*|*sec-battery*) matched=1; tv=\"\"; { read -r tv < \"\$z/temp\"; } 2>/dev/null; " +
+                    "case \"\$tv\" in \"\"|-*|0) ;; *) tzb=\"\$tv\"; __wt_tzb=\"\$z\"; break ;; esac ;; esac; done; " +
+                    "[ \"\$matched\" = \"0\" ] && [ -z \"\$__wt_tzb\" ] && __wt_tzb=\"none\"; ;; esac; " +
+                    "fi; " +
+                    "c=\"\"; { read -r c < /sys/class/power_supply/battery/current_now; } 2>/dev/null; " +
+                    "v=\"\"; { read -r v < /sys/class/power_supply/battery/voltage_now; } 2>/dev/null; " +
+                    "tcf=\"\"; { read -r tcf < /sys/class/sec/sec-cf-thermistor/temperature; } 2>/dev/null; " +
+                    "tth=\"\"; { read -r tth < /sys/class/sec/sec-thermistor/temperature; } 2>/dev/null; " +
+                    "tap=\"\"; { read -r tap < /sys/class/sec/sec-ap-thermistor/temperature; } 2>/dev/null; " +
+                    "tpa=\"\"; { read -r tpa < /sys/class/sec/sec-pa-thermistor/temperature; } 2>/dev/null; " +
+                    "p1=/sys/class/power_supply/battery/batt_temp; p2=/sys/class/power_supply/battery/temp; " +
+                    "p3=/sys/class/sec/battery/batt_temp; p4=/sys/class/power_supply/battery/chg_temp; p5=/sys/class/power_supply/battery/dchg_temp; " +
+                    "tb1=\"\"; tb2=\"\"; tb3=\"\"; tchg=\"\"; tdchg=\"\"; need=\"\"; " +
+                    "if [ -e \"\$p1\" ]; then { read -r tb1 < \"\$p1\"; } 2>/dev/null; [ -z \"\$tb1\" ] && need=\"\$need \$p1\"; fi; " +
+                    "if [ -e \"\$p2\" ]; then { read -r tb2 < \"\$p2\"; } 2>/dev/null; [ -z \"\$tb2\" ] && need=\"\$need \$p2\"; fi; " +
+                    "if [ -e \"\$p3\" ]; then { read -r tb3 < \"\$p3\"; } 2>/dev/null; [ -z \"\$tb3\" ] && need=\"\$need \$p3\"; fi; " +
+                    "if [ -e \"\$p4\" ]; then { read -r tchg < \"\$p4\"; } 2>/dev/null; [ -z \"\$tchg\" ] && need=\"\$need \$p4\"; fi; " +
+                    "if [ -e \"\$p5\" ]; then { read -r tdchg < \"\$p5\"; } 2>/dev/null; [ -z \"\$tdchg\" ] && need=\"\$need \$p5\"; fi; " +
+                    "if [ -n \"\$need\" ]; then " +
+                    "relock=\"\"; for line in \$(stat -c \"%a:%n\" \$need 2>/dev/null); do " +
+                    "m=\"\${line%%:*}\"; np=\"\${line#*:}\"; " +
+                    "case \"\$m\" in 0|00|000|0000) relock=\"\$relock \$np\" ;; esac; " +
+                    "done; " +
+                    "if [ -n \"\$relock\" ]; then " +
+                    "chmod 0444 \$relock 2>/dev/null; " +
+                    "[ -z \"\$tb1\" ] && [ -e \"\$p1\" ] && { read -r tb1 < \"\$p1\"; } 2>/dev/null; " +
+                    "[ -z \"\$tb2\" ] && [ -e \"\$p2\" ] && { read -r tb2 < \"\$p2\"; } 2>/dev/null; " +
+                    "[ -z \"\$tb3\" ] && [ -e \"\$p3\" ] && { read -r tb3 < \"\$p3\"; } 2>/dev/null; " +
+                    "[ -z \"\$tchg\" ] && [ -e \"\$p4\" ] && { read -r tchg < \"\$p4\"; } 2>/dev/null; " +
+                    "[ -z \"\$tdchg\" ] && [ -e \"\$p5\" ] && { read -r tdchg < \"\$p5\"; } 2>/dev/null; " +
+                    "chmod 0000 \$relock 2>/dev/null; " +
+                    "fi; " +
+                    "fi; " +
+                    "echo \"C=\$c\"; echo \"V=\$v\"; " +
+                    "echo \"TB1=\$tb1\"; echo \"TB2=\$tb2\"; echo \"TB3=\$tb3\"; echo \"TZB=\$tzb\"; " +
+                    "echo \"TCF=\$tcf\"; echo \"TTH=\$tth\"; echo \"TAP=\$tap\"; echo \"TPA=\$tpa\"; " +
+                    "echo \"TCHG=\$tchg\"; echo \"TDCHG=\$tdchg\"; " +
+                    "echo __DONE__",
+                timeoutSeconds = 4,
+            )
 
-            var rawVoltage = abs(taggedInt(stdout, "V") ?: 0)
-            if (rawVoltage > 100_000) rawVoltage /= 1_000      // 部分内核以 µV 上报
-            voltageMv = rawVoltage
+            if (exitCode == 0 && stdout.contains("__UID__0")) {
+                var rawCurrent = abs(taggedInt(stdout, "C") ?: 0)
+                if (rawCurrent > 100_000) rawCurrent /= 1_000      // 部分内核以 µA 上报
+                currentMa = rawCurrent
 
-            val tb1 = normalizeTemp(taggedInt(stdout, "TB1"))
-            val tb2 = normalizeTemp(taggedInt(stdout, "TB2"))
-            val tb3 = normalizeTemp(taggedInt(stdout, "TB3"))
-            val tzb = normalizeTemp(taggedInt(stdout, "TZB"))
-            val tcf = normalizeTemp(taggedInt(stdout, "TCF"))
-            val tth = normalizeTemp(taggedInt(stdout, "TTH"))
-            // 电池/机身有效温度取电池、thermal_zone 电池热敏与中框的最高值，防止机身已达 45°C 而单一节点滞后或失真
-            tempTenths = maxOf(tb1, tb2, tb3, tzb, tcf, tth)
+                var rawVoltage = abs(taggedInt(stdout, "V") ?: 0)
+                if (rawVoltage > 100_000) rawVoltage /= 1_000      // 部分内核以 µV 上报
+                voltageMv = rawVoltage
 
-            val tap = normalizeTemp(taggedInt(stdout, "TAP"))
-            val tpa = normalizeTemp(taggedInt(stdout, "TPA"))
-            val tchg = normalizeTemp(taggedInt(stdout, "TCHG"))
-            val tdchg = normalizeTemp(taggedInt(stdout, "TDCHG"))
-            maxChipTempTenths = maxOf(tap, tpa, tchg, tdchg)
+                val tb1 = normalizeTemp(taggedInt(stdout, "TB1"))
+                val tb2 = normalizeTemp(taggedInt(stdout, "TB2"))
+                val tb3 = normalizeTemp(taggedInt(stdout, "TB3"))
+                val tzb = normalizeTemp(taggedInt(stdout, "TZB"))
+                val tcf = normalizeTemp(taggedInt(stdout, "TCF"))
+                val tth = normalizeTemp(taggedInt(stdout, "TTH"))
+                // 电池/机身有效温度取电池、thermal_zone 电池热敏与中框的最高值，防止机身已达 45°C 而单一节点滞后或失真
+                tempTenths = maxOf(tb1, tb2, tb3, tzb, tcf, tth)
+
+                val tap = normalizeTemp(taggedInt(stdout, "TAP"))
+                val tpa = normalizeTemp(taggedInt(stdout, "TPA"))
+                val tchg = normalizeTemp(taggedInt(stdout, "TCHG"))
+                val tdchg = normalizeTemp(taggedInt(stdout, "TDCHG"))
+                maxChipTempTenths = maxOf(tap, tpa, tchg, tdchg)
+            }
         }
 
         // 兜底方案：使用系统 BatteryManager API

@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.SharedPreferences
 import android.util.Log
 import com.weitiao.tuning.core.CscConstants
+import com.weitiao.tuning.core.RootShell
 import com.weitiao.tuning.core.TuningPrefs
 import com.weitiao.tuning.tuning.FastChargeController
 import com.weitiao.tuning.tuning.FastChargeNotifier
@@ -67,7 +68,7 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
                     FastChargeNotifier.cancelLive(this)
                 }
                 if (!cfg.brightScreenFastCharge || !FastChargeScheduler.isPluggedIn(this)) {
-                    if (FastChargeController.isAnyTemperatureNodeBlocked() == true) {
+                    if (RootShell.hasRoot() && FastChargeController.isAnyTemperatureNodeBlocked() == true) {
                         FastChargeController.restoreTemperatureNodes()
                         Log.i(TAG, "App.onCreate: 已自动修复残留 0000 温控节点权限")
                     }

@@ -34,6 +34,10 @@ object RootShell {
     private var sessionWriter: BufferedWriter? = null
     private var sessionReader: BufferedReader? = null
 
+    @Volatile
+    private var lastSuErrorLogElapsed = 0L
+    private const val SU_ERROR_LOG_COOLDOWN_MS = 30_000L
+
     /**
      * 执行 su 命令（优先走持久化 su 会话，异常自动回退单次 su 进程）
      * @param command 待执行的 shell 指令
@@ -41,16 +45,24 @@ object RootShell {
      * @return Pair(exitCode, stdout)，失败返回 Pair(-1, errorMsg)
      */
     fun exec(command: String, timeoutSeconds: Long = DEFAULT_TIMEOUT_SECONDS): Pair<Int, String> {
-        execPersistent(command, timeoutSeconds)?.let { return it }
+        val (shouldFallbackOneShot, persistentResult) = execPersistent(command, timeoutSeconds)
+        if (persistentResult != null) return persistentResult
+        // 若首次拉起 `su` 失败或被拒权立即退出（未超时也非复用旧会话掉线），不再重复 spawn execOneShot 刷屏
+        if (!shouldFallbackOneShot) {
+            return -1 to "Root su unavailable"
+        }
         return execOneShot(command, timeoutSeconds)
     }
 
-    private fun execPersistent(command: String, timeoutSeconds: Long): Pair<Int, String>? {
+    private fun execPersistent(command: String, timeoutSeconds: Long): Pair<Boolean, Pair<Int, String>?> {
         synchronized(sessionLock) {
+            var hadExistingSession = false
             return try {
-                val proc = sessionProcess?.takeIf { it.isAlive } ?: openSessionLocked() ?: return null
-                val writer = sessionWriter ?: return null
-                val reader = sessionReader ?: return null
+                val existing = sessionProcess?.takeIf { it.isAlive }
+                hadExistingSession = existing != null
+                val proc = existing ?: openSessionLocked() ?: return false to null
+                val writer = sessionWriter ?: return hadExistingSession to null
+                val reader = sessionReader ?: return hadExistingSession to null
                 val marker = "__WT_EOF_${System.nanoTime()}__"
 
                 writer.write("{\n")
@@ -77,16 +89,18 @@ object RootShell {
                 })
 
                 try {
-                    future.get(timeoutSeconds, TimeUnit.SECONDS)
+                    true to future.get(timeoutSeconds, TimeUnit.SECONDS)
                 } catch (e: TimeoutException) {
                     future.cancel(true)
                     closeSessionLocked()
                     Log.w(TAG, "Persistent su timed out after ${timeoutSeconds}s, falling back: $command")
-                    null
+                    true to null
                 }
             } catch (t: Throwable) {
                 closeSessionLocked()
-                null
+                logSuFailureThrottled("Persistent su session failed (${t.message})")
+                // 仅当已有存活会话中途断开时回退单次进程；全新 su 会话直接 EOF/失败多为无权限，不再重复拉起
+                hadExistingSession to null
             }
         }
     }
@@ -101,7 +115,22 @@ object RootShell {
             proc
         } catch (t: Throwable) {
             closeSessionLocked()
+            logSuFailureThrottled("Failed to open su session: ${t.message}")
             null
+        }
+    }
+
+    private fun elapsedMs(): Long =
+        runCatching { android.os.SystemClock.elapsedRealtime() }.getOrElse { System.currentTimeMillis() }
+
+    internal fun shouldLogSuFailure(nowElapsedMs: Long, lastLoggedElapsedMs: Long): Boolean =
+        lastLoggedElapsedMs == 0L || (nowElapsedMs - lastLoggedElapsedMs) >= SU_ERROR_LOG_COOLDOWN_MS
+
+    private fun logSuFailureThrottled(message: String) {
+        val now = elapsedMs()
+        if (shouldLogSuFailure(now, lastSuErrorLogElapsed)) {
+            lastSuErrorLogElapsed = now
+            Log.w(TAG, message)
         }
     }
 
@@ -160,7 +189,7 @@ object RootShell {
             }
             exitCode to (if (stdout.isNotBlank()) stdout else stderr)
         } catch (e: Throwable) {
-            Log.e(TAG, "Failed to exec root command: $command", e)
+            logSuFailureThrottled("Failed to exec root command (${e.message}): $command")
             -1 to (e.message ?: "Root execution failed")
         } finally {
             stdoutFuture?.cancel(true)
@@ -177,16 +206,23 @@ object RootShell {
     private var cachedHasRoot = false
     private const val ROOT_CHECK_TTL_MS = 15_000L
 
+    /** 无阻塞读取最近 15 秒内的 Root 缓存结果；未探测或已过期返回 null，绝不在主线程触发 su */
+    fun peekCachedHasRoot(): Boolean? {
+        val now = elapsedMs()
+        val checkedAt = lastRootCheckElapsed
+        return if (checkedAt > 0L && (now - checkedAt < ROOT_CHECK_TTL_MS)) cachedHasRoot else null
+    }
+
     /** 检查 root 是否可用，支持 15 秒缓存以避免高频重复创建 su 进程与竞争锁 */
     fun hasRoot(forceRefresh: Boolean = false): Boolean {
-        val now = android.os.SystemClock.elapsedRealtime()
+        val now = elapsedMs()
         if (!forceRefresh && lastRootCheckElapsed > 0L && (now - lastRootCheckElapsed < ROOT_CHECK_TTL_MS)) {
             return cachedHasRoot
         }
         val (code, out) = exec("id", timeoutSeconds = 3)
         val available = code == 0 && (out.contains("uid=0") || out.trim() == "0" || out.lines().any { it.trim() == "0" })
         cachedHasRoot = available
-        lastRootCheckElapsed = now
+        lastRootCheckElapsed = elapsedMs()
         return available
     }
 }
