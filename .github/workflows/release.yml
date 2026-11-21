@@ -24,35 +24,29 @@ jobs:
 
       - name: Verify APK & Generate SHA-256 Checksum
         run: |
-          test -f releases/WeiTiao-v1.6.1.apk
+          test -f releases/WeiTiao-v1.6.2.apk
           cd releases
-          sha256sum WeiTiao-v1.6.1.apk > WeiTiao-v1.6.1.apk.sha256
-          cat WeiTiao-v1.6.1.apk.sha256
+          sha256sum WeiTiao-v1.6.2.apk > WeiTiao-v1.6.2.apk.sha256
+          cat WeiTiao-v1.6.2.apk.sha256
 
       - name: Create GitHub Release and Upload APK + Checksum
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.6.1
-          name: "微调 WeiTiao v1.6.1 (微信步数页简化、精确适配与配置同步诊断)"
+          tag_name: v1.6.2
+          name: "微调 WeiTiao v1.6.2 (修复无 Root 下快充节点同步死循环与 su 日志刷屏)"
           body: |
-            ### 微调 (WeiTiao) v1.6.1 (`versionCode=41`)
+            ### 微调 (WeiTiao) v1.6.2 (`versionCode=42`)
 
-            - **微信步数页简化**：
-              - 主屏聚焦总开关、今日客户端步数与计划目标、目标中心设置以及手动「重启微信」按钮，一屏即可完成高频日常操作；
-              - 将「进阶参数」与「运行状态与排障」拆分为两张默认折叠卡片并支持独立展开；「每日计划」标为推荐，保留「真实步数倍率」与「旧版自动」并在非计划模式下于主屏展示当前模式参数与切回入口；
-              - 重启提示按实际生效规则说明，避免误导每次调整目标都必须重启微信。
-            - **快捷目标与数字输入**：
-              - 提供 `6,000 / 10,000 / 15,000 / 20,000` 快捷档与自定义数字输入框，键盘弹出前后快捷档及操作按钮均可直接使用；
-              - 自定义数字输入需显式点击「保存」才提交，点击「取消」立即恢复原值且不改动本地/远端配置与 `generation`。
-            - **配置同步诊断与客户端标注**：
-              - 细分配置同步、微信加载与当日计划更新状态（区分「仅本地保存，尚未同步到 LSPosed」「已同步到 LSPosed，微信待加载最新配置」「最新配置已加载，等待下一次计步读取」「配置同步状态未知」）；
-              - 主屏今日步数仅在存在今日有效快照时显示并明确标注「客户端」，不暗示服务端已接受。
-            - **Play 版微信 `8.0.80/3200` 精确模式（`EXACT`）已实测通过**：
-              - 基于 APK 摘要与实例方法签名校验启用精确适配，真机已验证：计划重建、首读无突跳、时间窗口内渐进增长，以及同签名覆盖安装与日常交互/取消编辑零漂移。
-            - **待验证项**：
-              - 显式「保存」改目标实机流程；
-              - 时间窗口结束后的自然增长与冻结行为；
-              - 微信运动上传入口与服务端排行榜结果。
+            - **根治无 Root 权限下的 `scheduleNodeSync` 死循环与 CPU 空转 (`BrightScreenFastChargeService`)**：
+              - 新增 `shouldContinueNodeSyncLoop`（同步失败 `syncFailed` 立即终止，且限定 `MAX_SYNC_LOOP_ITERATIONS = 4` 上限），彻底消除 `appliedBlocked == null` 引发的 10ms 级无限自旋；
+              - 新增 `NO_ROOT_RETRY_COOLDOWN_MS = 60_000L`（60 秒）冷却机制与无阻塞 `isRootRetryInCooldown` 判定，避免反复轮询重试并保证 `RootShell.hasRoot()` 检查不再阻塞主线程；
+              - 后台探针发现 Root 恢复授权（`peekCachedHasRoot() == true`）时自动解除冷却并恢复节点控制。
+            - **消除无 Root 时的 `su` 重复拉起与日志刷屏 (`RootShell` / `FastChargeController` / `App` / `PassThroughService`)**：
+              - `execPersistent` 仅在复用会话中途断开或超时时回退 `execOneShot`，首次拉起 `su` 失败或立即 EOF 退出时不再重复 spawn 第二次并把失败日志按 30 秒节流为 `Log.w`；
+              - `FastChargeController.readBatteryMetrics`、`App.onCreate` 自愈与 `PassThroughService` 前置 `RootShell.hasRoot()` 判断，无 Root 时优雅降级为系统 `BatteryManager` 读取。
+            - **单元测试与真机验证**：
+              - `FastChargeSafetyTest` 新增同步循环终止、60s 冷却与 30s 日志节流用例（15 个套件 / 130 项测试全部通过）；
+              - `SM-S928B` 真机同签名覆盖安装后运行稳定：单持久 `su` 会话无高频 fork、满电保护下温控节点维持 `644`、`CPU 0.0%`、配置零漂移。
           files: |
-            releases/WeiTiao-v1.6.1.apk
-            releases/WeiTiao-v1.6.1.apk.sha256
+            releases/WeiTiao-v1.6.2.apk
+            releases/WeiTiao-v1.6.2.apk.sha256
