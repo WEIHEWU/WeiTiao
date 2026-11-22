@@ -51,6 +51,7 @@ import com.weitiao.tuning.core.RootShell
 import com.weitiao.tuning.core.StoreCleaner
 import com.weitiao.tuning.core.TuningConfig
 import com.weitiao.tuning.core.TuningPrefs
+import com.weitiao.tuning.tuning.FastChargeScheduler
 import com.weitiao.tuning.ui.components.ActivationGuideDialog
 import com.weitiao.tuning.ui.components.ConfirmRestartAppsDialog
 import com.weitiao.tuning.ui.components.IosGlassTokens
@@ -443,6 +444,10 @@ fun FeatureDetailScreen(
     fun recheckEnvironment(showFeedback: Boolean = false) {
         scope.launch {
             val rootOk = withContext(Dispatchers.IO) { RootShell.hasRoot(forceRefresh = true) }
+            if (rootOk && FastChargeScheduler.isRootSuspended(context)) {
+                FastChargeScheduler.setRootSuspended(context, false)
+                TuningPrefs.resyncServices(context)
+            }
             val xpOk = App.getXposedService() != null || App.getRemotePrefs() != null
             hasRoot = rootOk
             xposedReady = xpOk
@@ -463,7 +468,12 @@ fun FeatureDetailScreen(
         selectedPassApps = TuningPrefs.selectedApps(context)
         regionCleanupPending = RegionApplyState.isPending(context)
         xposedReady = App.getXposedService() != null || App.getRemotePrefs() != null
-        hasRoot = withContext(Dispatchers.IO) { RootShell.hasRoot() }
+        val rootOk = withContext(Dispatchers.IO) { RootShell.hasRoot() }
+        hasRoot = rootOk
+        if (rootOk && FastChargeScheduler.isRootSuspended(context)) {
+            FastChargeScheduler.setRootSuspended(context, false)
+            TuningPrefs.resyncServices(context)
+        }
     }
 
     fun updateCsc(toastMessage: String? = null, block: (CscConfig) -> CscConfig) {

@@ -1,12 +1,19 @@
 package com.weitiao.tuning
 
 import android.app.Application
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.SharedPreferences
+import android.os.Build
 import android.util.Log
 import com.weitiao.tuning.core.CscConstants
 import com.weitiao.tuning.core.RootShell
 import com.weitiao.tuning.core.TuningPrefs
+import com.weitiao.tuning.tuning.BrightScreenFastChargeService
 import com.weitiao.tuning.tuning.FastChargeController
+import com.weitiao.tuning.tuning.FastChargeFallback
 import com.weitiao.tuning.tuning.FastChargeNotifier
 import com.weitiao.tuning.tuning.FastChargeScheduler
 import io.github.libxposed.service.XposedService
@@ -58,23 +65,79 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
 
         // 启动自愈检查（全量在后台线程执行，不阻塞冷启动主线程）：
         // 1. 仅在覆盖安装后执行一次旧版 19076 常驻通知与旧渠道清理，不为未启用快充的用户创建渠道或发通知；
-        // 2. 若当前未开启亮屏快充或未插充电器，检测并恢复可能残留的 0000 温控节点权限；
-        // 3. 不在 App.onCreate 中调用 hideNotification，避免覆盖正在运行的常驻服务已发布的充电实时通知。
+        // 2. 若未启用快充或未在活跃充电（含 100% 满电保护），清除可见通知并按需恢复可能残留的 0000 温控节点；
+        // 3. 当且仅当此前曾记录过节点可能被锁或开关处于开启时才探测 sysfs，避免未启用功能或无 Root 设备冷启动反复调 su。
         Thread({
             runCatching {
                 FastChargeNotifier.cleanupLegacyIfNeeded(this)
                 val cfg = TuningPrefs.load(this)
-                if (!cfg.brightScreenFastCharge) {
+                val snap = FastChargeScheduler.readBatterySnapshot(this)
+                val fullStopped = FastChargeController.isFullChargeStopped(
+                    level = snap.level,
+                    status = snap.status,
+                    previouslyReleased = BrightScreenFastChargeService.isFullChargeReleasedActive,
+                )
+                if (!cfg.brightScreenFastCharge || !snap.plugged || fullStopped) {
                     FastChargeNotifier.cancelLive(this)
                 }
-                if (!cfg.brightScreenFastCharge || !FastChargeScheduler.isPluggedIn(this)) {
-                    if (RootShell.hasRoot() && FastChargeController.isAnyTemperatureNodeBlocked() == true) {
-                        FastChargeController.restoreTemperatureNodes()
-                        Log.i(TAG, "App.onCreate: 已自动修复残留 0000 温控节点权限")
+                val mayNeedHeal = FastChargeController.isNodesMayBeBlocked(this) || cfg.brightScreenFastCharge
+                if (mayNeedHeal && (!cfg.brightScreenFastCharge || !snap.plugged) && RootShell.hasRoot()) {
+                    when (FastChargeController.isAnyTemperatureNodeBlocked()) {
+                        true -> {
+                            FastChargeController.restoreTemperatureNodes(this)
+                            Log.i(TAG, "App.onCreate: 已自动修复残留 0000 温控节点权限")
+                        }
+                        false -> FastChargeController.markNodesMayBeBlocked(this, false)
+                        null -> Unit
                     }
                 }
             }
         }, "Tuning-ThermalSelfHeal").apply { isDaemon = true }.start()
+
+        // 进程级电源插拔闭环监听：保证 100% 满电服务退场且后续拔线再插线时（即使服务已停），
+        // 只要进程仍在缓存中也能立刻重新布防 JOB_ID_ARM 并在再插电时自动唤醒快充。
+        val powerFilter = IntentFilter().apply {
+            addAction(Intent.ACTION_POWER_CONNECTED)
+            addAction(Intent.ACTION_POWER_DISCONNECTED)
+        }
+        val powerReceiver = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context, intent: Intent) {
+                val action = intent.action ?: return
+                val appCtx = applicationContext
+                when (action) {
+                    Intent.ACTION_POWER_DISCONNECTED -> {
+                        BrightScreenFastChargeService.isFullChargeReleasedActive = false
+                        FastChargeNotifier.cancelLive(appCtx)
+                        Thread({
+                            runCatching {
+                                val cfg = TuningPrefs.load(appCtx)
+                                val anyEnabled = cfg.brightScreenFastCharge || cfg.passThrough
+                                if (anyEnabled && !FastChargeScheduler.isRootSuspended(appCtx)) {
+                                    FastChargeScheduler.enable(appCtx, knownPlugged = false)
+                                }
+                                if (FastChargeController.isNodesMayBeBlocked(appCtx) && RootShell.hasRoot()) {
+                                    FastChargeController.restoreTemperatureNodes(appCtx)
+                                }
+                            }
+                        }, "Tuning-AppPowerDisconnect").apply { isDaemon = true }.start()
+                    }
+                    Intent.ACTION_POWER_CONNECTED -> {
+                        val cfg = TuningPrefs.load(appCtx)
+                        val anyEnabled = cfg.brightScreenFastCharge || cfg.passThrough
+                        if (anyEnabled && !FastChargeScheduler.isRootSuspended(appCtx)) {
+                            Thread({
+                                runCatching { FastChargeFallback.applyNow(appCtx) }
+                            }, "Tuning-AppPowerConnect").apply { isDaemon = true }.start()
+                        }
+                    }
+                }
+            }
+        }
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(powerReceiver, powerFilter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(powerReceiver, powerFilter)
+        }
     }
 
     override fun onServiceBind(service: XposedService) {

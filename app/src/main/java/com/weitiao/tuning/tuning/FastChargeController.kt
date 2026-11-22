@@ -58,6 +58,37 @@ object FastChargeController {
     private const val UID_PREAMBLE =
         "[ \"\${__wt_uid:-}\" = \"0\" ] || __wt_uid=\$(id -u); echo __UID__\$__wt_uid; "
 
+    internal const val RUNTIME_PREFS_NAME = "fast_charge_runtime"
+    private const val KEY_NODES_MAY_BE_BLOCKED = "nodes_may_be_blocked"
+    internal const val TZB_STUCK_READ_THRESHOLD = 6
+    internal const val DIRECT_BATT_VERIFY_INTERVAL_MS = 60_000L
+    internal const val NEAR_CUTOFF_MARGIN_TENTHS = 30 // 3.0°C
+
+    @Volatile private var nodesBlockedHint = false
+    @Volatile private var lastTzbTempTenths = 0
+    @Volatile private var lastMaxReadableTempTenths = 0
+    @Volatile private var consecutiveIdenticalTzbReads = 0
+    @Volatile private var lastDirectBattReadElapsedMs = 0L
+
+    private fun runtimePrefs(context: Context) =
+        context.getSharedPreferences(RUNTIME_PREFS_NAME, Context.MODE_PRIVATE)
+
+    fun isNodesMayBeBlocked(context: Context): Boolean =
+        nodesBlockedHint || runtimePrefs(context).getBoolean(KEY_NODES_MAY_BE_BLOCKED, false)
+
+    fun markNodesMayBeBlocked(context: Context, blocked: Boolean) {
+        nodesBlockedHint = blocked
+        runtimePrefs(context).edit().putBoolean(KEY_NODES_MAY_BE_BLOCKED, blocked).apply()
+    }
+
+    internal fun resetThermalSamplingStateForTest() {
+        nodesBlockedHint = false
+        lastTzbTempTenths = 0
+        lastMaxReadableTempTenths = 0
+        consecutiveIdenticalTzbReads = 0
+        lastDirectBattReadElapsedMs = 0L
+    }
+
     const val FULL_CHARGE_RELEASE_LEVEL = 100
     const val FULL_CHARGE_RESUME_LEVEL = 98
 
@@ -70,6 +101,43 @@ object FastChargeController {
         level >= FULL_CHARGE_RELEASE_LEVEL -> true
         previouslyReleased && level > FULL_CHARGE_RESUME_LEVEL -> true
         else -> false
+    }
+
+    /** 判定是否处于「已充满/停充保护」状态（兼容 100%/99% 滞回及系统 BATTERY_STATUS_FULL）。 */
+    fun isFullChargeStopped(level: Int, status: Int, previouslyReleased: Boolean): Boolean =
+        status == BatteryManager.BATTERY_STATUS_FULL || nextFullChargeReleased(level, previouslyReleased)
+
+    /** 统一判定亮屏快充当前是否需要工作（必须物理接通电源，且未进入满电停充保护）。 */
+    fun isActivelyChargingForFastCharge(
+        plugged: Boolean,
+        level: Int,
+        status: Int,
+        previouslyFullReleased: Boolean,
+    ): Boolean = plugged && !isFullChargeStopped(level, status, previouslyFullReleased)
+
+    /**
+     * 智能决策本轮 sysfs 采集是否允许对已屏蔽为 `0000` 的电池节点做「临时 0444 解锁并回读」。
+     * 免锁的 `thermal_zone` 电池热敏 (`__wt_tzb`) 读数正常、未卡死、远离熔断阈值且距离上次直读 <60s 时，
+     * 返回 `false`，避免每轮采样反复 `chmod 0444/0000` 带来的唤醒与被系统守护进程抓到温升窗口的风险。
+     */
+    internal fun shouldForceUnlockBatteryTempRead(
+        tzbTempTenths: Int,
+        maxReadableTempTenths: Int,
+        cutoffCelsius: Int,
+        consecutiveIdenticalTzbReads: Int,
+        lastDirectBattReadElapsedMs: Long,
+        nowElapsedMs: Long,
+    ): Boolean {
+        if (tzbTempTenths <= 0) return true
+        if (consecutiveIdenticalTzbReads >= TZB_STUCK_READ_THRESHOLD) return true
+        if (lastDirectBattReadElapsedMs <= 0L || (nowElapsedMs - lastDirectBattReadElapsedMs) >= DIRECT_BATT_VERIFY_INTERVAL_MS) {
+            return true
+        }
+        val cutoffTenths = cutoffCelsius.coerceIn(
+            TuningConfig.MIN_THERMAL_CUTOFF_CELSIUS,
+            TuningConfig.MAX_THERMAL_CUTOFF_CELSIUS,
+        ) * 10
+        return maxReadableTempTenths >= cutoffTenths - NEAR_CUTOFF_MARGIN_TENTHS
     }
 
     /**
@@ -136,7 +204,8 @@ object FastChargeController {
      * 同时强制确保 AP/PA/GPU/thermal 等核心芯片温控节点处于可读状态，保留系统 CPU/射频过热保护。
      * 批量合并为最多三次 chmod 调用（0755 / 0644 / 0000），避免对 17 个节点逐个 fork。
      */
-    fun blockTemperatureNodes(): Result {
+    fun blockTemperatureNodes(context: Context? = null): Result {
+        context?.let { markNodesMayBeBlocked(it, true) }
         val command = buildString {
             append(UID_PREAMBLE)
             append("d755=\"\"; f644=\"\"; f000=\"\"; ")
@@ -154,14 +223,18 @@ object FastChargeController {
             append("[ -n \"\$f000\" ] && chmod 0000 \$f000 2>/dev/null; ")
             append("echo __DONE__")
         }
-        return runRootCommand(command)
+        val res = runRootCommand(command)
+        if (!res.success && context != null && isAnyTemperatureNodeBlocked() == false) {
+            markNodesMayBeBlocked(context, false)
+        }
+        return res
     }
 
     /**
      * 恢复全部温控节点（含充电温控节点与旧版可能残留锁死的 AP/PA/WF/thermal 节点）。
      * 目录使用 0755，sysfs 传感器文件使用 0644，批量合并 chmod 调用。
      */
-    fun restoreTemperatureNodes(): Result {
+    fun restoreTemperatureNodes(context: Context? = null): Result {
         val command = buildString {
             append(UID_PREAMBLE)
             append("d755=\"\"; f644=\"\"; ")
@@ -174,7 +247,11 @@ object FastChargeController {
             append("[ -n \"\$f644\" ] && chmod 0644 \$f644 2>/dev/null; ")
             append("echo __DONE__")
         }
-        return runRootCommand(command)
+        val res = runRootCommand(command)
+        if (res.success && context != null) {
+            markNodesMayBeBlocked(context, false)
+        }
+        return res
     }
 
     /**
@@ -259,13 +336,27 @@ object FastChargeController {
      * 3. 被 `0000` 屏蔽的节点先直读，仅对未读出值的存在节点做单次批量 `stat` + `chmod 0444` + `read -r` + `chmod 0000`，
      *    将每次轮询的外部进程派生从 ~85 次降至 0~4 次。
      */
-    fun readBatteryMetrics(context: Context): BatteryMetrics {
+    fun readBatteryMetrics(
+        context: Context,
+        cutoffCelsius: Int = TuningConfig.DEFAULT_THERMAL_CUTOFF_CELSIUS,
+        cachedBatteryIntent: Intent? = null,
+    ): BatteryMetrics {
         var currentMa = 0
         var voltageMv = 0
         var tempTenths = 0
         var maxChipTempTenths = 0
 
         if (RootShell.hasRoot()) {
+            val nowMs = android.os.SystemClock.elapsedRealtime()
+            val forceUnlock = shouldForceUnlockBatteryTempRead(
+                tzbTempTenths = lastTzbTempTenths,
+                maxReadableTempTenths = lastMaxReadableTempTenths,
+                cutoffCelsius = cutoffCelsius,
+                consecutiveIdenticalTzbReads = consecutiveIdenticalTzbReads,
+                lastDirectBattReadElapsedMs = lastDirectBattReadElapsedMs,
+                nowElapsedMs = nowMs,
+            )
+            val forceUnlockFlag = if (forceUnlock) "1" else "0"
             val (exitCode, stdout) = RootShell.exec(
                 UID_PREAMBLE +
                     "tzb=\"\"; " +
@@ -278,6 +369,7 @@ object FastChargeController {
                     "case \"\$tv\" in \"\"|-*|0) ;; *) tzb=\"\$tv\"; __wt_tzb=\"\$z\"; break ;; esac ;; esac; done; " +
                     "[ \"\$matched\" = \"0\" ] && [ -z \"\$__wt_tzb\" ] && __wt_tzb=\"none\"; ;; esac; " +
                     "fi; " +
+                    "case \"\$tzb\" in \"\"|-*|0|*[!0-9]*) tzb_bad=1 ;; *) tzb_bad=0 ;; esac; " +
                     "c=\"\"; { read -r c < /sys/class/power_supply/battery/current_now; } 2>/dev/null; " +
                     "v=\"\"; { read -r v < /sys/class/power_supply/battery/voltage_now; } 2>/dev/null; " +
                     "tcf=\"\"; { read -r tcf < /sys/class/sec/sec-cf-thermistor/temperature; } 2>/dev/null; " +
@@ -292,12 +384,14 @@ object FastChargeController {
                     "if [ -e \"\$p3\" ]; then { read -r tb3 < \"\$p3\"; } 2>/dev/null; [ -z \"\$tb3\" ] && need=\"\$need \$p3\"; fi; " +
                     "if [ -e \"\$p4\" ]; then { read -r tchg < \"\$p4\"; } 2>/dev/null; [ -z \"\$tchg\" ] && need=\"\$need \$p4\"; fi; " +
                     "if [ -e \"\$p5\" ]; then { read -r tdchg < \"\$p5\"; } 2>/dev/null; [ -z \"\$tdchg\" ] && need=\"\$need \$p5\"; fi; " +
-                    "if [ -n \"\$need\" ]; then " +
+                    "unlocked=0; " +
+                    "if [ -n \"\$need\" ] && { [ \"$forceUnlockFlag\" = \"1\" ] || [ \"\$tzb_bad\" = \"1\" ]; }; then " +
                     "relock=\"\"; for line in \$(stat -c \"%a:%n\" \$need 2>/dev/null); do " +
                     "m=\"\${line%%:*}\"; np=\"\${line#*:}\"; " +
                     "case \"\$m\" in 0|00|000|0000) relock=\"\$relock \$np\" ;; esac; " +
                     "done; " +
                     "if [ -n \"\$relock\" ]; then " +
+                    "unlocked=1; " +
                     "chmod 0444 \$relock 2>/dev/null; " +
                     "[ -z \"\$tb1\" ] && [ -e \"\$p1\" ] && { read -r tb1 < \"\$p1\"; } 2>/dev/null; " +
                     "[ -z \"\$tb2\" ] && [ -e \"\$p2\" ] && { read -r tb2 < \"\$p2\"; } 2>/dev/null; " +
@@ -307,7 +401,7 @@ object FastChargeController {
                     "chmod 0000 \$relock 2>/dev/null; " +
                     "fi; " +
                     "fi; " +
-                    "echo \"C=\$c\"; echo \"V=\$v\"; " +
+                    "echo \"C=\$c\"; echo \"V=\$v\"; echo \"UNLOCKED=\$unlocked\"; " +
                     "echo \"TB1=\$tb1\"; echo \"TB2=\$tb2\"; echo \"TB3=\$tb3\"; echo \"TZB=\$tzb\"; " +
                     "echo \"TCF=\$tcf\"; echo \"TTH=\$tth\"; echo \"TAP=\$tap\"; echo \"TPA=\$tpa\"; " +
                     "echo \"TCHG=\$tchg\"; echo \"TDCHG=\$tdchg\"; " +
@@ -338,6 +432,18 @@ object FastChargeController {
                 val tchg = normalizeTemp(taggedInt(stdout, "TCHG"))
                 val tdchg = normalizeTemp(taggedInt(stdout, "TDCHG"))
                 maxChipTempTenths = maxOf(tap, tpa, tchg, tdchg)
+
+                val directBattMax = maxOf(tb1, tb2, tb3)
+                if (taggedInt(stdout, "UNLOCKED") == 1 || directBattMax > 0) {
+                    lastDirectBattReadElapsedMs = android.os.SystemClock.elapsedRealtime()
+                }
+                if (tzb > 0 && tzb == lastTzbTempTenths) {
+                    consecutiveIdenticalTzbReads++
+                } else {
+                    lastTzbTempTenths = tzb
+                    consecutiveIdenticalTzbReads = if (tzb > 0) 1 else 0
+                }
+                lastMaxReadableTempTenths = maxOf(tzb, tcf, tth, maxChipTempTenths)
             }
         }
 
@@ -355,8 +461,8 @@ object FastChargeController {
         }
 
         if (voltageMv == 0 || tempTenths == 0) {
-            val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
-            val batteryStatus = context.registerReceiver(null, filter)
+            val batteryStatus = cachedBatteryIntent
+                ?: runCatching { context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED)) }.getOrNull()
             if (voltageMv == 0) {
                 voltageMv = batteryStatus?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 3800) ?: 3800
             }

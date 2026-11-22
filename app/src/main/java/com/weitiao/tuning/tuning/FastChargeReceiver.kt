@@ -4,104 +4,73 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
-import androidx.core.content.ContextCompat
+import com.weitiao.tuning.core.RootShell
 import com.weitiao.tuning.core.TuningPrefs
 
 /**
- * 亮屏快充拉起入口。
+ * 亮屏快充拉起入口（静态接收器）。
  *
  * 监听：开机、包更新、插电、拔电。
  *
- * 关键修复：Android 12（targetSdk 31+）起后台启动前台服务被禁止，
- * 而 `ACTION_POWER_CONNECTED` 不在豁免名单内（仅 BOOT_COMPLETED /
- * LOCKED_BOOT_COMPLETED / MY_PACKAGE_REPLACED 等豁免）。
- * 原实现用 `runCatching` 吞掉了这个异常，导致「拔线后服务退出 → 再插电时
- * 静态广播启动服务失败且毫无日志 → 只有重启手机才恢复」。
- *
- * 现在改为两段式：
- * 1. 先尝试拉起常驻前台服务（开机/包更新等豁免场景一定成功）；
- * 2. 若被后台限制拒绝，则在广播自身的存活窗口内直接下发 root 策略并推送实时通知，
- *    保证插入电源立刻可见。
+ * 安全策略：
+ * 1. 全量逻辑放入 `goAsync()` 后台线程，不在广播主线程执行同步 `su`；
+ * 2. 先校验物理插电、100% 满电状态（方案 A）与 Root 状态，未满足条件前绝不调用
+ *    `startForegroundService()`，彻底杜绝无充电时弹通知或 `ForegroundServiceDidNotStartInTimeException`。
  */
 class FastChargeReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent?) {
         val action = intent?.action
-        val cfg = TuningPrefs.load(context)
-        val fastChargeEnabled = cfg.brightScreenFastCharge
-        val passThroughEnabled = cfg.passThrough
-
-        if (!fastChargeEnabled && !passThroughEnabled) {
-            val pending = goAsync()
-            Thread({
-                try {
-                    FastChargeController.restoreTemperatureNodes()
-                    FastChargeScheduler.disable(context)
-                    FastChargeNotifier.cancelLive(context)
-                } finally {
-                    runCatching { pending?.finish() }
-                }
-            }, "Tuning-FastChargeDisable").apply { isDaemon = true }.start()
-            return
-        }
-
-        if (action == Intent.ACTION_POWER_DISCONNECTED || !FastChargeScheduler.isPluggedIn(context)) {
-            val pending = goAsync()
-            Thread({
-                try {
-                    FastChargeController.restoreTemperatureNodes()
-                    FastChargeNotifier.cancelLive(context)
-                    // 未插电或拔线时绝不在后台启动前台服务，而是布防 RequiresCharging 的插电触发器等待下次插电拉起
-                    FastChargeScheduler.enable(context)
-                } finally {
-                    runCatching { pending?.finish() }
-                }
-            }, "Tuning-FastChargeUnplug").apply { isDaemon = true }.start()
-            return
-        }
-
-        if (passThroughEnabled) {
-            runCatching {
-                ContextCompat.startForegroundService(
-                    context,
-                    Intent(context, PassThroughService::class.java).setAction(PassThroughService.ACTION_REFRESH),
-                )
-            }
-        }
-
-        if (!fastChargeEnabled) {
-            FastChargeScheduler.enable(context)
-            return
-        }
-
-        FastChargeNotifier.ensureChannels(context)
-
-        val started = runCatching {
-            ContextCompat.startForegroundService(context, serviceIntent(context))
-            true
-        }.getOrDefault(false)
-
-        if (started) {
-            Log.i(TAG, "已拉起亮屏快充前台服务 (action=$action)")
-            return
-        }
-
-        Log.w(TAG, "后台启动前台服务被限制 (action=$action)，改用即时兜底路径")
-        // 兜底任务：JobService 执行期间处于活动窗口，比广播更容易重新拉起常驻服务
-        FastChargeScheduler.kick(context)
+        val appCtx = context.applicationContext
         val pending = goAsync()
         Thread({
             try {
-                FastChargeFallback.applyNow(context)
+                if (action == Intent.ACTION_BOOT_COMPLETED ||
+                    action == Intent.ACTION_LOCKED_BOOT_COMPLETED ||
+                    action == Intent.ACTION_MY_PACKAGE_REPLACED
+                ) {
+                    // 系统重启或覆盖更新后解除无 Root 静默挂起，允许自检重新接入
+                    FastChargeScheduler.setRootSuspended(appCtx, false)
+                }
+
+                val cfg = TuningPrefs.load(appCtx)
+                val fastChargeEnabled = cfg.brightScreenFastCharge
+                val passThroughEnabled = cfg.passThrough
+
+                if (!fastChargeEnabled && !passThroughEnabled) {
+                    if (FastChargeController.isNodesMayBeBlocked(appCtx) && RootShell.hasRoot()) {
+                        FastChargeController.restoreTemperatureNodes(appCtx)
+                    }
+                    FastChargeScheduler.disable(appCtx)
+                    FastChargeNotifier.cancelLive(appCtx)
+                    return@Thread
+                }
+
+                val snap = FastChargeScheduler.readBatterySnapshot(appCtx)
+                if (action == Intent.ACTION_POWER_DISCONNECTED || !snap.plugged) {
+                    BrightScreenFastChargeService.isFullChargeReleasedActive = false
+                    FastChargeNotifier.cancelLive(appCtx)
+                    if (FastChargeController.isNodesMayBeBlocked(appCtx) && RootShell.hasRoot()) {
+                        FastChargeController.restoreTemperatureNodes(appCtx)
+                    }
+                    FastChargeScheduler.enable(appCtx, knownPlugged = false)
+                    return@Thread
+                }
+
+                if (FastChargeScheduler.isRootSuspended(appCtx)) {
+                    FastChargeScheduler.disable(appCtx)
+                    FastChargeNotifier.cancelLive(appCtx)
+                    return@Thread
+                }
+
+                // 已接通电源：统一交给 FastChargeFallback.applyNow 完成满电/Root/服务拉起与兜底判定
+                Log.d(TAG, "收到电源广播 action=$action，进入统一门控下发")
+                FastChargeFallback.applyNow(appCtx)
             } finally {
                 runCatching { pending?.finish() }
             }
-        }, "Tuning-FastChargeFallback").apply { isDaemon = true }.start()
+        }, "Tuning-FastChargeReceiver").apply { isDaemon = true }.start()
     }
-
-    private fun serviceIntent(context: Context): Intent =
-        Intent(context, BrightScreenFastChargeService::class.java)
-            .setAction(BrightScreenFastChargeService.ACTION_START)
 
     private companion object {
         const val TAG = "TuningFastCharge"

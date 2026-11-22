@@ -1,6 +1,7 @@
 package com.weitiao.tuning.tuning
 
 import android.app.NotificationManager
+import android.os.BatteryManager
 import com.weitiao.tuning.core.RootShell
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -495,5 +496,192 @@ class FastChargeSafetyTest {
         assertTrue(RootShell.shouldLogSuFailure(nowElapsedMs = 5_000L, lastLoggedElapsedMs = 0L))
         assertFalse(RootShell.shouldLogSuFailure(nowElapsedMs = 20_000L, lastLoggedElapsedMs = 5_000L))
         assertTrue(RootShell.shouldLogSuFailure(nowElapsedMs = 35_000L, lastLoggedElapsedMs = 5_000L))
+    }
+
+    @Test
+    fun activeChargingPolicyStopsAtFullChargeOrUnpluggedAndRespectsAllowLiveReuse() {
+        // 1. 未插电 -> false
+        assertFalse(
+            FastChargeController.isActivelyChargingForFastCharge(
+                plugged = false,
+                level = 50,
+                status = BatteryManager.BATTERY_STATUS_DISCHARGING,
+                previouslyFullReleased = false,
+            ),
+        )
+        // 2. 插电但已 100% 或系统报告 BATTERY_STATUS_FULL -> 方案 A 退出服务与通知 -> false
+        assertFalse(
+            FastChargeController.isActivelyChargingForFastCharge(
+                plugged = true,
+                level = 100,
+                status = BatteryManager.BATTERY_STATUS_CHARGING,
+                previouslyFullReleased = false,
+            ),
+        )
+        assertFalse(
+            FastChargeController.isActivelyChargingForFastCharge(
+                plugged = true,
+                level = 85,
+                status = BatteryManager.BATTERY_STATUS_FULL,
+                previouslyFullReleased = false,
+            ),
+        )
+        // 3. 满电回落至 99%（滞回期内）仍停用 -> false；回落至 98% 重新激活 -> true
+        assertFalse(
+            FastChargeController.isActivelyChargingForFastCharge(
+                plugged = true,
+                level = 99,
+                status = BatteryManager.BATTERY_STATUS_CHARGING,
+                previouslyFullReleased = true,
+            ),
+        )
+        assertTrue(
+            FastChargeController.isActivelyChargingForFastCharge(
+                plugged = true,
+                level = 98,
+                status = BatteryManager.BATTERY_STATUS_CHARGING,
+                previouslyFullReleased = true,
+            ),
+        )
+
+        // 4. 前次遗留过 LIVE 状态时，若以 allowLiveReuse = false 绑定前台契约（准备立即退出），绝不闪现可见通知
+        FastChargeNotifier.onPostLive("电量:80%", "35.0°C", liveChannelAllowed = true, hasService = true)
+        assertEquals(FastChargeNotifier.DisplayState.LIVE, FastChargeNotifier.displayState)
+        assertEquals(
+            FastChargeNotifier.TransitionAction.BIND_FOREGROUND_HIDDEN,
+            FastChargeNotifier.onBindForeground(liveChannelAllowed = true, allowLiveReuse = false),
+        )
+        assertEquals(FastChargeNotifier.DisplayState.HIDDEN, FastChargeNotifier.displayState)
+        assertNull(FastChargeNotifier.lastSubText)
+    }
+
+    @Test
+    fun overheatAndFullChargeDoNotSpinNodeSyncOrChmodOnceRestored() {
+        // 1. 刚进入过热/满电切换（appliedBlocked=true 或 forceRestore=true）-> 必须触发恢复
+        assertTrue(
+            BrightScreenFastChargeService.shouldScheduleNodeSync(
+                desiredBlocked = false,
+                forceRestore = true,
+                appliedBlocked = true,
+                needVerify = false,
+            ),
+        )
+        // 2. 节点已恢复（appliedBlocked=false）且未到 15s/30s 周期复核点，过热期间也不再每 5s/10s 进同步
+        assertFalse(
+            BrightScreenFastChargeService.shouldScheduleNodeSync(
+                desiredBlocked = false,
+                forceRestore = false,
+                appliedBlocked = false,
+                needVerify = false,
+            ),
+        )
+        // 3. 到 15s/30s 复核周期时探测：若底层确实均为 0644 (anyBlocked=false)，绝不重复执行 chmod 恢复
+        assertTrue(
+            BrightScreenFastChargeService.shouldScheduleNodeSync(
+                desiredBlocked = false,
+                forceRestore = false,
+                appliedBlocked = false,
+                needVerify = true,
+            ),
+        )
+        assertFalse(
+            BrightScreenFastChargeService.shouldExecuteRestoreNodes(
+                forceUnlock = false,
+                appliedBlocked = false,
+                anyBlocked = false,
+                rootSuccessState = true,
+            ),
+        )
+        // 4. 若外部守护进程再次将节点锁成 0000 (anyBlocked=true) 或为切换瞬间 (forceUnlock=true) -> 立即恢复
+        assertTrue(
+            BrightScreenFastChargeService.shouldExecuteRestoreNodes(
+                forceUnlock = false,
+                appliedBlocked = false,
+                anyBlocked = true,
+                rootSuccessState = true,
+            ),
+        )
+        assertTrue(
+            BrightScreenFastChargeService.shouldExecuteRestoreNodes(
+                forceUnlock = true,
+                appliedBlocked = false,
+                anyBlocked = false,
+                rootSuccessState = true,
+            ),
+        )
+    }
+
+    @Test
+    fun armTriggerDecisionPreventsPingPongAndRootSuspensionSpins() {
+        assertEquals(
+            FastChargeScheduler.ArmTriggerDecision.CANCEL_ALL_SUSPENDED,
+            FastChargeScheduler.decideArmTrigger(rootSuspended = true, plugged = false),
+        )
+        assertEquals(
+            FastChargeScheduler.ArmTriggerDecision.CANCEL_IMMEDIATE_PLUGGED,
+            FastChargeScheduler.decideArmTrigger(rootSuspended = false, plugged = true),
+        )
+        assertEquals(
+            FastChargeScheduler.ArmTriggerDecision.SCHEDULE_ARM_UNPLUGGED,
+            FastChargeScheduler.decideArmTrigger(rootSuspended = false, plugged = false),
+        )
+    }
+
+    @Test
+    fun thermalSamplingSkipsRoutineUnlockWhenTzbHealthyAndFallsBackWhenNeeded() {
+        // 1. __wt_tzb 正常跳变、远低于阈值 (44°C - 3°C = 41°C) 且距离上次直读 <60s -> 不解锁 0000 节点
+        assertFalse(
+            FastChargeController.shouldForceUnlockBatteryTempRead(
+                tzbTempTenths = 355,
+                maxReadableTempTenths = 380,
+                cutoffCelsius = 44,
+                consecutiveIdenticalTzbReads = 2,
+                lastDirectBattReadElapsedMs = 100_000L,
+                nowElapsedMs = 130_000L,
+            ),
+        )
+        // 2. __wt_tzb 缺失/失效 -> 必须兜底临时解锁读 batt_temp
+        assertTrue(
+            FastChargeController.shouldForceUnlockBatteryTempRead(
+                tzbTempTenths = 0,
+                maxReadableTempTenths = 350,
+                cutoffCelsius = 44,
+                consecutiveIdenticalTzbReads = 0,
+                lastDirectBattReadElapsedMs = 100_000L,
+                nowElapsedMs = 110_000L,
+            ),
+        )
+        // 3. __wt_tzb 连续 6 次读数完全不变（疑似卡死）-> 必须兜底解锁核实
+        assertTrue(
+            FastChargeController.shouldForceUnlockBatteryTempRead(
+                tzbTempTenths = 355,
+                maxReadableTempTenths = 360,
+                cutoffCelsius = 44,
+                consecutiveIdenticalTzbReads = FastChargeController.TZB_STUCK_READ_THRESHOLD,
+                lastDirectBattReadElapsedMs = 100_000L,
+                nowElapsedMs = 130_000L,
+            ),
+        )
+        // 4. 接近安全熔断阈值（>= 41.0°C）或超过 60s 低频校验周期 -> 解锁核实真实电池温度
+        assertTrue(
+            FastChargeController.shouldForceUnlockBatteryTempRead(
+                tzbTempTenths = 410,
+                maxReadableTempTenths = 410,
+                cutoffCelsius = 44,
+                consecutiveIdenticalTzbReads = 1,
+                lastDirectBattReadElapsedMs = 100_000L,
+                nowElapsedMs = 110_000L,
+            ),
+        )
+        assertTrue(
+            FastChargeController.shouldForceUnlockBatteryTempRead(
+                tzbTempTenths = 350,
+                maxReadableTempTenths = 360,
+                cutoffCelsius = 44,
+                consecutiveIdenticalTzbReads = 1,
+                lastDirectBattReadElapsedMs = 100_000L,
+                nowElapsedMs = 100_000L + FastChargeController.DIRECT_BATT_VERIFY_INTERVAL_MS,
+            ),
+        )
     }
 }

@@ -69,6 +69,13 @@ class BrightScreenFastChargeService : Service() {
     @Volatile private var lastRootFailureElapsed = 0L
     @Volatile private var lastTickElapsed = 0L
     @Volatile private var samsungSettingsApplied = false
+    @Volatile private var lastBatteryIntent: Intent? = null
+
+    private enum class StandbyReason {
+        UNPLUGGED,
+        FULL_CHARGE,
+        NO_ROOT,
+    }
 
     @Volatile private var latestMetrics = FastChargeController.BatteryMetrics(0, 0, 0.0, 0, 0)
     @Volatile private var hasFreshSysfsMetrics = false
@@ -87,6 +94,10 @@ class BrightScreenFastChargeService : Service() {
                 restoreAndStop()
                 return
             }
+            if (FastChargeScheduler.isRootSuspended(this@BrightScreenFastChargeService)) {
+                enterStandby(StandbyReason.NO_ROOT)
+                return
+            }
 
             // 广播驱动时做最小间隔保护，避免 BATTERY_CHANGED 高频触发导致过度轮询
             val now = SystemClock.elapsedRealtime()
@@ -96,27 +107,32 @@ class BrightScreenFastChargeService : Service() {
             }
             lastTickElapsed = now
 
-            // 直接读粘性广播 + 屏幕状态，避免依赖可能被系统合并/延迟的广播
+            // 优先使用最新广播快照刷新状态，无缓存时回退读取粘性广播
             refreshChargingState()
 
-            if (isWiredCharging) {
-                wasChargingLastTick = true
-                if (isScreenOn) {
-                    // 若已有真实 sysfs 温度数据、处于过热或满电释放态则立即评估策略；首次未满电采样等待 readMetricsAsync 返回真实温度后再决定是否屏蔽节点
-                    if (hasFreshSysfsMetrics || isOverheated || isFullChargeReleased) {
-                        evaluatePolicy()
-                    }
-                    readMetricsAsync()
-                    updateLiveNotification()
-                    handler.postDelayed(this, nextActiveTickIntervalMs())
-                } else {
-                    // 息屏充电时强制交还官方温控，暂停 5s 高频采样，亮屏广播会立即恢复。
-                    // 仍处于充电状态，因此保留同一条实时通知，但不做高频采样。
+            if (!isWiredCharging) {
+                enterStandby(StandbyReason.UNPLUGGED)
+                return
+            }
+            // 方案 A：100% 满电保护期间立即撤回通知并停止服务/轮询，零后台驻留与唤醒
+            if (isFullChargeReleased) {
+                enterStandby(StandbyReason.FULL_CHARGE)
+                return
+            }
+
+            wasChargingLastTick = true
+            if (isScreenOn) {
+                // 若已有真实 sysfs 温度数据或处于过热态则立即评估策略；首次采样等待 readMetricsAsync 返回真实温度后再决定是否屏蔽节点
+                if (hasFreshSysfsMetrics || isOverheated) {
                     evaluatePolicy()
-                    updateLiveNotification()
                 }
+                readMetricsAsync()
+                updateLiveNotification()
+                handler.postDelayed(this, TICKER_ACTIVE_MS)
             } else {
-                enterStandby()
+                // 息屏充电时强制交还官方温控，暂停高频采样，亮屏广播会立即恢复。
+                evaluatePolicy()
+                updateLiveNotification()
             }
         }
     }
@@ -125,9 +141,13 @@ class BrightScreenFastChargeService : Service() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
                 Intent.ACTION_BATTERY_CHANGED -> {
+                    lastBatteryIntent = intent
                     val plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) > 0
-                    if (plugged != isWiredCharging) {
-                        if (!plugged) {
+                    val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, currentLevel)
+                    val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+                    val fullStopped = FastChargeController.isFullChargeStopped(level, status, isFullChargeReleased)
+                    if (plugged != isWiredCharging || (isWiredCharging && fullStopped && !isFullChargeReleased)) {
+                        if (!plugged || fullStopped) {
                             forceRestoreRequested.set(true)
                         }
                         lastTickElapsed = 0L
@@ -165,8 +185,8 @@ class BrightScreenFastChargeService : Service() {
         isServiceAlive = true
         FastChargeNotifier.ensureChannels(this)
 
-        // 启动即进入前台（绑定隐藏渠道通知），保证进程优先级，避免被回收
-        foregroundStarted = FastChargeNotifier.bindForegroundService(this)
+        // 先用隐藏渠道满足 Android 8+ startForegroundService 契约，避免闪现可见通知；具体运行或退出由 onStartCommand 决定
+        foregroundStarted = FastChargeNotifier.bindForegroundService(this, allowLiveReuse = false)
         if (!foregroundStarted) {
             Log.e(TAG, "前台服务启动失败（可能受后台启动限制）")
         }
@@ -187,40 +207,47 @@ class BrightScreenFastChargeService : Service() {
             registerReceiver(chargingReceiver, filter)
         }
         receiverRegistered = true
-
-        // 只要功能处于开启状态，就保持兜底任务在册
-        FastChargeScheduler.enable(this)
-
-        handler.post(tickerRunnable)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         isServiceAlive = true
-        // 每次 ContextCompat.startForegroundService 触发 onStartCommand 时均必须先同步满足系统的 startForeground 契约，
-        // 随后再根据开关或插电状态决定继续运行还是 stopForeground + stopSelf，彻底杜绝 ForegroundServiceDidNotStartInTimeException。
-        foregroundStarted = FastChargeNotifier.bindForegroundService(this) || foregroundStarted
-
-        if (intent?.action == ACTION_RESTORE_AND_STOP) {
-            restoreAndStop()
-            return START_NOT_STICKY
-        }
-        if (!isEnabled()) {
-            restoreAndStop()
-            return START_NOT_STICKY
-        }
-
-        FastChargeScheduler.enable(this)
+        val action = intent?.action
         refreshChargingState()
-        if (!isWiredCharging) {
-            enterStandby()
+
+        // 主线程绝不同步执行 su；如不满足运行条件，确保完成一次 startForeground 契约后同步移除通知并退出
+        if (action == ACTION_RESTORE_AND_STOP || !isEnabled()) {
+            if (!foregroundStarted) {
+                foregroundStarted = FastChargeNotifier.bindForegroundService(this, allowLiveReuse = false)
+            }
+            restoreAndStop()
+            return START_NOT_STICKY
+        }
+        val immediateStandbyReason = when {
+            FastChargeScheduler.isRootSuspended(this) -> StandbyReason.NO_ROOT
+            !isWiredCharging -> StandbyReason.UNPLUGGED
+            isFullChargeReleased -> StandbyReason.FULL_CHARGE
+            action == ACTION_STOP_STANDBY -> StandbyReason.UNPLUGGED
+            else -> null
+        }
+        if (immediateStandbyReason != null) {
+            if (!foregroundStarted) {
+                foregroundStarted = FastChargeNotifier.bindForegroundService(this, allowLiveReuse = false)
+            }
+            enterStandby(immediateStandbyReason)
             return START_NOT_STICKY
         }
 
-        if (!samsungSettingsApplied && !isRootRetryInCooldown(rootSuccessState, lastRootFailureElapsed, SystemClock.elapsedRealtime(), RootShell.peekCachedHasRoot())) {
+        foregroundStarted = FastChargeNotifier.bindForegroundService(this, allowLiveReuse = true) || foregroundStarted
+        FastChargeScheduler.enable(this, knownPlugged = true)
+
+        if (!samsungSettingsApplied) {
             samsungSettingsApplied = true
             postRoot {
                 if (!RootShell.hasRoot()) {
                     samsungSettingsApplied = false
+                    handler.post {
+                        if (isServiceAlive) enterStandby(StandbyReason.NO_ROOT)
+                    }
                     return@postRoot
                 }
                 val res = FastChargeController.enableSamsungFastChargingSettings()
@@ -233,25 +260,26 @@ class BrightScreenFastChargeService : Service() {
         lastTickElapsed = 0L
         handler.removeCallbacks(tickerRunnable)
         handler.post(tickerRunnable)
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
-    /** 从粘性广播与 PowerManager 同步最新状态（不依赖广播是否送达） */
+    /** 从最新广播缓存或粘性广播与 PowerManager 同步状态（不依赖广播是否送达） */
     private fun refreshChargingState() {
-        val battery = runCatching {
+        val battery = lastBatteryIntent ?: runCatching {
             registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-        }.getOrNull()
+        }.getOrNull()?.also { lastBatteryIntent = it }
 
         if (battery != null) {
             val plugged = battery.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0)
             isWiredCharging = plugged > 0
             currentLevel = battery.getIntExtra(BatteryManager.EXTRA_LEVEL, currentLevel)
-            val nextFullReleased = FastChargeController.nextFullChargeReleased(currentLevel, isFullChargeReleased)
+            val status = battery.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+            val nextFullReleased = FastChargeController.isFullChargeStopped(currentLevel, status, isFullChargeReleased)
             if (nextFullReleased && !isFullChargeReleased) {
                 isFullChargeReleased = true
                 isFullChargeReleasedActive = true
                 forceRestoreRequested.set(true)
-                Log.i(TAG, "电量已达 ${currentLevel}%，满电保护自动恢复原生温控")
+                Log.i(TAG, "电量已达 ${currentLevel}%（或已充满），满电保护自动恢复原生温控并停轮询")
             } else if (!nextFullReleased && isFullChargeReleased) {
                 isFullChargeReleased = false
                 isFullChargeReleasedActive = false
@@ -314,9 +342,25 @@ class BrightScreenFastChargeService : Service() {
 
     private fun readMetricsAsync() {
         if (isReadingMetrics.compareAndSet(false, true)) {
+            val cutoffCelsius = currentConfig().thermalCutoffCelsius.coerceIn(
+                TuningConfig.MIN_THERMAL_CUTOFF_CELSIUS,
+                TuningConfig.MAX_THERMAL_CUTOFF_CELSIUS,
+            )
+            val batterySnapshotIntent = lastBatteryIntent
+            val appCtx = applicationContext
             postRoot {
                 try {
-                    val metrics = FastChargeController.readBatteryMetrics(this)
+                    if (!RootShell.hasRoot()) {
+                        handler.post {
+                            if (isServiceAlive) enterStandby(StandbyReason.NO_ROOT)
+                        }
+                        return@postRoot
+                    }
+                    val metrics = FastChargeController.readBatteryMetrics(
+                        context = appCtx,
+                        cutoffCelsius = cutoffCelsius,
+                        cachedBatteryIntent = batterySnapshotIntent,
+                    )
                     latestMetrics = metrics
                     lastKnownMetrics = metrics
                     if (metrics.temperatureTenths > 0) {
@@ -325,7 +369,7 @@ class BrightScreenFastChargeService : Service() {
                     }
                     handler.post {
                         updateOverheatState(metrics)
-                        if (isWiredCharging) {
+                        if (isWiredCharging && !isFullChargeReleased) {
                             evaluatePolicy()
                             updateLiveNotification()
                         }
@@ -337,7 +381,7 @@ class BrightScreenFastChargeService : Service() {
         }
     }
 
-    /** 核心策略：亮屏 + 有线充电 + 未过热 + 未触发满电释放 → 屏蔽充电温控节点，否则无条件恢复官方温控并定期复核 */
+    /** 核心策略：亮屏 + 有线充电 + 未过热 + 未触发满电释放 → 屏蔽充电温控节点，否则无条件恢复官方温控并按周期只读复核 */
     private fun evaluatePolicy() {
         val desired = FastChargeController.shouldBlockChargingNodes(
             isWiredCharging = isWiredCharging,
@@ -360,17 +404,8 @@ class BrightScreenFastChargeService : Service() {
         val needVerify = now - lastVerifyElapsed >= verifyIntervalMs
         val forceRestore = !desired && forceRestoreRequested.get()
 
-        if (desired) {
-            if (appliedBlocked != true || needVerify) {
-                scheduleNodeSync()
-            }
-        } else {
-            // 当处于过热熔断、满电释放、息屏或拔电状态时：
-            // 不仅在 appliedBlocked != false 时恢复，且每 VERIFY_INTERVAL_MS 强校验底层节点权限，
-            // 彻底杜绝任何外部任务或状态不同步导致节点残留 0000 锁死！
-            if (forceRestore || isOverheated || appliedBlocked != false || needVerify) {
-                scheduleNodeSync()
-            }
+        if (shouldScheduleNodeSync(desired, forceRestore, appliedBlocked, needVerify)) {
+            scheduleNodeSync()
         }
     }
 
@@ -385,10 +420,11 @@ class BrightScreenFastChargeService : Service() {
     /**
      * 在单线程 rootExecutor 上串行同步温控节点状态。
      * 不再因前一次检测未完成而丢弃随后的「熔断/满电释放/拔线/息屏解锁」指令；
-     * 同时在无 Root 或同步失败时立即退出循环，防止 `appliedBlocked == null` 引发 10ms 级 CPU 死循环。
+     * 同时在无 Root 或节点已处于恢复态时直接短路，消除过热/无 Root 下的循环唤醒与多余 chmod。
      */
     private fun scheduleNodeSync() {
         if (!syncScheduled.compareAndSet(false, true)) return
+        val appCtx = applicationContext
         postRoot {
             try {
                 var attempts = 0
@@ -399,18 +435,22 @@ class BrightScreenFastChargeService : Service() {
                     val forceUnlock = forceRestoreRequested.getAndSet(false)
                     var syncFailed = false
 
-                    if (!forceUnlock && appliedBlocked != true && !RootShell.hasRoot()) {
+                    if (!RootShell.hasRoot()) {
                         rootSuccessState = false
                         appliedBlocked = null
                         syncFailed = true
                         lastRootFailureElapsed = SystemClock.elapsedRealtime()
+                        handler.post {
+                            if (isServiceAlive) enterStandby(StandbyReason.NO_ROOT)
+                        }
                     } else if (wantBlock && !forceUnlock) {
                         val blocked = FastChargeController.areTemperatureNodesBlocked()
                         if (blocked == true) {
+                            FastChargeController.markNodesMayBeBlocked(appCtx, true)
                             appliedBlocked = true
                             rootSuccessState = true
                         } else {
-                            val result = FastChargeController.blockTemperatureNodes()
+                            val result = FastChargeController.blockTemperatureNodes(appCtx)
                             rootSuccessState = result.success
                             if (result.success) {
                                 appliedBlocked = true
@@ -423,16 +463,19 @@ class BrightScreenFastChargeService : Service() {
                         }
                     } else {
                         val anyBlocked = FastChargeController.isAnyTemperatureNodeBlocked()
-                        // 过热保护触发、满电释放或强制解锁时无条件执行 restoreTemperatureNodes（强制 chmod 0644 全部温控节点）；
-                        // 无 Root 时不陷入重复失败死循环
-                        val shouldRestore = forceUnlock ||
-                            isOverheated ||
-                            isFullChargeReleased ||
-                            appliedBlocked != false ||
-                            anyBlocked == true ||
-                            (anyBlocked == null && rootSuccessState != false)
+                        if (anyBlocked == false) {
+                            FastChargeController.markNodesMayBeBlocked(appCtx, false)
+                        }
+                        // 仅当本次是状态切换强恢复(forceUnlock)、状态曾锁死(appliedBlocked==true)或实际探测到节点仍为 0000 时才执行 chmod 恢复；
+                        // 已恢复过热/满电/息屏态的周期复核不重复执行 chmod
+                        val shouldRestore = shouldExecuteRestoreNodes(
+                            forceUnlock = forceUnlock,
+                            appliedBlocked = appliedBlocked,
+                            anyBlocked = anyBlocked,
+                            rootSuccessState = rootSuccessState,
+                        )
                         if (shouldRestore) {
-                            val result = FastChargeController.restoreTemperatureNodes()
+                            val result = FastChargeController.restoreTemperatureNodes(appCtx)
                             rootSuccessState = result.success
                             if (result.success) {
                                 appliedBlocked = false
@@ -468,10 +511,10 @@ class BrightScreenFastChargeService : Service() {
     }
 
     /**
-     * 拔线/未插电时：恢复官方温控节点、布防充电唤醒触发器，并退出前台服务移除通知，
-     * 确保未充电时通知栏 100% 不残留任何通知，下次插电由广播 + JobScheduler 立即唤醒。
+     * 拔线、满电停充(方案A)或无 Root 挂起时：
+     * 主线程立即撤回通知并停止前台服务，后台线程按需单次恢复温控节点后停机，绝不拖延或驻留空转。
      */
-    private fun enterStandby() {
+    private fun enterStandby(reason: StandbyReason) {
         handler.removeCallbacks(tickerRunnable)
         wasChargingLastTick = false
         desiredBlocked = false
@@ -479,8 +522,13 @@ class BrightScreenFastChargeService : Service() {
         samsungSettingsApplied = false
         isOverheated = false
         isThermalCutoffActive = false
-        isFullChargeReleased = false
-        isFullChargeReleasedActive = false
+        if (reason == StandbyReason.UNPLUGGED) {
+            isFullChargeReleased = false
+            isFullChargeReleasedActive = false
+        } else if (reason == StandbyReason.FULL_CHARGE) {
+            isFullChargeReleased = true
+            isFullChargeReleasedActive = true
+        }
         lastNotifiedLevel = -1
         lastNotifiedWatts = -1.0
         lastNotifyTime = 0L
@@ -488,27 +536,32 @@ class BrightScreenFastChargeService : Service() {
         lastNotifiedOverheated = null
         lastNotifiedFullReleased = null
 
-        FastChargeScheduler.enable(this)
-        postRoot {
-            if (RootShell.hasRoot() || appliedBlocked == true) {
-                logResult("未充电待命，恢复官方温控", FastChargeController.restoreTemperatureNodes())
-            }
-            appliedBlocked = false
-            rootSuccessState = null
-            lastRootFailureElapsed = 0L
-            handler.post {
-                if (isEnabled() && FastChargeScheduler.isPluggedIn(this)) {
-                    Log.i(TAG, "待命退出取消：已重新连接电源")
-                    lastTickElapsed = 0L
-                    handler.post(tickerRunnable)
-                    return@post
-                }
-                FastChargeNotifier.cancelLive(this)
-                runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
-                foregroundStarted = false
-                stopSelf()
+        FastChargeNotifier.cancelLive(this)
+        runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+        foregroundStarted = false
+
+        when (reason) {
+            StandbyReason.UNPLUGGED -> FastChargeScheduler.enable(this, knownPlugged = false)
+            StandbyReason.FULL_CHARGE -> FastChargeScheduler.onFullChargeStandby(this)
+            StandbyReason.NO_ROOT -> {
+                FastChargeScheduler.setRootSuspended(this, true)
+                FastChargeScheduler.disable(this)
             }
         }
+
+        val appCtx = applicationContext
+        val needRestore = appliedBlocked == true || FastChargeController.isNodesMayBeBlocked(this)
+        appliedBlocked = false
+        rootSuccessState = null
+        lastRootFailureElapsed = 0L
+        if (reason != StandbyReason.NO_ROOT && needRestore) {
+            postRoot {
+                if (RootShell.hasRoot()) {
+                    logResult("退出待命并恢复官方温控($reason)", FastChargeController.restoreTemperatureNodes(appCtx))
+                }
+            }
+        }
+        stopSelf()
     }
 
     /**
@@ -523,8 +576,8 @@ class BrightScreenFastChargeService : Service() {
     }
 
     private fun updateLiveNotification() {
-        if (!isWiredCharging) {
-            hideServiceNotification()
+        if (!isWiredCharging || isFullChargeReleased) {
+            FastChargeNotifier.cancelLive(this)
             lastNotifiedLevel = -1
             lastNotifiedWatts = -1.0
             lastNotifyTime = 0L
@@ -579,34 +632,30 @@ class BrightScreenFastChargeService : Service() {
         samsungSettingsApplied = false
         isFullChargeReleased = false
         isFullChargeReleasedActive = false
-        postRoot {
-            if (RootShell.hasRoot() || appliedBlocked == true) {
-                logResult("关闭亮屏快充，恢复官方温控", FastChargeController.restoreTemperatureNodes())
-            }
-            appliedBlocked = false
-            rootSuccessState = null
-            lastRootFailureElapsed = 0L
-            handler.post {
-                // 恢复温控是异步的，这期间用户完全可能又把开关打开了。
-                // 若不重新判断就直接 stopSelf()，刚被重新启用的常驻服务会被这次延迟回调杀掉，
-                // 表现为「关掉再打开后要等下一个周期任务才生效」。
-                if (isEnabled()) {
-                    Log.i(TAG, "停止流程被取消：功能已重新开启")
-                    return@post
+        FastChargeScheduler.disable(this)
+        FastChargeNotifier.cancelLive(this)
+        lastNotifiedLevel = -1
+        lastNotifiedWatts = -1.0
+        lastNotifyTime = 0L
+        lastNotifiedScreenOn = null
+        lastNotifiedOverheated = null
+        lastNotifiedFullReleased = null
+        runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+        foregroundStarted = false
+
+        val appCtx = applicationContext
+        val needRestore = appliedBlocked == true || FastChargeController.isNodesMayBeBlocked(this)
+        appliedBlocked = false
+        rootSuccessState = null
+        lastRootFailureElapsed = 0L
+        if (needRestore) {
+            postRoot {
+                if (RootShell.hasRoot()) {
+                    logResult("关闭亮屏快充，恢复官方温控", FastChargeController.restoreTemperatureNodes(appCtx))
                 }
-                FastChargeNotifier.cancelLive(this)
-                lastNotifiedLevel = -1
-                lastNotifiedWatts = -1.0
-                lastNotifyTime = 0L
-                lastNotifiedScreenOn = null
-                lastNotifiedOverheated = null
-                lastNotifiedFullReleased = null
-                runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
-                foregroundStarted = false
-                stopSelf()
             }
         }
-        FastChargeScheduler.disable(this)
+        stopSelf()
     }
 
     /**
@@ -643,8 +692,14 @@ class BrightScreenFastChargeService : Service() {
      * 强行结束，也能立刻重排兜底任务，让下次插电仍能被系统拉起。
      */
     override fun onTaskRemoved(rootIntent: Intent?) {
-        Log.w(TAG, "任务被移除，重新排布兜底任务")
-        FastChargeScheduler.enable(this)
+        if (isEnabled() && !FastChargeScheduler.isRootSuspended(this)) {
+            val snap = FastChargeScheduler.readBatterySnapshot(this)
+            if (FastChargeController.isFullChargeStopped(snap.level, snap.status, isFullChargeReleased)) {
+                FastChargeScheduler.onFullChargeStandby(this)
+            } else {
+                FastChargeScheduler.enable(this, knownPlugged = snap.plugged)
+            }
+        }
         super.onTaskRemoved(rootIntent)
     }
 
@@ -655,10 +710,14 @@ class BrightScreenFastChargeService : Service() {
             runCatching { unregisterReceiver(chargingReceiver) }
             receiverRegistered = false
         }
+        val appCtx = applicationContext
+        val needSafetyRestore = appliedBlocked == true
         runCatching {
-            rootExecutor.execute {
-                if (RootShell.hasRoot() || appliedBlocked == true) {
-                    FastChargeController.restoreTemperatureNodes()
+            if (needSafetyRestore) {
+                rootExecutor.execute {
+                    if (RootShell.hasRoot()) {
+                        FastChargeController.restoreTemperatureNodes(appCtx)
+                    }
                 }
             }
         }
@@ -670,6 +729,7 @@ class BrightScreenFastChargeService : Service() {
 
     companion object {
         const val ACTION_START = "com.weitiao.tuning.action.START_FAST_CHARGE"
+        const val ACTION_STOP_STANDBY = "com.weitiao.tuning.action.STOP_STANDBY_FAST_CHARGE"
         const val ACTION_RESTORE_AND_STOP = "com.weitiao.tuning.action.RESTORE_FAST_CHARGE"
 
         @Volatile
@@ -690,15 +750,46 @@ class BrightScreenFastChargeService : Service() {
 
         private const val TAG = "TuningFastCharge"
 
-        private const val TICKER_ACTIVE_MS = 5_000L
-        private const val TICKER_FULL_MS = 15_000L
-        private const val TICKER_IDLE_MS = 30_000L
+        private const val TICKER_ACTIVE_MS = 10_000L
+        private const val TICKER_FULL_MS = 30_000L
         private const val MIN_TICK_INTERVAL_MS = 3_000L
         private const val VERIFY_INTERVAL_MS = 15_000L // 每 15s 双向复核一次节点权限，防止被系统重置或异常锁死
         private const val VERIFY_INTERVAL_FULL_MS = 30_000L // 100% 满电涓流阶段降频至 30s 复核
         private const val NO_ROOT_RETRY_COOLDOWN_MS = 60_000L // 无 Root 或执行失败后冷却 60s 再试，避免高频重试空转
         private const val MAX_SYNC_LOOP_ITERATIONS = 4
         private const val NOTIFY_THROTTLE_MS = 15_000L // 小幅功率波动 (<0.8W) 至少间隔 15s 刷新一次通知
+
+        /**
+         * 决策当前 tick 是否需要触发一次后台节点状态核对/同步：
+         * 过热/满电/息屏释放阶段（`desiredBlocked == false`）一旦 `appliedBlocked == false`，
+         * 除过渡瞬间的 `forceRestore` 外仅受 `needVerify`（15s/30s）节流驱动，彻底杜绝每次采样反复触发。
+         */
+        internal fun shouldScheduleNodeSync(
+            desiredBlocked: Boolean,
+            forceRestore: Boolean,
+            appliedBlocked: Boolean?,
+            needVerify: Boolean,
+        ): Boolean = if (desiredBlocked) {
+            appliedBlocked != true || needVerify
+        } else {
+            forceRestore || appliedBlocked != false || needVerify
+        }
+
+        /**
+         * 决策恢复分支是否需要执行 `chmod` 恢复：
+         * 只有本次为切换强恢复 (`forceUnlock`)、此前确已锁死 (`appliedBlocked == true`)、
+         * 实际 `stat` 探测仍有节点处于 `0000` (`anyBlocked == true`)，或未知状态下 (`anyBlocked == null && appliedBlocked != false`) 才执行，
+         * 已确认全部 `0644` 后绝不在过热/满电下重复执行 `chmod`。
+         */
+        internal fun shouldExecuteRestoreNodes(
+            forceUnlock: Boolean,
+            appliedBlocked: Boolean?,
+            anyBlocked: Boolean?,
+            rootSuccessState: Boolean?,
+        ): Boolean = forceUnlock ||
+            appliedBlocked == true ||
+            anyBlocked == true ||
+            (anyBlocked == null && appliedBlocked != false && rootSuccessState != false)
 
         /**
          * 判断是否处于无 Root / 执行失败后的冷却期内（纯时间与无阻塞缓存判定，不在主线程触发 su）。

@@ -7,6 +7,7 @@ import android.os.Build
 import androidx.core.content.ContextCompat
 import com.weitiao.tuning.App
 import com.weitiao.tuning.tuning.BrightScreenFastChargeService
+import com.weitiao.tuning.tuning.FastChargeController
 import com.weitiao.tuning.tuning.FastChargeNotifier
 import com.weitiao.tuning.tuning.FastChargeScheduler
 import com.weitiao.tuning.tuning.PassThroughService
@@ -272,16 +273,34 @@ object TuningPrefs {
     }
 
     /**
-     * 应用回到前台时重新武装充电触发器并在已插电时拉起前台服务。
-     * 未插电时仅布防 JobScheduler 插电触发器，不在后台启动空转前台服务，确保未充电时通知栏 100% 不出现常驻通知。
+     * 应用回到前台时重新武装充电触发器并在满足条件时拉起前台服务。
+     * 未插电或 100% 满电保护态 / 无 Root 挂起态绝不启动空转服务，确保通知栏干净零耗电。
      */
     fun resyncServices(context: Context) {
         val config = load(context)
-        val plugged = FastChargeScheduler.isPluggedIn(context)
-        if (config.brightScreenFastCharge || config.passThrough) {
-            FastChargeScheduler.enable(context)
+        val snap = FastChargeScheduler.readBatterySnapshot(context)
+        val plugged = snap.plugged
+        val rootSuspended = FastChargeScheduler.isRootSuspended(context)
+        val fullStopped = FastChargeController.isFullChargeStopped(
+            level = snap.level,
+            status = snap.status,
+            previouslyReleased = BrightScreenFastChargeService.isFullChargeReleasedActive,
+        )
+        val activelyChargingFast = FastChargeController.isActivelyChargingForFastCharge(
+            plugged = plugged,
+            level = snap.level,
+            status = snap.status,
+            previouslyFullReleased = BrightScreenFastChargeService.isFullChargeReleasedActive,
+        )
+
+        if (!rootSuspended && (config.brightScreenFastCharge || config.passThrough)) {
+            if (config.brightScreenFastCharge && fullStopped && !config.passThrough) {
+                FastChargeScheduler.onFullChargeStandby(context)
+            } else {
+                FastChargeScheduler.enable(context, knownPlugged = plugged)
+            }
         }
-        if (config.brightScreenFastCharge && plugged) {
+        if (config.brightScreenFastCharge && activelyChargingFast && !rootSuspended) {
             runCatching {
                 ContextCompat.startForegroundService(
                     context,
@@ -289,8 +308,10 @@ object TuningPrefs {
                         .setAction(BrightScreenFastChargeService.ACTION_START),
                 )
             }
+        } else if (!config.brightScreenFastCharge || !plugged || fullStopped || rootSuspended) {
+            FastChargeNotifier.cancelLive(context)
         }
-        if (config.passThrough && plugged) {
+        if (config.passThrough && plugged && !rootSuspended) {
             runCatching {
                 ContextCompat.startForegroundService(
                     context,
@@ -342,23 +363,97 @@ object TuningPrefs {
     }
 
     private fun syncServices(context: Context, previous: TuningConfig, config: TuningConfig) {
-        val plugged = FastChargeScheduler.isPluggedIn(context)
-        val fastIntent = Intent(context, BrightScreenFastChargeService::class.java).setAction(
-            if (config.brightScreenFastCharge) BrightScreenFastChargeService.ACTION_START
-            else BrightScreenFastChargeService.ACTION_RESTORE_AND_STOP,
+        if ((!previous.brightScreenFastCharge && config.brightScreenFastCharge) ||
+            (!previous.passThrough && config.passThrough)
+        ) {
+            FastChargeScheduler.setRootSuspended(context, false)
+        }
+
+        val snap = FastChargeScheduler.readBatterySnapshot(context)
+        val plugged = snap.plugged
+        val rootSuspended = FastChargeScheduler.isRootSuspended(context)
+        val fullStopped = FastChargeController.isFullChargeStopped(
+            level = snap.level,
+            status = snap.status,
+            previouslyReleased = BrightScreenFastChargeService.isFullChargeReleasedActive,
         )
+        val activelyChargingFast = FastChargeController.isActivelyChargingForFastCharge(
+            plugged = plugged,
+            level = snap.level,
+            status = snap.status,
+            previouslyFullReleased = BrightScreenFastChargeService.isFullChargeReleasedActive,
+        )
+
         if (config.brightScreenFastCharge) {
-            FastChargeScheduler.enable(context)
-            if (plugged || BrightScreenFastChargeService.isServiceAlive) {
-                runCatching { ContextCompat.startForegroundService(context, fastIntent) }
+            when {
+                rootSuspended -> {
+                    if (!config.passThrough) FastChargeScheduler.disable(context)
+                    FastChargeNotifier.cancelLive(context)
+                    if (BrightScreenFastChargeService.isServiceAlive) {
+                        runCatching {
+                            context.startService(
+                                Intent(context, BrightScreenFastChargeService::class.java)
+                                    .setAction(BrightScreenFastChargeService.ACTION_STOP_STANDBY),
+                            )
+                        }
+                    }
+                }
+                activelyChargingFast -> {
+                    FastChargeScheduler.enable(context, knownPlugged = true)
+                    runCatching {
+                        ContextCompat.startForegroundService(
+                            context,
+                            Intent(context, BrightScreenFastChargeService::class.java)
+                                .setAction(BrightScreenFastChargeService.ACTION_START),
+                        )
+                    }
+                }
+                plugged -> {
+                    FastChargeScheduler.onFullChargeStandby(context)
+                    FastChargeNotifier.cancelLive(context)
+                    if (BrightScreenFastChargeService.isServiceAlive) {
+                        runCatching {
+                            context.startService(
+                                Intent(context, BrightScreenFastChargeService::class.java)
+                                    .setAction(BrightScreenFastChargeService.ACTION_STOP_STANDBY),
+                            )
+                        }
+                    }
+                }
+                else -> {
+                    FastChargeScheduler.enable(context, knownPlugged = false)
+                    FastChargeNotifier.cancelLive(context)
+                    if (BrightScreenFastChargeService.isServiceAlive) {
+                        runCatching {
+                            context.startService(
+                                Intent(context, BrightScreenFastChargeService::class.java)
+                                    .setAction(BrightScreenFastChargeService.ACTION_STOP_STANDBY),
+                            )
+                        }
+                    }
+                }
             }
         } else {
             if (!config.passThrough) {
                 FastChargeScheduler.disable(context)
             }
             FastChargeNotifier.cancelLive(context)
-            if (previous.brightScreenFastCharge || BrightScreenFastChargeService.isServiceAlive) {
-                runCatching { context.startService(fastIntent) }
+            if (BrightScreenFastChargeService.isServiceAlive) {
+                runCatching {
+                    context.startService(
+                        Intent(context, BrightScreenFastChargeService::class.java)
+                            .setAction(BrightScreenFastChargeService.ACTION_RESTORE_AND_STOP),
+                    )
+                }
+            } else if (previous.brightScreenFastCharge && FastChargeController.isNodesMayBeBlocked(context)) {
+                val appCtx = context.applicationContext
+                Thread({
+                    runCatching {
+                        if (RootShell.hasRoot()) {
+                            FastChargeController.restoreTemperatureNodes(appCtx)
+                        }
+                    }
+                }, "Tuning-ThermalDisableRestore").apply { isDaemon = true }.start()
             }
         }
 
@@ -366,8 +461,10 @@ object TuningPrefs {
             if (config.passThrough) PassThroughService.ACTION_REFRESH
             else PassThroughService.ACTION_DISABLE,
         )
-        if (config.passThrough) {
-            FastChargeScheduler.enable(context)
+        if (config.passThrough && !rootSuspended) {
+            if (!config.brightScreenFastCharge || !fullStopped) {
+                FastChargeScheduler.enable(context, knownPlugged = plugged)
+            }
             if (plugged || PassThroughService.isServiceAlive) {
                 runCatching { ContextCompat.startForegroundService(context, passIntent) }
             }
@@ -375,7 +472,7 @@ object TuningPrefs {
             if (!config.brightScreenFastCharge) {
                 FastChargeScheduler.disable(context)
             }
-            if (previous.passThrough || PassThroughService.isServiceAlive) {
+            if (PassThroughService.isServiceAlive) {
                 runCatching { context.startService(passIntent) }
             }
         }

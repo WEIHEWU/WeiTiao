@@ -12,6 +12,8 @@ import android.os.BatteryManager
 import android.os.PowerManager
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.weitiao.tuning.core.RootShell
+import com.weitiao.tuning.core.TuningConfig
 import com.weitiao.tuning.core.TuningPrefs
 
 /**
@@ -35,8 +37,61 @@ object FastChargeScheduler {
     private const val JOB_ID_KICK = 19079
     private const val JOB_ID_ARM = 19080
     private const val PERIOD_MS = 15 * 60 * 1000L
+    private const val ARM_DEBOUNCE_MS = 3_000L
+    private const val KEY_ROOT_SUSPENDED = "fast_charge_root_suspended"
 
-    fun enable(context: Context) {
+    @Volatile
+    private var rootSuspendedCache: Boolean? = null
+
+    data class BatterySnapshot(
+        val plugged: Boolean,
+        val level: Int,
+        val status: Int,
+    )
+
+    internal enum class ArmTriggerDecision {
+        CANCEL_ALL_SUSPENDED,
+        CANCEL_IMMEDIATE_PLUGGED,
+        SCHEDULE_ARM_UNPLUGGED,
+    }
+
+    internal fun decideArmTrigger(
+        rootSuspended: Boolean,
+        plugged: Boolean,
+    ): ArmTriggerDecision = when {
+        rootSuspended -> ArmTriggerDecision.CANCEL_ALL_SUSPENDED
+        plugged -> ArmTriggerDecision.CANCEL_IMMEDIATE_PLUGGED
+        else -> ArmTriggerDecision.SCHEDULE_ARM_UNPLUGGED
+    }
+
+    fun isRootSuspended(context: Context): Boolean {
+        val cached = rootSuspendedCache
+        if (cached != null) return cached
+        val persisted = context
+            .getSharedPreferences(FastChargeController.RUNTIME_PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_ROOT_SUSPENDED, false)
+        rootSuspendedCache = persisted
+        return persisted
+    }
+
+    fun setRootSuspended(context: Context, suspended: Boolean) {
+        rootSuspendedCache = suspended
+        context
+            .getSharedPreferences(FastChargeController.RUNTIME_PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_ROOT_SUSPENDED, suspended)
+            .apply()
+    }
+
+    internal fun resetStateForTest() {
+        rootSuspendedCache = null
+    }
+
+    fun enable(context: Context, knownPlugged: Boolean? = null) {
+        if (isRootSuspended(context)) {
+            disable(context)
+            return
+        }
         runCatching {
             val scheduler = context.getSystemService(JobScheduler::class.java) ?: return
             if (scheduler.getPendingJob(JOB_ID) == null) {
@@ -47,7 +102,7 @@ object FastChargeScheduler {
                     .build()
                 scheduler.schedule(info)
             }
-            armChargingTrigger(context)
+            armChargingTrigger(context, knownPlugged)
         }.onFailure { Log.w(TAG, "兜底任务调度失败", it) }
     }
 
@@ -60,32 +115,76 @@ object FastChargeScheduler {
         }.onFailure { Log.w(TAG, "兜底任务取消失败", it) }
     }
 
-    internal fun isPluggedIn(context: Context): Boolean {
-        val battery = runCatching {
-            context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-        }.getOrNull()
-        return (battery?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0) > 0
+    /** 仅取消即时唤醒任务（插电待命 / 100% 满电退出服务时防止 JobScheduler 毫秒级乒乓拉起）。 */
+    fun cancelImmediateTriggers(context: Context) {
+        runCatching {
+            val scheduler = context.getSystemService(JobScheduler::class.java) ?: return
+            scheduler.cancel(JOB_ID_KICK)
+            scheduler.cancel(JOB_ID_ARM)
+        }.onFailure { Log.w(TAG, "取消即时触发器失败", it) }
     }
 
     /**
-     * 布防「插电触发器」——整套修复里最关键的一环。
-     *
-     * `ACTION_POWER_CONNECTED` 不在 Android 8+ 隐式广播豁免名单里（targetSdk≥26
-     * 时静态注册收不到），所以进程一旦被杀就再也收不到插电事件，只能等 15 分钟的
-     * 周期任务。这里改用一个**只约束「正在充电」、且不设任何时间窗口**的一次性任务：
-     * 未充电时它一直挂起，约束一旦满足（即插上电源）系统会**立刻**执行它，
-     * 于是插电后几秒内就能下发策略并弹出通知，等价于拿到了我们自己的插电广播。
-     *
-     * 只在未充电时布防：充电中布防会立即触发，而那条路径已由常驻服务覆盖，无需重复。
+     * 100% 满电保护退场：立即撤掉即时触发器避免与服务退出乒乓互踢，同时保留周期性兜底任务，
+     * 并在物理拔线（由 App 进程级动态接收器 / 静态广播 / UI 回前台触发）后重新布防 JOB_ID_ARM。
      */
-    fun armChargingTrigger(context: Context) {
+    fun onFullChargeStandby(context: Context) {
+        if (isRootSuspended(context)) {
+            disable(context)
+            return
+        }
         runCatching {
             val scheduler = context.getSystemService(JobScheduler::class.java) ?: return
-            // 已布防则直接跳过：待命态下每 5 秒会被调用一次，不能每次都走一遍调度
+            scheduler.cancel(JOB_ID_KICK)
+            scheduler.cancel(JOB_ID_ARM)
+            if (scheduler.getPendingJob(JOB_ID) == null) {
+                val info = JobInfo.Builder(JOB_ID, ComponentName(context, FastChargeJobService::class.java))
+                    .setRequiresCharging(true)
+                    .setPeriodic(PERIOD_MS)
+                    .setPersisted(true)
+                    .build()
+                scheduler.schedule(info)
+            }
+        }.onFailure { Log.w(TAG, "满电待命任务调整失败", it) }
+    }
+
+    internal fun readBatterySnapshot(context: Context): BatterySnapshot {
+        val battery = runCatching {
+            context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        }.getOrNull()
+        val plugged = (battery?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0) > 0
+        val level = battery?.getIntExtra(BatteryManager.EXTRA_LEVEL, 0) ?: 0
+        val status = battery?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+        return BatterySnapshot(plugged = plugged, level = level, status = status)
+    }
+
+    internal fun isPluggedIn(context: Context): Boolean = readBatterySnapshot(context).plugged
+
+    /**
+     * 布防「插电触发器」——只在物理未插电且具备 Root 时布防，并加 3s 最小延迟防抖：
+     * - 无 Root 挂起态：撤消全部任务；
+     * - 已插电态（如 100% 满电退场）：主动取消即时触发器，严禁在充电状态下排入 0ms RequiresCharging 任务引发乒乓死循环；
+     * - 未插电态：若尚未布防则调度 `JOB_ID_ARM`，下次接入电源即刻触发。
+     */
+    fun armChargingTrigger(context: Context, knownPlugged: Boolean? = null) {
+        val plugged = knownPlugged ?: isPluggedIn(context)
+        when (decideArmTrigger(isRootSuspended(context), plugged)) {
+            ArmTriggerDecision.CANCEL_ALL_SUSPENDED -> {
+                disable(context)
+                return
+            }
+            ArmTriggerDecision.CANCEL_IMMEDIATE_PLUGGED -> {
+                cancelImmediateTriggers(context)
+                return
+            }
+            ArmTriggerDecision.SCHEDULE_ARM_UNPLUGGED -> Unit
+        }
+        runCatching {
+            val scheduler = context.getSystemService(JobScheduler::class.java) ?: return
             if (scheduler.getPendingJob(JOB_ID_ARM) != null) return
-            if (isPluggedIn(context)) return
             val info = JobInfo.Builder(JOB_ID_ARM, ComponentName(context, FastChargeJobService::class.java))
                 .setRequiresCharging(true)
+                .setMinimumLatency(ARM_DEBOUNCE_MS)
                 .setPersisted(true)
                 .build()
             scheduler.schedule(info)
@@ -93,20 +192,16 @@ object FastChargeScheduler {
     }
 
     /**
-     * 插电后立刻跑一次的唤醒任务。
-     *
-     * 前台服务被后台限制拒绝时，只靠 15 分钟的周期任务要等太久。
-     * 这里排一个「要求正在充电 + 立即执行」的一次性任务：
-     * JobService 执行期间应用处于活动窗口，比广播更容易成功拉起常驻前台服务，
-     * 即便仍被拒绝，也会走一遍 root 策略下发与实时通知刷新。
+     * 插电后短暂延迟跑一次的唤醒任务（附加 3s 防抖延迟避免极端边界立即重入）。
      */
     fun kick(context: Context) {
+        if (isRootSuspended(context)) return
         runCatching {
             val scheduler = context.getSystemService(JobScheduler::class.java) ?: return
             val info = JobInfo.Builder(JOB_ID_KICK, ComponentName(context, FastChargeJobService::class.java))
                 .setRequiresCharging(true)
-                .setMinimumLatency(0L)
-                .setOverrideDeadline(0L)
+                .setMinimumLatency(ARM_DEBOUNCE_MS)
+                .setOverrideDeadline(ARM_DEBOUNCE_MS + 2_000L)
                 .build()
             scheduler.schedule(info)
         }.onFailure { Log.w(TAG, "即时唤醒任务调度失败", it) }
@@ -128,42 +223,96 @@ object FastChargeFallback {
         val passThroughEnabled = cfg.passThrough
 
         if (!fastChargeEnabled && !passThroughEnabled) {
-            FastChargeController.restoreTemperatureNodes()
+            if (FastChargeController.isNodesMayBeBlocked(context) && RootShell.hasRoot()) {
+                FastChargeController.restoreTemperatureNodes(context)
+            }
             FastChargeScheduler.disable(context)
             FastChargeNotifier.cancelLive(context)
             return
         }
-        FastChargeScheduler.enable(context)
 
-        val battery = runCatching {
-            context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-        }.getOrNull()
-        val plugged = battery?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0
-        val level = battery?.getIntExtra(BatteryManager.EXTRA_LEVEL, 0) ?: 0
+        val snap = FastChargeScheduler.readBatterySnapshot(context)
+        val plugged = snap.plugged
+        val level = snap.level
 
-        if (plugged <= 0) {
-            FastChargeController.restoreTemperatureNodes()
+        if (!plugged) {
+            BrightScreenFastChargeService.isFullChargeReleasedActive = false
             FastChargeNotifier.cancelLive(context)
-            FastChargeScheduler.armChargingTrigger(context)
+            if (FastChargeController.isNodesMayBeBlocked(context) && RootShell.hasRoot()) {
+                FastChargeController.restoreTemperatureNodes(context)
+            }
+            FastChargeScheduler.enable(context, knownPlugged = false)
             return
         }
 
-        if (passThroughEnabled && !PassThroughService.isServiceAlive) {
-            runCatching {
-                val passIntent = Intent(context, PassThroughService::class.java)
-                    .setAction(PassThroughService.ACTION_REFRESH)
-                ContextCompat.startForegroundService(context, passIntent)
+        val fullReleased = FastChargeController.isFullChargeStopped(
+            level = level,
+            status = snap.status,
+            previouslyReleased = BrightScreenFastChargeService.isFullChargeReleasedActive,
+        )
+        BrightScreenFastChargeService.isFullChargeReleasedActive = fullReleased
+
+        if (passThroughEnabled && !PassThroughService.isServiceAlive && !FastChargeScheduler.isRootSuspended(context)) {
+            if (RootShell.hasRoot()) {
+                runCatching {
+                    val passIntent = Intent(context, PassThroughService::class.java)
+                        .setAction(PassThroughService.ACTION_REFRESH)
+                    ContextCompat.startForegroundService(context, passIntent)
+                }
+            } else {
+                FastChargeScheduler.setRootSuspended(context, true)
+                FastChargeScheduler.disable(context)
+                FastChargeNotifier.cancelLive(context)
+                return
             }
         }
 
         if (!fastChargeEnabled) {
-            FastChargeController.restoreTemperatureNodes()
             FastChargeNotifier.cancelLive(context)
+            if (FastChargeController.isNodesMayBeBlocked(context) && RootShell.hasRoot()) {
+                FastChargeController.restoreTemperatureNodes(context)
+            }
             return
         }
 
-        // 优先尝试拉起/唤醒亮屏快充前台服务；若服务已存活，严禁在此处越权执行 blockTemperatureNodes()，
-        // 彻底避免周期性 JobService 在高温熔断期间（如 17:05:31）背着常驻服务把温度节点重新锁死为 0000！
+        // 方案 A：100% 满电保护期间隐藏通知并停止后台轮询，绝不拉起前台服务也不重复刷 su
+        if (fullReleased) {
+            FastChargeNotifier.cancelLive(context)
+            if (FastChargeController.isNodesMayBeBlocked(context) && RootShell.hasRoot()) {
+                FastChargeController.restoreTemperatureNodes(context)
+            }
+            FastChargeScheduler.onFullChargeStandby(context)
+            if (BrightScreenFastChargeService.isServiceAlive) {
+                runCatching {
+                    context.startService(
+                        Intent(context, BrightScreenFastChargeService::class.java)
+                            .setAction(BrightScreenFastChargeService.ACTION_STOP_STANDBY),
+                    )
+                }
+            }
+            return
+        }
+
+        // 无 Root 快速熔断：Fail-Fast 停止全部调度与前台服务拉起，避免无效重试与耗电
+        if (!RootShell.hasRoot()) {
+            FastChargeScheduler.setRootSuspended(context, true)
+            FastChargeScheduler.disable(context)
+            FastChargeNotifier.cancelLive(context)
+            if (BrightScreenFastChargeService.isServiceAlive) {
+                runCatching {
+                    context.startService(
+                        Intent(context, BrightScreenFastChargeService::class.java)
+                            .setAction(BrightScreenFastChargeService.ACTION_STOP_STANDBY),
+                    )
+                }
+            }
+            Log.w(TAG, "未检测到 Root 权限，亮屏快充自动进入静默挂起状态")
+            return
+        }
+        FastChargeScheduler.setRootSuspended(context, false)
+        FastChargeScheduler.enable(context, knownPlugged = true)
+
+        // 全部前置门控通过（已插电 + 未满电停充 + 具备 Root）：优先拉起亮屏快充前台服务
         val startedOrNotified = runCatching {
             val intent = Intent(context, BrightScreenFastChargeService::class.java)
                 .setAction(BrightScreenFastChargeService.ACTION_START)
@@ -179,48 +328,31 @@ object FastChargeFallback {
         val screenOn = powerManager?.isInteractive ?: true
 
         if (!screenOn) {
-            FastChargeController.restoreTemperatureNodes()
+            if (FastChargeController.isNodesMayBeBlocked(context)) {
+                FastChargeController.restoreTemperatureNodes(context)
+            }
             FastChargeNotifier.postLive(context, "息屏安全充 · 电量:$level%")
             return
         }
 
-        val fullReleased = FastChargeController.nextFullChargeReleased(
-            level = level,
-            previouslyReleased = BrightScreenFastChargeService.isFullChargeReleasedActive,
+        val cutoffCelsius = cfg.thermalCutoffCelsius.coerceIn(
+            TuningConfig.MIN_THERMAL_CUTOFF_CELSIUS,
+            TuningConfig.MAX_THERMAL_CUTOFF_CELSIUS,
         )
-        BrightScreenFastChargeService.isFullChargeReleasedActive = fullReleased
-        if (fullReleased) {
-            FastChargeController.restoreTemperatureNodes()
-            val metrics = FastChargeController.readBatteryMetrics(context)
-            BrightScreenFastChargeService.lastKnownMetrics = metrics
-            val tempC = String.format("%.1f°C", metrics.temperatureTenths / 10.0)
-            val statusText = FastChargeNotifier.formatChargingStatus(
-                isScreenOn = true,
-                isOverheated = false,
-                level = level,
-                metrics = metrics,
-                isFullReleased = true,
-            )
-            FastChargeNotifier.postLive(context, statusText, tempC)
-            Log.i(TAG, "兜底路径检测到满电 ($level%)，已恢复原生温控")
-            return
-        }
-
         // 先读取真实温度并执行与常驻服务完全一致的双重高温安全熔断判定
-        val metrics = FastChargeController.readBatteryMetrics(context)
+        val metrics = FastChargeController.readBatteryMetrics(context, cutoffCelsius = cutoffCelsius)
         BrightScreenFastChargeService.lastKnownMetrics = metrics
         val overheated = FastChargeController.isOverheated(
             metrics = metrics,
-            cutoffCelsius = cfg.thermalCutoffCelsius.coerceIn(
-                 com.weitiao.tuning.core.TuningConfig.MIN_THERMAL_CUTOFF_CELSIUS,
-                com.weitiao.tuning.core.TuningConfig.MAX_THERMAL_CUTOFF_CELSIUS,
-            ),
+            cutoffCelsius = cutoffCelsius,
             previouslyOverheated = BrightScreenFastChargeService.isThermalCutoffActive,
         )
         BrightScreenFastChargeService.isThermalCutoffActive = overheated
 
         if (overheated) {
-            FastChargeController.restoreTemperatureNodes()
+            if (FastChargeController.isNodesMayBeBlocked(context)) {
+                FastChargeController.restoreTemperatureNodes(context)
+            }
             val tempC = String.format("%.1f°C", metrics.temperatureTenths / 10.0)
             val statusText = FastChargeNotifier.formatChargingStatus(
                 isScreenOn = true,
@@ -234,7 +366,7 @@ object FastChargeFallback {
         }
 
         FastChargeController.enableSamsungFastChargingSettings()
-        val result = FastChargeController.blockTemperatureNodes()
+        val result = FastChargeController.blockTemperatureNodes(context)
         val statusText = FastChargeNotifier.formatChargingStatus(
             isScreenOn = true,
             isOverheated = false,
@@ -264,23 +396,29 @@ class FastChargeJobService : JobService() {
 
     override fun onStopJob(params: JobParameters?): Boolean {
         // 当用户拔掉充电器导致 requiresCharging 约束失效，或任务被取消时，系统会立即回调 onStopJob：
-        // 即使常驻服务已被系统回收，这里也能在后台线程确保拔线瞬间无条件恢复全部温控节点！
+        // 即使常驻服务已被系统回收，这里也能在后台线程确保拔线瞬间按需恢复全部温控节点并重布插电触发器！
         val context = applicationContext
         val cfg = TuningPrefs.load(context)
         val anyEnabled = cfg.brightScreenFastCharge || cfg.passThrough
         Thread({
             runCatching {
+                val plugged = FastChargeScheduler.isPluggedIn(context)
                 if (!anyEnabled) {
-                    FastChargeController.restoreTemperatureNodes()
+                    if (FastChargeController.isNodesMayBeBlocked(context) && RootShell.hasRoot()) {
+                        FastChargeController.restoreTemperatureNodes(context)
+                    }
                     FastChargeScheduler.disable(context)
                     FastChargeNotifier.cancelLive(context)
-                } else if (!FastChargeScheduler.isPluggedIn(context)) {
-                    FastChargeController.restoreTemperatureNodes()
+                } else if (!plugged) {
+                    BrightScreenFastChargeService.isFullChargeReleasedActive = false
+                    if (FastChargeController.isNodesMayBeBlocked(context) && RootShell.hasRoot()) {
+                        FastChargeController.restoreTemperatureNodes(context)
+                    }
                     FastChargeNotifier.cancelLive(context)
-                    FastChargeScheduler.armChargingTrigger(context)
+                    FastChargeScheduler.armChargingTrigger(context, knownPlugged = false)
                 }
             }
         }, "Tuning-FastChargeUnplugRestore").apply { isDaemon = true }.start()
-        return anyEnabled
+        return anyEnabled && !FastChargeScheduler.isRootSuspended(context)
     }
 }

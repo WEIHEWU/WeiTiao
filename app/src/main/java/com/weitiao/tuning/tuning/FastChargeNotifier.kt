@@ -236,9 +236,12 @@ object FastChargeNotifier {
     }
 
     @Synchronized
-    internal fun onBindForeground(liveChannelAllowed: Boolean): TransitionAction {
+    internal fun onBindForeground(
+        liveChannelAllowed: Boolean,
+        allowLiveReuse: Boolean = true,
+    ): TransitionAction {
         val currentStatus = lastStatusText
-        if (displayState == DisplayState.LIVE && !currentStatus.isNullOrBlank() && liveChannelAllowed) {
+        if (allowLiveReuse && displayState == DisplayState.LIVE && !currentStatus.isNullOrBlank() && liveChannelAllowed) {
             hiddenBoundToService = false
             return TransitionAction.BIND_FOREGROUND_LIVE
         }
@@ -373,12 +376,12 @@ object FastChargeNotifier {
      * - 否则绑定隐藏渠道通知，并在绑定完成后清理被替换的旧隐藏渠道。
      */
     @Synchronized
-    fun bindForegroundService(service: Service): Boolean {
-        val allowed = isLiveChannelAllowed(service)
+    fun bindForegroundService(service: Service, allowLiveReuse: Boolean = true): Boolean {
+        val allowed = if (allowLiveReuse) isLiveChannelAllowed(service) else false
         val manager = service.getSystemService(NotificationManager::class.java)
         runCatching { manager?.cancel(LEGACY_SERVICE_NOTIFICATION_ID) }
 
-        return when (onBindForeground(allowed)) {
+        return when (onBindForeground(allowed, allowLiveReuse)) {
             TransitionAction.BIND_FOREGROUND_LIVE -> {
                 val liveNotif = buildLiveNotification(service, lastStatusText ?: IDLE_STATUS, lastSubText)
                 val bound = runCatching {

@@ -39,6 +39,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.weitiao.tuning.App
 import com.weitiao.tuning.BuildConfig
 import com.weitiao.tuning.R
@@ -52,6 +55,7 @@ import com.weitiao.tuning.core.HeartbeatHealth
 import com.weitiao.tuning.core.StoreCleaner
 import com.weitiao.tuning.core.TuningConfig
 import com.weitiao.tuning.core.TuningPrefs
+import com.weitiao.tuning.tuning.FastChargeScheduler
 import com.weitiao.tuning.ui.components.ActivationGuideDialog
 import com.weitiao.tuning.ui.components.ConfirmRestartAppsDialog
 import com.weitiao.tuning.ui.components.IosGlassTokens
@@ -131,6 +135,10 @@ fun DashboardScreen(
     fun recheckEnvironment(showToast: Boolean = false) {
         scope.launch {
             val rootOk = withContext(Dispatchers.IO) { RootShell.hasRoot(forceRefresh = true) }
+            if (rootOk && FastChargeScheduler.isRootSuspended(context)) {
+                FastChargeScheduler.setRootSuspended(context, false)
+                TuningPrefs.resyncServices(context)
+            }
             val xpOk = App.getXposedService() != null || App.getRemotePrefs() != null
             hasRoot = rootOk
             xposedReady = xpOk
@@ -153,14 +161,25 @@ fun DashboardScreen(
         regionCleanupPending = RegionApplyState.isPending(context)
         xposedReady = App.getXposedService() != null || App.getRemotePrefs() != null
         batteryRestricted = TuningPrefs.isBatteryOptimizationRestricted(context)
-        hasRoot = withContext(Dispatchers.IO) { RootShell.hasRoot() }
+        val rootOk = withContext(Dispatchers.IO) { RootShell.hasRoot() }
+        hasRoot = rootOk
+        if (rootOk && FastChargeScheduler.isRootSuspended(context)) {
+            FastChargeScheduler.setRootSuspended(context, false)
+            TuningPrefs.resyncServices(context)
+        }
     }
 
-    LaunchedEffect(Unit) {
-        while (isActive) {
-            delay(2500L)
-            xposedReady = App.getXposedService() != null || App.getRemotePrefs() != null
-            batteryRestricted = TuningPrefs.isBatteryOptimizationRestricted(context)
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, context) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                xposedReady = App.getXposedService() != null || App.getRemotePrefs() != null
+                batteryRestricted = TuningPrefs.isBatteryOptimizationRestricted(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
         }
     }
 

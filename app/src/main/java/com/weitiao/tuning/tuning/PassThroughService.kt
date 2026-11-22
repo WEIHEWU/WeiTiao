@@ -171,7 +171,7 @@ class PassThroughService : Service() {
             disableAndStop()
             return START_NOT_STICKY
         }
-        if (!isFeatureEnabled()) {
+        if (!isFeatureEnabled() || FastChargeScheduler.isRootSuspended(this)) {
             disableAndStop()
             return START_NOT_STICKY
         }
@@ -188,7 +188,7 @@ class PassThroughService : Service() {
         } else {
             stopActivePollingAndEvaluate()
         }
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     private fun refreshBatteryState() {
@@ -205,6 +205,22 @@ class PassThroughService : Service() {
         if (!evaluationQueued.compareAndSet(false, true)) return
         postWorker {
             try {
+                if (!RootShell.hasRoot()) {
+                    if (appliedState == true) {
+                        setPassThroughSysfs(false)
+                    }
+                    appliedState = false
+                    FastChargeScheduler.setRootSuspended(this, true)
+                    handler.post {
+                        pollRunning = false
+                        handler.removeCallbacks(pollRunnable)
+                        FastChargeScheduler.disable(this)
+                        runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+                        runCatching { getSystemService(NotificationManager::class.java)?.cancel(NOTIFICATION_ID) }
+                        stopSelf()
+                    }
+                    return@postWorker
+                }
                 val config = TuningPrefs.load(this)
                 val selected = TuningPrefs.selectedApps(this)
                 val limit = config.passThroughLimit
