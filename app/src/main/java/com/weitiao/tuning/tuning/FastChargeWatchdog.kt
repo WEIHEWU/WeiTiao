@@ -9,7 +9,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
-import android.os.PowerManager
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.weitiao.tuning.core.RootShell
@@ -47,7 +46,11 @@ object FastChargeScheduler {
         val plugged: Boolean,
         val level: Int,
         val status: Int,
-    )
+        val pluggedType: Int = 0,
+    ) {
+        val isAcCharging: Boolean
+            get() = FastChargeController.isAcPlugged(pluggedType)
+    }
 
     internal enum class ArmTriggerDecision {
         CANCEL_ALL_SUSPENDED,
@@ -152,10 +155,16 @@ object FastChargeScheduler {
         val battery = runCatching {
             context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
         }.getOrNull()
-        val plugged = (battery?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0) > 0
+        val pluggedType = battery?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0
+        val plugged = pluggedType > 0
         val level = battery?.getIntExtra(BatteryManager.EXTRA_LEVEL, 0) ?: 0
         val status = battery?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
-        return BatterySnapshot(plugged = plugged, level = level, status = status)
+        return BatterySnapshot(
+            plugged = plugged,
+            level = level,
+            status = status,
+            pluggedType = pluggedType,
+        )
     }
 
     internal fun isPluggedIn(context: Context): Boolean = readBatterySnapshot(context).plugged
@@ -275,6 +284,25 @@ object FastChargeFallback {
             return
         }
 
+        // 非 AC 充电器（USB / 无线充）仅取消快充通知与节点屏蔽，避免误锁 USB 慢充与 JobScheduler 乒乓唤醒
+        if (!snap.isAcCharging) {
+            BrightScreenFastChargeService.isFullChargeReleasedActive = false
+            FastChargeNotifier.cancelLive(context)
+            if (FastChargeController.isNodesMayBeBlocked(context) && RootShell.hasRoot()) {
+                FastChargeController.restoreTemperatureNodes(context)
+            }
+            FastChargeScheduler.onFullChargeStandby(context)
+            if (BrightScreenFastChargeService.isServiceAlive) {
+                runCatching {
+                    context.startService(
+                        Intent(context, BrightScreenFastChargeService::class.java)
+                            .setAction(BrightScreenFastChargeService.ACTION_STOP_STANDBY),
+                    )
+                }
+            }
+            return
+        }
+
         // 方案 A：100% 满电保护期间隐藏通知并停止后台轮询，绝不拉起前台服务也不重复刷 su
         if (fullReleased) {
             FastChargeNotifier.cancelLive(context)
@@ -312,7 +340,7 @@ object FastChargeFallback {
         FastChargeScheduler.setRootSuspended(context, false)
         FastChargeScheduler.enable(context, knownPlugged = true)
 
-        // 全部前置门控通过（已插电 + 未满电停充 + 具备 Root）：优先拉起亮屏快充前台服务
+        // 全部前置门控通过（已插 AC + 未满电停充 + 具备 Root）：优先拉起亮屏快充前台服务
         val startedOrNotified = runCatching {
             val intent = Intent(context, BrightScreenFastChargeService::class.java)
                 .setAction(BrightScreenFastChargeService.ACTION_START)
@@ -324,22 +352,11 @@ object FastChargeFallback {
             return
         }
 
-        val powerManager = context.getSystemService(PowerManager::class.java)
-        val screenOn = powerManager?.isInteractive ?: true
-
-        if (!screenOn) {
-            if (FastChargeController.isNodesMayBeBlocked(context)) {
-                FastChargeController.restoreTemperatureNodes(context)
-            }
-            FastChargeNotifier.postLive(context, "息屏安全充 · 电量:$level%")
-            return
-        }
-
         val cutoffCelsius = cfg.thermalCutoffCelsius.coerceIn(
             TuningConfig.MIN_THERMAL_CUTOFF_CELSIUS,
             TuningConfig.MAX_THERMAL_CUTOFF_CELSIUS,
         )
-        // 先读取真实温度并执行与常驻服务完全一致的双重高温安全熔断判定
+        // 先读取电池温度并执行仅针对电池温度的高温安全熔断判定
         val metrics = FastChargeController.readBatteryMetrics(context, cutoffCelsius = cutoffCelsius)
         BrightScreenFastChargeService.lastKnownMetrics = metrics
         val overheated = FastChargeController.isOverheated(
@@ -361,7 +378,7 @@ object FastChargeFallback {
                 metrics = metrics,
             )
             FastChargeNotifier.postLive(context, statusText, tempC)
-            Log.w(TAG, "兜底路径检测到高温 (batt=${metrics.temperatureTenths / 10.0}℃, chip=${metrics.maxChipTempTenths / 10.0}℃)，已恢复官方温控")
+            Log.w(TAG, "兜底路径检测到电池高温 (batt=${metrics.temperatureTenths / 10.0}℃)，已恢复官方温控")
             return
         }
 

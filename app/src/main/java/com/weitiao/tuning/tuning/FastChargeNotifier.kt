@@ -140,13 +140,12 @@ object FastChargeNotifier {
      * 统一格式化充电状态文案（常驻服务与兜底路径共用，保证展示内容完全一致）。
      */
     internal fun formatChargingStatus(
-        isScreenOn: Boolean,
+        @Suppress("UNUSED_PARAMETER") isScreenOn: Boolean = true,
         isOverheated: Boolean,
         level: Int,
         metrics: FastChargeController.BatteryMetrics,
         isFullReleased: Boolean = false,
     ): String = when {
-        !isScreenOn -> String.format("息屏安全充 · 电量:%d%%", level)
         isOverheated -> String.format("高温保护恢复原生温控 · 电量:%d%%", level)
         isFullReleased && metrics.currentMa > 0 && metrics.voltageMv > 0 -> {
             String.format(

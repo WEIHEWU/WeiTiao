@@ -905,8 +905,8 @@ internal fun PowerOptimizationDetailContent(
             OneUiItemRow(
                 title = if (isZh) "启用亮屏快充" else "Enable Screen-On Fast Charge",
                 subtitle = if (tuning.brightScreenFastCharge) {
-                    if (isZh) "已开启 · 电池达到 ${tuning.thermalCutoffCelsius}°C 或息屏时自动恢复系统温控"
-                    else "Enabled · Auto-restores system thermal control at ${tuning.thermalCutoffCelsius}°C or screen off"
+                    if (isZh) "已开启 · AC 有线充电生效，电池达 ${tuning.thermalCutoffCelsius}°C、充满或拔线自动恢复"
+                    else "Enabled · Active on AC charger; auto-restores at ${tuning.thermalCutoffCelsius}°C battery cutoff, full charge, or unplug"
                 } else {
                     if (isZh) "已关闭，亮屏边玩边充时保持三星默认限流策略"
                     else "Disabled. Uses Samsung default screen-on charging limit"
@@ -936,8 +936,8 @@ internal fun PowerOptimizationDetailContent(
 
         if (!tuning.brightScreenFastCharge) {
             OneUiNoticeBanner(
-                text = if (isZh) "开启后可在亮屏使用手机时解除三星充电功率限制，内置温控熔断保护，达到安全温度阈值或息屏后立即还原系统温控。"
-                else "Unlocks full fast-charge speed while screen is on, with automatic thermal safety cutoff.",
+                text = if (isZh) "开启后接入 AC 有线充电器即全面解除三星温控限流并支持低电流自动重协商，达到电池安全温度阈值、充满 100% 或拔线时自动还原系统温控。"
+                else "Unlocks Samsung thermal charging limits while on AC power with low-current auto-recovery, automatically restoring at battery cutoff, full charge, or unplug.",
                 icon = Icons.Default.Bolt,
                 contentColor = IosGlassTokens.IosAmber,
             )

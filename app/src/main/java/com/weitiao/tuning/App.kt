@@ -77,11 +77,17 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
                     status = snap.status,
                     previouslyReleased = BrightScreenFastChargeService.isFullChargeReleasedActive,
                 )
-                if (!cfg.brightScreenFastCharge || !snap.plugged || fullStopped) {
+                val activelyChargingFast = FastChargeController.isActivelyChargingForFastCharge(
+                    pluggedType = snap.pluggedType,
+                    level = snap.level,
+                    status = snap.status,
+                    previouslyFullReleased = BrightScreenFastChargeService.isFullChargeReleasedActive,
+                )
+                if (!cfg.brightScreenFastCharge || !activelyChargingFast) {
                     FastChargeNotifier.cancelLive(this)
                 }
                 val mayNeedHeal = FastChargeController.isNodesMayBeBlocked(this) || cfg.brightScreenFastCharge
-                if (mayNeedHeal && (!cfg.brightScreenFastCharge || !snap.plugged) && RootShell.hasRoot()) {
+                if (mayNeedHeal && (!cfg.brightScreenFastCharge || !snap.isAcCharging || fullStopped) && RootShell.hasRoot()) {
                     when (FastChargeController.isAnyTemperatureNodeBlocked()) {
                         true -> {
                             FastChargeController.restoreTemperatureNodes(this)

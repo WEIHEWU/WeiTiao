@@ -37,18 +37,18 @@ class FastChargeSafetyTest {
     }
 
     @Test
-    fun isOverheatedTripsOnBatteryOrChipAndHoldsUntilCooledDown() {
-        // Case 1: Battery is only 38.0°C, but Charger IC / AP chip hits 50.0°C -> MUST trip immediately!
-        val hotChipMetrics = FastChargeController.BatteryMetrics(
+    fun isOverheatedTripsOnBatteryOnlyAndHoldsUntilCooledDown() {
+        // Case 1: Battery is cool (38.0°C) even if AP/PA chip temp field is high (50.0°C) -> must NOT false-trip!
+        val coolBattHighChipMetrics = FastChargeController.BatteryMetrics(
             currentMa = 3000,
             voltageMv = 4200,
             powerWatts = 12.6,
             temperatureTenths = 380,
             maxChipTempTenths = 500,
         )
-        assertTrue(
-            "Chip at 50.0°C must trigger thermal cutoff even when battery is 38.0°C",
-            FastChargeController.isOverheated(hotChipMetrics, cutoffCelsius = 44, previouslyOverheated = false),
+        assertFalse(
+            "High AP/chip temperature must not trigger false thermal cutoff while battery is 38.0°C",
+            FastChargeController.isOverheated(coolBattHighChipMetrics, cutoffCelsius = 44, previouslyOverheated = false),
         )
 
         // Case 2: Once overheated, if sensor returns 0 (e.g. -88.8°C error), must STAY overheated (fail-safe)
@@ -64,49 +64,38 @@ class FastChargeSafetyTest {
             FastChargeController.isOverheated(unreadableMetrics, cutoffCelsius = 44, previouslyOverheated = true),
         )
 
-        // Case 3: Battery at 44.0°C trips 44°C cutoff, stays overheated at 42.0°C, cools down at 40.5°C (with chip <= 44.0°C)
-        val hotBatt = FastChargeController.BatteryMetrics(3000, 4200, 12.6, temperatureTenths = 440, maxChipTempTenths = 435)
+        // Case 3: Battery at 44.0°C trips 44°C cutoff, stays overheated at 42.0°C, cools down at 40.5°C
+        val hotBatt = FastChargeController.BatteryMetrics(3000, 4200, 12.6, temperatureTenths = 440, maxChipTempTenths = 520)
         assertTrue(FastChargeController.isOverheated(hotBatt, cutoffCelsius = 44, previouslyOverheated = false))
 
-        val warmBatt = FastChargeController.BatteryMetrics(3000, 4200, 12.6, temperatureTenths = 420, maxChipTempTenths = 435)
+        val warmBatt = FastChargeController.BatteryMetrics(3000, 4200, 12.6, temperatureTenths = 420, maxChipTempTenths = 520)
         assertTrue(FastChargeController.isOverheated(warmBatt, cutoffCelsius = 44, previouslyOverheated = true))
 
-        val cooledBatt = FastChargeController.BatteryMetrics(3000, 4200, 12.6, temperatureTenths = 405, maxChipTempTenths = 435)
+        val cooledBatt = FastChargeController.BatteryMetrics(3000, 4200, 12.6, temperatureTenths = 405, maxChipTempTenths = 520)
         assertFalse(FastChargeController.isOverheated(cooledBatt, cutoffCelsius = 44, previouslyOverheated = true))
     }
 
     @Test
-    fun isOverheatedTripsOnTightenedChipCutoff() {
-        // 1. Default cutoff 44°C -> chip cutoff = min(44 + 3, 47) = 47.0°C (470), cooldown = 44.0°C (440)
-        val chipAt47 = FastChargeController.BatteryMetrics(3000, 4200, 12.6, temperatureTenths = 360, maxChipTempTenths = 470)
+    fun isOverheatedFollowsUserConfiguredBatteryCutoffAnd3DegreeHysteresis() {
+        val batt420 = FastChargeController.BatteryMetrics(3000, 4200, 12.6, temperatureTenths = 420)
         assertTrue(
-            "Chip at 47.0°C must trigger overheat under tightened default 44°C cutoff",
-            FastChargeController.isOverheated(chipAt47, cutoffCelsius = 44, previouslyOverheated = false),
+            "Battery at 42.0°C must trip 42°C cutoff",
+            FastChargeController.isOverheated(batt420, cutoffCelsius = 42, previouslyOverheated = false),
         )
-
-        val chipAt45 = FastChargeController.BatteryMetrics(3000, 4200, 12.6, temperatureTenths = 360, maxChipTempTenths = 450)
         assertTrue(
-            "Chip at 45.0°C (> 44.0°C cooldown) must stay overheated",
-            FastChargeController.isOverheated(chipAt45, cutoffCelsius = 44, previouslyOverheated = true),
-        )
-
-        val chipCooledTo435 = FastChargeController.BatteryMetrics(3000, 4200, 12.6, temperatureTenths = 360, maxChipTempTenths = 435)
-        assertFalse(
-            "Chip cooled to 43.5°C (<= 44.0°C) should recover",
-            FastChargeController.isOverheated(chipCooledTo435, cutoffCelsius = 44, previouslyOverheated = true),
-        )
-
-        // 2. User cutoff 42°C -> chip cutoff = min(42 + 3, 47) = 45.0°C (450), cooldown = 42.0°C (420)
-        assertTrue(
-            "Chip at 45.0°C must trip when user sets 42°C cutoff",
-            FastChargeController.isOverheated(chipAt45, cutoffCelsius = 42, previouslyOverheated = false),
-        )
-        assertFalse(
-            "Chip at 44.5°C must not trip before 45.0°C when not previously overheated",
+            "Battery at 39.5°C (> 39.0°C cooldown) must stay overheated under 42°C cutoff",
             FastChargeController.isOverheated(
-                chipAt45.copy(maxChipTempTenths = 445),
+                batt420.copy(temperatureTenths = 395),
                 cutoffCelsius = 42,
-                previouslyOverheated = false,
+                previouslyOverheated = true,
+            ),
+        )
+        assertFalse(
+            "Battery cooled to 39.0°C (<= 39.0°C) should recover under 42°C cutoff",
+            FastChargeController.isOverheated(
+                batt420.copy(temperatureTenths = 390),
+                cutoffCelsius = 42,
+                previouslyOverheated = true,
             ),
         )
     }
@@ -122,19 +111,24 @@ class FastChargeSafetyTest {
         // 98% -> resumes fast charge
         assertFalse(FastChargeController.nextFullChargeReleased(level = 98, previouslyReleased = true))
 
-        // Policy helper must never allow blocking charging nodes while fullChargeReleased is true
+        // Policy helper blocks all 17 nodes whenever AC-charging, not overheated, and not full-charge released
         assertFalse(
             FastChargeController.shouldBlockChargingNodes(
-                isWiredCharging = true,
-                isScreenOn = true,
+                isAcCharging = true,
                 isOverheated = false,
                 fullChargeReleased = true,
             ),
         )
+        assertFalse(
+            FastChargeController.shouldBlockChargingNodes(
+                isAcCharging = false,
+                isOverheated = false,
+                fullChargeReleased = false,
+            ),
+        )
         assertTrue(
             FastChargeController.shouldBlockChargingNodes(
-                isWiredCharging = true,
-                isScreenOn = true,
+                isAcCharging = true,
                 isOverheated = false,
                 fullChargeReleased = false,
             ),
@@ -215,14 +209,14 @@ class FastChargeSafetyTest {
             FastChargeNotifier.onPostLive(activeText, "36.5°C", liveChannelAllowed = true, hasService = true),
         )
 
-        // 3. 充电中息屏 -> 仍在 LIVE 态原地更新为「息屏安全充」，重复调用去重为 NO_OP
+        // 3. 充电中即使息屏 -> 保持同一实时功率展示口径，不切换到息屏停充态，重复调用去重为 NO_OP
         val screenOffText = FastChargeNotifier.formatChargingStatus(
             isScreenOn = false,
             isOverheated = false,
             level = 66,
             metrics = sampleMetrics,
         )
-        assertEquals("息屏安全充 · 电量:66%", screenOffText)
+        assertEquals("电量:66% 电流:4500mA 电压:9.00V 功率:40.5W", screenOffText)
         assertEquals(
             FastChargeNotifier.TransitionAction.BIND_FOREGROUND_LIVE,
             FastChargeNotifier.onPostLive(screenOffText, "36.5°C", liveChannelAllowed = true, hasService = true),
@@ -332,47 +326,36 @@ class FastChargeSafetyTest {
     }
 
     @Test
-    fun parseNodeBlockReportHandlesAllBlockedMixedOpenAndSocLocked() {
-        // 1. All existing charging nodes 0000, SoC nodes 0644/0755 -> blocked=true, any=true
+    fun parseNodeBlockReportHandlesAll17BlockedMixedOpenAndRestored() {
+        // 1. All existing managed nodes (battery + AP/PA/thermal) at 0 / 0000 -> allChargingBlocked=true, anyNodeBlocked=true
         val blockedReport = FastChargeController.parseNodeBlockReport(
             """
             __UID__0
             0:/sys/class/power_supply/battery/temp
             0000:/sys/class/power_supply/battery/batt_temp
-            644:/sys/class/sec/sec-ap-thermistor/temperature
-            755:/sys/class/thermal
+            0:/sys/class/sec/sec-ap-thermistor/temperature
+            0:/sys/class/thermal
             __DONE__
             """.trimIndent(),
         )
         assertEquals(true, blockedReport?.allChargingBlocked)
         assertEquals(true, blockedReport?.anyNodeBlocked)
 
-        // 2. Partial reset by thermal daemon (temp=644, batt_temp=0) -> allChargingBlocked=false, anyNodeBlocked=true
+        // 2. Partial reset by thermal daemon (battery=0, sec-ap=644, thermal=755) -> allChargingBlocked=false, anyNodeBlocked=true
         val partialReport = FastChargeController.parseNodeBlockReport(
             """
             __UID__0
-            644:/sys/class/power_supply/battery/temp
+            0:/sys/class/power_supply/battery/temp
             0:/sys/class/power_supply/battery/batt_temp
             644:/sys/class/sec/sec-ap-thermistor/temperature
+            755:/sys/class/thermal
             __DONE__
             """.trimIndent(),
         )
         assertEquals(false, partialReport?.allChargingBlocked)
         assertEquals(true, partialReport?.anyNodeBlocked)
 
-        // 3. SoC safety node accidentally locked -> allChargingBlocked=false, anyNodeBlocked=true
-        val socLockedReport = FastChargeController.parseNodeBlockReport(
-            """
-            __UID__0
-            0:/sys/class/power_supply/battery/temp
-            0:/sys/class/sec/sec-ap-thermistor/temperature
-            __DONE__
-            """.trimIndent(),
-        )
-        assertEquals(false, socLockedReport?.allChargingBlocked)
-        assertEquals(true, socLockedReport?.anyNodeBlocked)
-
-        // 4. All restored -> allChargingBlocked=false, anyNodeBlocked=false
+        // 3. All restored -> allChargingBlocked=false, anyNodeBlocked=false
         val restoredReport = FastChargeController.parseNodeBlockReport(
             """
             __UID__0
@@ -386,7 +369,7 @@ class FastChargeSafetyTest {
         assertEquals(false, restoredReport?.allChargingBlocked)
         assertEquals(false, restoredReport?.anyNodeBlocked)
 
-        // 5. Missing root or incomplete output -> null
+        // 4. Missing root or incomplete output -> null
         assertNull(FastChargeController.parseNodeBlockReport("__UID__10508\n__DONE__"))
         assertNull(FastChargeController.parseNodeBlockReport("__UID__0\n0:/sys/class/power_supply/battery/temp"))
     }
@@ -499,20 +482,36 @@ class FastChargeSafetyTest {
     }
 
     @Test
-    fun activeChargingPolicyStopsAtFullChargeOrUnpluggedAndRespectsAllowLiveReuse() {
-        // 1. 未插电 -> false
+    fun activeChargingPolicyRequiresAcPluggedStopsAtFullOrUnpluggedAndRespectsAllowLiveReuse() {
+        // 1. 未插电 / USB / 无线充 -> false（仅 AC 有线充电器激活）
         assertFalse(
             FastChargeController.isActivelyChargingForFastCharge(
-                plugged = false,
+                pluggedType = 0,
                 level = 50,
                 status = BatteryManager.BATTERY_STATUS_DISCHARGING,
                 previouslyFullReleased = false,
             ),
         )
-        // 2. 插电但已 100% 或系统报告 BATTERY_STATUS_FULL -> 方案 A 退出服务与通知 -> false
         assertFalse(
             FastChargeController.isActivelyChargingForFastCharge(
-                plugged = true,
+                pluggedType = BatteryManager.BATTERY_PLUGGED_USB,
+                level = 50,
+                status = BatteryManager.BATTERY_STATUS_CHARGING,
+                previouslyFullReleased = false,
+            ),
+        )
+        assertFalse(
+            FastChargeController.isActivelyChargingForFastCharge(
+                pluggedType = BatteryManager.BATTERY_PLUGGED_WIRELESS,
+                level = 50,
+                status = BatteryManager.BATTERY_STATUS_CHARGING,
+                previouslyFullReleased = false,
+            ),
+        )
+        // 2. AC 充电但已 100% 或系统报告 BATTERY_STATUS_FULL -> 方案 A 退出服务与通知 -> false
+        assertFalse(
+            FastChargeController.isActivelyChargingForFastCharge(
+                pluggedType = BatteryManager.BATTERY_PLUGGED_AC,
                 level = 100,
                 status = BatteryManager.BATTERY_STATUS_CHARGING,
                 previouslyFullReleased = false,
@@ -520,7 +519,7 @@ class FastChargeSafetyTest {
         )
         assertFalse(
             FastChargeController.isActivelyChargingForFastCharge(
-                plugged = true,
+                pluggedType = BatteryManager.BATTERY_PLUGGED_AC,
                 level = 85,
                 status = BatteryManager.BATTERY_STATUS_FULL,
                 previouslyFullReleased = false,
@@ -529,7 +528,7 @@ class FastChargeSafetyTest {
         // 3. 满电回落至 99%（滞回期内）仍停用 -> false；回落至 98% 重新激活 -> true
         assertFalse(
             FastChargeController.isActivelyChargingForFastCharge(
-                plugged = true,
+                pluggedType = BatteryManager.BATTERY_PLUGGED_AC,
                 level = 99,
                 status = BatteryManager.BATTERY_STATUS_CHARGING,
                 previouslyFullReleased = true,
@@ -537,7 +536,7 @@ class FastChargeSafetyTest {
         )
         assertTrue(
             FastChargeController.isActivelyChargingForFastCharge(
-                plugged = true,
+                pluggedType = BatteryManager.BATTERY_PLUGGED_AC,
                 level = 98,
                 status = BatteryManager.BATTERY_STATUS_CHARGING,
                 previouslyFullReleased = true,
@@ -566,7 +565,7 @@ class FastChargeSafetyTest {
                 needVerify = false,
             ),
         )
-        // 2. 节点已恢复（appliedBlocked=false）且未到 15s/30s 周期复核点，过热期间也不再每 5s/10s 进同步
+        // 2. 节点已恢复（appliedBlocked=false）且未到 15s/30s 周期复核点，过热期间也不再每 10s 进同步
         assertFalse(
             BrightScreenFastChargeService.shouldScheduleNodeSync(
                 desiredBlocked = false,
@@ -628,59 +627,185 @@ class FastChargeSafetyTest {
     }
 
     @Test
-    fun thermalSamplingSkipsRoutineUnlockWhenTzbHealthyAndFallsBackWhenNeeded() {
-        // 1. __wt_tzb 正常跳变、远低于阈值 (44°C - 3°C = 41°C) 且距离上次直读 <60s -> 不解锁 0000 节点
+    fun lowCurrentKickTriggersOnlyAfterConfirmationAndRespectsCooldownAndCap() {
+        // 1. 满足全部条件：AC 充电、未满电、未过热、已屏蔽、电量 < 85%、连续 2 次电流 1..999mA、无冷却 -> true
+        assertTrue(
+            BrightScreenFastChargeService.shouldTriggerLowCurrentKick(
+                isAcCharging = true,
+                isFullChargeReleased = false,
+                isOverheated = false,
+                appliedBlocked = true,
+                kickInProgress = false,
+                level = 60,
+                currentMa = 650,
+                batteryStatus = BatteryManager.BATTERY_STATUS_CHARGING,
+                consecutiveLowSamples = BrightScreenFastChargeService.LOW_CURRENT_KICK_CONFIRM_SAMPLES,
+                consecutiveKicks = 0,
+                lastKickElapsedMs = 0L,
+                nowElapsedMs = 10_000L,
+            ),
+        )
+        // 2. 仅单次低电流采样、电流为 0 或 >= 1000mA、电量 >= 85% -> 不触发
         assertFalse(
-            FastChargeController.shouldForceUnlockBatteryTempRead(
-                tzbTempTenths = 355,
-                maxReadableTempTenths = 380,
-                cutoffCelsius = 44,
-                consecutiveIdenticalTzbReads = 2,
-                lastDirectBattReadElapsedMs = 100_000L,
-                nowElapsedMs = 130_000L,
+            BrightScreenFastChargeService.shouldTriggerLowCurrentKick(
+                isAcCharging = true,
+                isFullChargeReleased = false,
+                isOverheated = false,
+                appliedBlocked = true,
+                kickInProgress = false,
+                level = 60,
+                currentMa = 650,
+                batteryStatus = BatteryManager.BATTERY_STATUS_CHARGING,
+                consecutiveLowSamples = 1,
+                consecutiveKicks = 0,
+                lastKickElapsedMs = 0L,
+                nowElapsedMs = 10_000L,
             ),
         )
-        // 2. __wt_tzb 缺失/失效 -> 必须兜底临时解锁读 batt_temp
-        assertTrue(
-            FastChargeController.shouldForceUnlockBatteryTempRead(
-                tzbTempTenths = 0,
-                maxReadableTempTenths = 350,
-                cutoffCelsius = 44,
-                consecutiveIdenticalTzbReads = 0,
-                lastDirectBattReadElapsedMs = 100_000L,
-                nowElapsedMs = 110_000L,
+        assertFalse(
+            BrightScreenFastChargeService.shouldTriggerLowCurrentKick(
+                isAcCharging = true,
+                isFullChargeReleased = false,
+                isOverheated = false,
+                appliedBlocked = true,
+                kickInProgress = false,
+                level = 60,
+                currentMa = 0,
+                batteryStatus = BatteryManager.BATTERY_STATUS_CHARGING,
+                consecutiveLowSamples = 2,
+                consecutiveKicks = 0,
+                lastKickElapsedMs = 0L,
+                nowElapsedMs = 10_000L,
             ),
         )
-        // 3. __wt_tzb 连续 6 次读数完全不变（疑似卡死）-> 必须兜底解锁核实
-        assertTrue(
-            FastChargeController.shouldForceUnlockBatteryTempRead(
-                tzbTempTenths = 355,
-                maxReadableTempTenths = 360,
-                cutoffCelsius = 44,
-                consecutiveIdenticalTzbReads = FastChargeController.TZB_STUCK_READ_THRESHOLD,
-                lastDirectBattReadElapsedMs = 100_000L,
-                nowElapsedMs = 130_000L,
+        assertFalse(
+            BrightScreenFastChargeService.shouldTriggerLowCurrentKick(
+                isAcCharging = true,
+                isFullChargeReleased = false,
+                isOverheated = false,
+                appliedBlocked = true,
+                kickInProgress = false,
+                level = 60,
+                currentMa = BrightScreenFastChargeService.LOW_CURRENT_KICK_THRESHOLD_MA,
+                batteryStatus = BatteryManager.BATTERY_STATUS_CHARGING,
+                consecutiveLowSamples = 2,
+                consecutiveKicks = 0,
+                lastKickElapsedMs = 0L,
+                nowElapsedMs = 10_000L,
             ),
         )
-        // 4. 接近安全熔断阈值（>= 41.0°C）或超过 60s 低频校验周期 -> 解锁核实真实电池温度
-        assertTrue(
-            FastChargeController.shouldForceUnlockBatteryTempRead(
-                tzbTempTenths = 410,
-                maxReadableTempTenths = 410,
-                cutoffCelsius = 44,
-                consecutiveIdenticalTzbReads = 1,
-                lastDirectBattReadElapsedMs = 100_000L,
-                nowElapsedMs = 110_000L,
+        assertFalse(
+            BrightScreenFastChargeService.shouldTriggerLowCurrentKick(
+                isAcCharging = true,
+                isFullChargeReleased = false,
+                isOverheated = false,
+                appliedBlocked = true,
+                kickInProgress = false,
+                level = BrightScreenFastChargeService.LOW_CURRENT_KICK_LEVEL_LIMIT,
+                currentMa = 500,
+                batteryStatus = BatteryManager.BATTERY_STATUS_CHARGING,
+                consecutiveLowSamples = 2,
+                consecutiveKicks = 0,
+                lastKickElapsedMs = 0L,
+                nowElapsedMs = 10_000L,
+            ),
+        )
+        // 3. 过热、满电、非 AC、正在重协商或节点未锁死 -> 不触发
+        assertFalse(
+            BrightScreenFastChargeService.shouldTriggerLowCurrentKick(
+                isAcCharging = false,
+                isFullChargeReleased = false,
+                isOverheated = false,
+                appliedBlocked = true,
+                kickInProgress = false,
+                level = 60,
+                currentMa = 500,
+                batteryStatus = BatteryManager.BATTERY_STATUS_CHARGING,
+                consecutiveLowSamples = 2,
+                consecutiveKicks = 0,
+                lastKickElapsedMs = 0L,
+                nowElapsedMs = 10_000L,
+            ),
+        )
+        assertFalse(
+            BrightScreenFastChargeService.shouldTriggerLowCurrentKick(
+                isAcCharging = true,
+                isFullChargeReleased = false,
+                isOverheated = true,
+                appliedBlocked = true,
+                kickInProgress = false,
+                level = 60,
+                currentMa = 500,
+                batteryStatus = BatteryManager.BATTERY_STATUS_CHARGING,
+                consecutiveLowSamples = 2,
+                consecutiveKicks = 0,
+                lastKickElapsedMs = 0L,
+                nowElapsedMs = 10_000L,
+            ),
+        )
+        assertFalse(
+            BrightScreenFastChargeService.shouldTriggerLowCurrentKick(
+                isAcCharging = true,
+                isFullChargeReleased = false,
+                isOverheated = false,
+                appliedBlocked = true,
+                kickInProgress = true,
+                level = 60,
+                currentMa = 500,
+                batteryStatus = BatteryManager.BATTERY_STATUS_CHARGING,
+                consecutiveLowSamples = 2,
+                consecutiveKicks = 0,
+                lastKickElapsedMs = 0L,
+                nowElapsedMs = 10_000L,
+            ),
+        )
+        // 4. 60s 冷却期内不触发，满 60s 恢复可触发；连续触发达 3 次上限停止，防止插老旧 5V/1A 充电器无限自旋
+        assertFalse(
+            BrightScreenFastChargeService.shouldTriggerLowCurrentKick(
+                isAcCharging = true,
+                isFullChargeReleased = false,
+                isOverheated = false,
+                appliedBlocked = true,
+                kickInProgress = false,
+                level = 60,
+                currentMa = 500,
+                batteryStatus = BatteryManager.BATTERY_STATUS_CHARGING,
+                consecutiveLowSamples = 2,
+                consecutiveKicks = 1,
+                lastKickElapsedMs = 10_000L,
+                nowElapsedMs = 45_000L,
             ),
         )
         assertTrue(
-            FastChargeController.shouldForceUnlockBatteryTempRead(
-                tzbTempTenths = 350,
-                maxReadableTempTenths = 360,
-                cutoffCelsius = 44,
-                consecutiveIdenticalTzbReads = 1,
-                lastDirectBattReadElapsedMs = 100_000L,
-                nowElapsedMs = 100_000L + FastChargeController.DIRECT_BATT_VERIFY_INTERVAL_MS,
+            BrightScreenFastChargeService.shouldTriggerLowCurrentKick(
+                isAcCharging = true,
+                isFullChargeReleased = false,
+                isOverheated = false,
+                appliedBlocked = true,
+                kickInProgress = false,
+                level = 60,
+                currentMa = 500,
+                batteryStatus = BatteryManager.BATTERY_STATUS_CHARGING,
+                consecutiveLowSamples = 2,
+                consecutiveKicks = 1,
+                lastKickElapsedMs = 10_000L,
+                nowElapsedMs = 10_000L + BrightScreenFastChargeService.LOW_CURRENT_KICK_COOLDOWN_MS,
+            ),
+        )
+        assertFalse(
+            BrightScreenFastChargeService.shouldTriggerLowCurrentKick(
+                isAcCharging = true,
+                isFullChargeReleased = false,
+                isOverheated = false,
+                appliedBlocked = true,
+                kickInProgress = false,
+                level = 60,
+                currentMa = 500,
+                batteryStatus = BatteryManager.BATTERY_STATUS_CHARGING,
+                consecutiveLowSamples = 2,
+                consecutiveKicks = BrightScreenFastChargeService.MAX_CONSECUTIVE_LOW_CURRENT_KICKS,
+                lastKickElapsedMs = 10_000L,
+                nowElapsedMs = 200_000L,
             ),
         )
     }

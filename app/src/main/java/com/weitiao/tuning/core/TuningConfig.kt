@@ -287,14 +287,14 @@ object TuningPrefs {
             previouslyReleased = BrightScreenFastChargeService.isFullChargeReleasedActive,
         )
         val activelyChargingFast = FastChargeController.isActivelyChargingForFastCharge(
-            plugged = plugged,
+            pluggedType = snap.pluggedType,
             level = snap.level,
             status = snap.status,
             previouslyFullReleased = BrightScreenFastChargeService.isFullChargeReleasedActive,
         )
 
         if (!rootSuspended && (config.brightScreenFastCharge || config.passThrough)) {
-            if (config.brightScreenFastCharge && fullStopped && !config.passThrough) {
+            if (config.brightScreenFastCharge && plugged && (!snap.isAcCharging || fullStopped) && !config.passThrough) {
                 FastChargeScheduler.onFullChargeStandby(context)
             } else {
                 FastChargeScheduler.enable(context, knownPlugged = plugged)
@@ -308,7 +308,7 @@ object TuningPrefs {
                         .setAction(BrightScreenFastChargeService.ACTION_START),
                 )
             }
-        } else if (!config.brightScreenFastCharge || !plugged || fullStopped || rootSuspended) {
+        } else if (!config.brightScreenFastCharge || !activelyChargingFast || rootSuspended) {
             FastChargeNotifier.cancelLive(context)
         }
         if (config.passThrough && plugged && !rootSuspended) {
@@ -368,6 +368,15 @@ object TuningPrefs {
         ) {
             FastChargeScheduler.setRootSuspended(context, false)
         }
+        if (!previous.brightScreenFastCharge && config.brightScreenFastCharge) {
+            Thread({
+                runCatching {
+                    if (RootShell.hasRoot()) {
+                        FastChargeController.enableSamsungFastChargingSettings()
+                    }
+                }
+            }, "Tuning-EnableSamsungFastCharge").apply { isDaemon = true }.start()
+        }
 
         val snap = FastChargeScheduler.readBatterySnapshot(context)
         val plugged = snap.plugged
@@ -378,7 +387,7 @@ object TuningPrefs {
             previouslyReleased = BrightScreenFastChargeService.isFullChargeReleasedActive,
         )
         val activelyChargingFast = FastChargeController.isActivelyChargingForFastCharge(
-            plugged = plugged,
+            pluggedType = snap.pluggedType,
             level = snap.level,
             status = snap.status,
             previouslyFullReleased = BrightScreenFastChargeService.isFullChargeReleasedActive,

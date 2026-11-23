@@ -15,11 +15,17 @@ import kotlin.math.abs
 object FastChargeController {
 
     /**
-     * 仅针对充电与电池限流的温控节点（亮屏快充仅屏蔽这些节点以解除亮屏充电限流）。
-     * 严禁屏蔽 AP (CPU)、PA (射频功放)、GPU (gpu_tmu) 与 /sys/class/thermal，
-     * 否则会导致三星 SSRM 误判整机处于 -88.8°C 极寒状态而彻底关闭 CPU/GPU/射频过热降频保护！
+     * 对齐 S8Tweak 原版完整 17 个温控节点（电池/充电路由 + AP/CP/PA/WF/机身热敏 + 屏幕 + GPU + /sys/class/thermal）。
+     * 仅在 AC 有线充电期间统一 `chmod 0000` 屏蔽以彻底解除三星 SSRM/SIOP 亮屏限流；
+     * 拔线、非 AC、满电 100% 或触发电池高温熔断时全部恢复（目录 0755，文件 0644）。
      */
-    private val CHARGING_TEMPERATURE_NODES = listOf(
+    private val ALL_MANAGED_NODES = listOf(
+        "/sys/class/sec/sec-ap-thermistor/temperature",
+        "/sys/class/sec/sec-cp-thermistor/temperature",
+        "/sys/class/sec/sec-pa-thermistor/temperature",
+        "/sys/class/sec/sec-wf-thermistor/temperature",
+        "/sys/class/sec/sec-thermistor/temperature",
+        "/sys/devices/platform/sec-thermistor/temperature",
         "/sys/class/power_supply/battery/temp",
         "/sys/class/power_supply/battery/batt_temp",
         "/sys/class/power_supply/battery/batt_wpc_temp",
@@ -28,31 +34,15 @@ object FastChargeController {
         "/sys/class/power_supply/battery/dchg_temp",
         "/sys/class/power_supply/battery/temp_ambient",
         "/sys/class/power_supply/ac/temp",
-    )
-
-    /**
-     * SoC / 处理器 / 射频功放 / GPU / 系统热区节点：
-     * 永远保持可读（绝不 chmod 0000），并在每次操作时主动恢复权限，确保旧版本残留锁死节点自动自愈。
-     */
-    private val SOC_THERMAL_SAFETY_NODES = listOf(
-        "/sys/class/sec/sec-ap-thermistor/temperature",
-        "/sys/class/sec/sec-cp-thermistor/temperature",
-        "/sys/class/sec/sec-pa-thermistor/temperature",
-        "/sys/class/sec/sec-wf-thermistor/temperature",
-        "/sys/class/sec/sec-thermistor/temperature",
-        "/sys/devices/platform/sec-thermistor/temperature",
         "/sys/class/lcd/panel/temperature",
         "/sys/kernel/gpu/gpu_tmu",
         "/sys/class/thermal",
     )
 
-    private val CHARGING_TEMPERATURE_SET = CHARGING_TEMPERATURE_NODES.toSet()
-    private val SOC_THERMAL_SAFETY_SET = SOC_THERMAL_SAFETY_NODES.toSet()
-    private val ALL_MANAGED_NODES = CHARGING_TEMPERATURE_NODES + SOC_THERMAL_SAFETY_NODES
     private val ALL_MANAGED_SET = ALL_MANAGED_NODES.toSet()
 
     /**
-     * 在持久化 su 会话中缓存 uid，避免每次 5s/15s 轮询都 fork 一次 `/system/bin/id`；
+     * 在持久化 su 会话中缓存 uid，避免每次轮询都 fork 一次 `/system/bin/id`；
      * 若回退到单次 su 进程，`__wt_uid` 为空仍会自动执行一次 `id -u`。
      */
     private const val UID_PREAMBLE =
@@ -60,15 +50,8 @@ object FastChargeController {
 
     internal const val RUNTIME_PREFS_NAME = "fast_charge_runtime"
     private const val KEY_NODES_MAY_BE_BLOCKED = "nodes_may_be_blocked"
-    internal const val TZB_STUCK_READ_THRESHOLD = 6
-    internal const val DIRECT_BATT_VERIFY_INTERVAL_MS = 60_000L
-    internal const val NEAR_CUTOFF_MARGIN_TENTHS = 30 // 3.0°C
 
     @Volatile private var nodesBlockedHint = false
-    @Volatile private var lastTzbTempTenths = 0
-    @Volatile private var lastMaxReadableTempTenths = 0
-    @Volatile private var consecutiveIdenticalTzbReads = 0
-    @Volatile private var lastDirectBattReadElapsedMs = 0L
 
     private fun runtimePrefs(context: Context) =
         context.getSharedPreferences(RUNTIME_PREFS_NAME, Context.MODE_PRIVATE)
@@ -81,21 +64,15 @@ object FastChargeController {
         runtimePrefs(context).edit().putBoolean(KEY_NODES_MAY_BE_BLOCKED, blocked).apply()
     }
 
-    internal fun resetThermalSamplingStateForTest() {
-        nodesBlockedHint = false
-        lastTzbTempTenths = 0
-        lastMaxReadableTempTenths = 0
-        consecutiveIdenticalTzbReads = 0
-        lastDirectBattReadElapsedMs = 0L
-    }
-
     const val FULL_CHARGE_RELEASE_LEVEL = 100
     const val FULL_CHARGE_RESUME_LEVEL = 98
 
+    fun isAcPlugged(pluggedType: Int): Boolean = pluggedType == BatteryManager.BATTERY_PLUGGED_AC
+
     /**
      * 满电自动归还温控滞回判定：
-     * - 电量 >= 100% 时释放温控（返回 true），避免 100% 涓流或插电脑 USB 时仍锁死 `battery/temp`；
-     * - 已释放后在 99% 保持释放，直至回落至 <= 98%（2% 滞回）才重新允许屏蔽充电温控节点。
+     * - 电量 >= 100% 时释放温控（返回 true），避免 100% 涓流保护后仍锁死节点；
+     * - 已释放后在 99% 保持释放，直至回落至 <= 98%（2% 滞回）才重新允许亮屏快充。
      */
     fun nextFullChargeReleased(level: Int, previouslyReleased: Boolean): Boolean = when {
         level >= FULL_CHARGE_RELEASE_LEVEL -> true
@@ -107,48 +84,22 @@ object FastChargeController {
     fun isFullChargeStopped(level: Int, status: Int, previouslyReleased: Boolean): Boolean =
         status == BatteryManager.BATTERY_STATUS_FULL || nextFullChargeReleased(level, previouslyReleased)
 
-    /** 统一判定亮屏快充当前是否需要工作（必须物理接通电源，且未进入满电停充保护）。 */
+    /** 统一判定亮屏快充当前是否需要工作（仅在 AC 有线充电器接入且未进入满电停充保护时激活）。 */
     fun isActivelyChargingForFastCharge(
-        plugged: Boolean,
+        pluggedType: Int,
         level: Int,
         status: Int,
         previouslyFullReleased: Boolean,
-    ): Boolean = plugged && !isFullChargeStopped(level, status, previouslyFullReleased)
+    ): Boolean = isAcPlugged(pluggedType) && !isFullChargeStopped(level, status, previouslyFullReleased)
 
     /**
-     * 智能决策本轮 sysfs 采集是否允许对已屏蔽为 `0000` 的电池节点做「临时 0444 解锁并回读」。
-     * 免锁的 `thermal_zone` 电池热敏 (`__wt_tzb`) 读数正常、未卡死、远离熔断阈值且距离上次直读 <60s 时，
-     * 返回 `false`，避免每轮采样反复 `chmod 0444/0000` 带来的唤醒与被系统守护进程抓到温升窗口的风险。
-     */
-    internal fun shouldForceUnlockBatteryTempRead(
-        tzbTempTenths: Int,
-        maxReadableTempTenths: Int,
-        cutoffCelsius: Int,
-        consecutiveIdenticalTzbReads: Int,
-        lastDirectBattReadElapsedMs: Long,
-        nowElapsedMs: Long,
-    ): Boolean {
-        if (tzbTempTenths <= 0) return true
-        if (consecutiveIdenticalTzbReads >= TZB_STUCK_READ_THRESHOLD) return true
-        if (lastDirectBattReadElapsedMs <= 0L || (nowElapsedMs - lastDirectBattReadElapsedMs) >= DIRECT_BATT_VERIFY_INTERVAL_MS) {
-            return true
-        }
-        val cutoffTenths = cutoffCelsius.coerceIn(
-            TuningConfig.MIN_THERMAL_CUTOFF_CELSIUS,
-            TuningConfig.MAX_THERMAL_CUTOFF_CELSIUS,
-        ) * 10
-        return maxReadableTempTenths >= cutoffTenths - NEAR_CUTOFF_MARGIN_TENTHS
-    }
-
-    /**
-     * 统一策略判定：仅在有线充电、亮屏、未过热且未处于满电释放态时才允许屏蔽充电温控节点。
+     * 统一策略判定：仅在 AC 有线充电、未过热且未处于满电释放态时才允许屏蔽全部 17 个温控节点（不再因息屏撤销）。
      */
     fun shouldBlockChargingNodes(
-        isWiredCharging: Boolean,
-        isScreenOn: Boolean,
+        isAcCharging: Boolean,
         isOverheated: Boolean,
         fullChargeReleased: Boolean,
-    ): Boolean = isWiredCharging && isScreenOn && !isOverheated && !fullChargeReleased
+    ): Boolean = isAcCharging && !isOverheated && !fullChargeReleased
 
     internal data class NodeBlockReport(
         val allChargingBlocked: Boolean?,
@@ -161,15 +112,14 @@ object FastChargeController {
         val currentMa: Int,
         val voltageMv: Int,
         val powerWatts: Double,
-        val temperatureTenths: Int, // 电池/机身有效温度（0.1°C 单位，如 385 代表 38.5°C）
-        val maxChipTempTenths: Int = 0, // 充电IC/处理器/射频功放最高温度（0.1°C 单位，如 500 代表 50.0°C）
+        val temperatureTenths: Int, // 电池有效温度（0.1°C 单位，如 385 代表 38.5°C）
+        val maxChipTempTenths: Int = 0, // 保留字段兼容历史数据结构（熔断不再计入 AP/PA 芯片温度）
     )
 
     /**
      * 判定是否触发高温安全熔断：
-     * 1. 电池/机身温度 >= 用户设定阈值（默认 42~44°C），降温 3.0°C 后恢复；
-     * 2. 充电IC (CHG/DC) / 处理器 (AP) / 射频功放 (PA) 任一芯片温度 >= min(阈值+3°C, 47°C)，
-     *    降温 3.0°C 后恢复，缩小与三星官方 SKIN 温控区间的温差盲区。
+     * 仅根据电池自身温度与用户设定阈值（默认 44°C）判定，降温 3.0°C 后恢复；
+     * 已处于熔断态且读温失效（<= 0）时保持 fail-safe 熔断态。
      */
     fun isOverheated(
         metrics: BatteryMetrics,
@@ -182,44 +132,26 @@ object FastChargeController {
         )
         val battOverheatTenths = clampedCutoff * 10
         val battCoolDownTenths = battOverheatTenths - 30 // 降温 3.0°C 恢复
-
-        val chipCutoffCelsius = (clampedCutoff + 3).coerceAtMost(47)
-        val chipOverheatTenths = chipCutoffCelsius * 10
-        val chipCoolDownTenths = chipOverheatTenths - 30 // 芯片降温 3.0°C 恢复
-
         val battTemp = metrics.temperatureTenths
-        val chipTemp = metrics.maxChipTempTenths
 
         return if (!previouslyOverheated) {
-            (battTemp >= battOverheatTenths) || (chipTemp >= chipOverheatTenths)
+            battTemp >= battOverheatTenths
         } else {
-            val battStillHot = battTemp <= 0 || battTemp > battCoolDownTenths
-            val chipStillHot = chipTemp > chipCoolDownTenths
-            battStillHot || chipStillHot
+            battTemp <= 0 || battTemp > battCoolDownTenths
         }
     }
 
     /**
-     * 屏蔽三星充电限流温控节点（解除亮屏快充限流），
-     * 同时强制确保 AP/PA/GPU/thermal 等核心芯片温控节点处于可读状态，保留系统 CPU/射频过热保护。
-     * 批量合并为最多三次 chmod 调用（0755 / 0644 / 0000），避免对 17 个节点逐个 fork。
+     * 屏蔽全部 17 个温控节点（对齐 S8Tweak 原版逻辑，单次批量 `chmod 0000`）。
      */
     fun blockTemperatureNodes(context: Context? = null): Result {
         context?.let { markNodesMayBeBlocked(it, true) }
         val command = buildString {
             append(UID_PREAMBLE)
-            append("d755=\"\"; f644=\"\"; f000=\"\"; ")
-
-            for (node in SOC_THERMAL_SAFETY_NODES) {
-                append("if [ -d '$node' ]; then d755=\"\$d755 $node\"; elif [ -e '$node' ]; then f644=\"\$f644 $node\"; fi; ")
-            }
-
-            for (node in CHARGING_TEMPERATURE_NODES) {
+            append("f000=\"\"; ")
+            for (node in ALL_MANAGED_NODES) {
                 append("[ -e '$node' ] && f000=\"\$f000 $node\"; ")
             }
-
-            append("[ -n \"\$d755\" ] && chmod 0755 \$d755 2>/dev/null; ")
-            append("[ -n \"\$f644\" ] && chmod 0644 \$f644 2>/dev/null; ")
             append("[ -n \"\$f000\" ] && chmod 0000 \$f000 2>/dev/null; ")
             append("echo __DONE__")
         }
@@ -231,8 +163,7 @@ object FastChargeController {
     }
 
     /**
-     * 恢复全部温控节点（含充电温控节点与旧版可能残留锁死的 AP/PA/WF/thermal 节点）。
-     * 目录使用 0755，sysfs 传感器文件使用 0644，批量合并 chmod 调用。
+     * 恢复全部 17 个温控节点权限：目录使用 0755，sysfs 传感器文件使用 0644，批量合并 chmod 调用。
      */
     fun restoreTemperatureNodes(context: Context? = null): Result {
         val command = buildString {
@@ -255,13 +186,12 @@ object FastChargeController {
     }
 
     /**
-     * 复核充电温控节点当前是否全部处于被屏蔽状态（且 SoC 安全节点未被误锁）。
-     * 仅调用一次 `stat -c '%a:%n'` 批量探测全部节点，代替原来的 17 次逐节点 subshell+stat。
+     * 复核全部 17 个受管温控节点当前是否均处于被屏蔽状态。
      */
     fun areTemperatureNodesBlocked(): Boolean? = queryNodeBlockReport()?.allChargingBlocked
 
     /**
-     * 检查是否存在任何一个温控节点仍处于 0000 锁死状态（用于熔断/息屏/拔线待命态强校验自愈）。
+     * 检查是否存在任何一个受管温控节点处于 0000 锁死状态（用于拔线/非 AC/满电/过热态校验自愈）。
      */
     fun isAnyTemperatureNodeBlocked(): Boolean? = queryNodeBlockReport()?.anyNodeBlocked
 
@@ -280,9 +210,7 @@ object FastChargeController {
     internal fun parseNodeBlockReport(stdout: String): NodeBlockReport? {
         if (!stdout.contains("__UID__0") || !stdout.contains("__DONE__")) return null
         var anyBlocked = false
-        var hasBlockedCharging = false
-        var hasOpenCharging = false
-        var socLocked = false
+        var hasOpen = false
 
         stdout.lineSequence().forEach { rawLine ->
             val line = rawLine.trim()
@@ -294,19 +222,14 @@ object FastChargeController {
             val isZeroMode = mode == "0" || mode == "00" || mode == "000" || mode == "0000"
             if (isZeroMode) {
                 anyBlocked = true
-            }
-            if (path in SOC_THERMAL_SAFETY_SET && isZeroMode) {
-                socLocked = true
-            }
-            if (path in CHARGING_TEMPERATURE_SET) {
-                if (isZeroMode) hasBlockedCharging = true else hasOpenCharging = true
+            } else {
+                hasOpen = true
             }
         }
 
         val allChargingBlocked = when {
-            socLocked -> false
-            !hasOpenCharging && !hasBlockedCharging -> null
-            else -> hasBlockedCharging && !hasOpenCharging
+            !anyBlocked && !hasOpen -> null
+            else -> anyBlocked && !hasOpen
         }
         return NodeBlockReport(
             allChargingBlocked = allChargingBlocked,
@@ -328,83 +251,32 @@ object FastChargeController {
     }
 
     /**
-     * 真实硬件节点直读：利用 Root 在持久化 sh 内直接读取系统 /sys 真实电压、电流与多路真实温度并计算实际功率 (W)。
-     *
-     * 性能优化要点（避免 root sh 持续 fork/execve 导致高 CPU 与数万次缺页）：
-     * 1. 全程使用 mksh 内建 `read -r var < file` 替代外部 `$(cat ... | head -n 1)`，常规节点 0 fork；
-     * 2. 缓存电池 `thermal_zone` 路径至会话变量 `__wt_tzb`，避免每次轮询遍历 80+ 个热区并反复 `cat type`；
-     * 3. 被 `0000` 屏蔽的节点先直读，仅对未读出值的存在节点做单次批量 `stat` + `chmod 0444` + `read -r` + `chmod 0000`，
-     *    将每次轮询的外部进程派生从 ~85 次降至 0~4 次。
+     * 纯免解锁硬件指标读取：通过 0-fork 的 mksh 内建 `read -r` 读取电流、电压及未被屏蔽的电池温度通道；
+     * 充电锁死 17 个节点期间绝不临时 `chmod 0444/0000`，当直读电池节点为空时由系统广播 `EXTRA_TEMPERATURE` 兜底。
      */
     fun readBatteryMetrics(
         context: Context,
-        cutoffCelsius: Int = TuningConfig.DEFAULT_THERMAL_CUTOFF_CELSIUS,
+        @Suppress("UNUSED_PARAMETER") cutoffCelsius: Int = TuningConfig.DEFAULT_THERMAL_CUTOFF_CELSIUS,
         cachedBatteryIntent: Intent? = null,
     ): BatteryMetrics {
         var currentMa = 0
         var voltageMv = 0
         var tempTenths = 0
-        var maxChipTempTenths = 0
 
         if (RootShell.hasRoot()) {
-            val nowMs = android.os.SystemClock.elapsedRealtime()
-            val forceUnlock = shouldForceUnlockBatteryTempRead(
-                tzbTempTenths = lastTzbTempTenths,
-                maxReadableTempTenths = lastMaxReadableTempTenths,
-                cutoffCelsius = cutoffCelsius,
-                consecutiveIdenticalTzbReads = consecutiveIdenticalTzbReads,
-                lastDirectBattReadElapsedMs = lastDirectBattReadElapsedMs,
-                nowElapsedMs = nowMs,
-            )
-            val forceUnlockFlag = if (forceUnlock) "1" else "0"
             val (exitCode, stdout) = RootShell.exec(
                 UID_PREAMBLE +
-                    "tzb=\"\"; " +
-                    "if [ \"\${__wt_tzb:-}\" != \"none\" ]; then " +
-                    "if [ -n \"\${__wt_tzb:-}\" ] && [ -e \"\$__wt_tzb/temp\" ]; then { read -r tzb < \"\$__wt_tzb/temp\"; } 2>/dev/null; fi; " +
-                    "case \"\$tzb\" in \"\"|-*|0) tzb=\"\"; __wt_tzb=\"\"; matched=0; " +
-                    "for z in /sys/class/thermal/thermal_zone*; do " +
-                    "[ -e \"\$z/type\" ] || continue; t=\"\"; { read -r t < \"\$z/type\"; } 2>/dev/null; " +
-                    "case \"\$t\" in *battery*|*batt*|*BAT*|*sec-battery*) matched=1; tv=\"\"; { read -r tv < \"\$z/temp\"; } 2>/dev/null; " +
-                    "case \"\$tv\" in \"\"|-*|0) ;; *) tzb=\"\$tv\"; __wt_tzb=\"\$z\"; break ;; esac ;; esac; done; " +
-                    "[ \"\$matched\" = \"0\" ] && [ -z \"\$__wt_tzb\" ] && __wt_tzb=\"none\"; ;; esac; " +
-                    "fi; " +
-                    "case \"\$tzb\" in \"\"|-*|0|*[!0-9]*) tzb_bad=1 ;; *) tzb_bad=0 ;; esac; " +
                     "c=\"\"; { read -r c < /sys/class/power_supply/battery/current_now; } 2>/dev/null; " +
                     "v=\"\"; { read -r v < /sys/class/power_supply/battery/voltage_now; } 2>/dev/null; " +
-                    "tcf=\"\"; { read -r tcf < /sys/class/sec/sec-cf-thermistor/temperature; } 2>/dev/null; " +
-                    "tth=\"\"; { read -r tth < /sys/class/sec/sec-thermistor/temperature; } 2>/dev/null; " +
-                    "tap=\"\"; { read -r tap < /sys/class/sec/sec-ap-thermistor/temperature; } 2>/dev/null; " +
-                    "tpa=\"\"; { read -r tpa < /sys/class/sec/sec-pa-thermistor/temperature; } 2>/dev/null; " +
-                    "p1=/sys/class/power_supply/battery/batt_temp; p2=/sys/class/power_supply/battery/temp; " +
-                    "p3=/sys/class/sec/battery/batt_temp; p4=/sys/class/power_supply/battery/chg_temp; p5=/sys/class/power_supply/battery/dchg_temp; " +
-                    "tb1=\"\"; tb2=\"\"; tb3=\"\"; tchg=\"\"; tdchg=\"\"; need=\"\"; " +
-                    "if [ -e \"\$p1\" ]; then { read -r tb1 < \"\$p1\"; } 2>/dev/null; [ -z \"\$tb1\" ] && need=\"\$need \$p1\"; fi; " +
-                    "if [ -e \"\$p2\" ]; then { read -r tb2 < \"\$p2\"; } 2>/dev/null; [ -z \"\$tb2\" ] && need=\"\$need \$p2\"; fi; " +
-                    "if [ -e \"\$p3\" ]; then { read -r tb3 < \"\$p3\"; } 2>/dev/null; [ -z \"\$tb3\" ] && need=\"\$need \$p3\"; fi; " +
-                    "if [ -e \"\$p4\" ]; then { read -r tchg < \"\$p4\"; } 2>/dev/null; [ -z \"\$tchg\" ] && need=\"\$need \$p4\"; fi; " +
-                    "if [ -e \"\$p5\" ]; then { read -r tdchg < \"\$p5\"; } 2>/dev/null; [ -z \"\$tdchg\" ] && need=\"\$need \$p5\"; fi; " +
-                    "unlocked=0; " +
-                    "if [ -n \"\$need\" ] && { [ \"$forceUnlockFlag\" = \"1\" ] || [ \"\$tzb_bad\" = \"1\" ]; }; then " +
-                    "relock=\"\"; for line in \$(stat -c \"%a:%n\" \$need 2>/dev/null); do " +
-                    "m=\"\${line%%:*}\"; np=\"\${line#*:}\"; " +
-                    "case \"\$m\" in 0|00|000|0000) relock=\"\$relock \$np\" ;; esac; " +
-                    "done; " +
-                    "if [ -n \"\$relock\" ]; then " +
-                    "unlocked=1; " +
-                    "chmod 0444 \$relock 2>/dev/null; " +
-                    "[ -z \"\$tb1\" ] && [ -e \"\$p1\" ] && { read -r tb1 < \"\$p1\"; } 2>/dev/null; " +
-                    "[ -z \"\$tb2\" ] && [ -e \"\$p2\" ] && { read -r tb2 < \"\$p2\"; } 2>/dev/null; " +
-                    "[ -z \"\$tb3\" ] && [ -e \"\$p3\" ] && { read -r tb3 < \"\$p3\"; } 2>/dev/null; " +
-                    "[ -z \"\$tchg\" ] && [ -e \"\$p4\" ] && { read -r tchg < \"\$p4\"; } 2>/dev/null; " +
-                    "[ -z \"\$tdchg\" ] && [ -e \"\$p5\" ] && { read -r tdchg < \"\$p5\"; } 2>/dev/null; " +
-                    "chmod 0000 \$relock 2>/dev/null; " +
-                    "fi; " +
-                    "fi; " +
-                    "echo \"C=\$c\"; echo \"V=\$v\"; echo \"UNLOCKED=\$unlocked\"; " +
-                    "echo \"TB1=\$tb1\"; echo \"TB2=\$tb2\"; echo \"TB3=\$tb3\"; echo \"TZB=\$tzb\"; " +
-                    "echo \"TCF=\$tcf\"; echo \"TTH=\$tth\"; echo \"TAP=\$tap\"; echo \"TPA=\$tpa\"; " +
-                    "echo \"TCHG=\$tchg\"; echo \"TDCHG=\$tdchg\"; " +
+                    "t1=\"\"; { read -r t1 < /sys/class/power_supply/battery/batt_temp_raw; } 2>/dev/null; " +
+                    "t2=\"\"; { read -r t2 < /sys/class/sec/battery/batt_temp; } 2>/dev/null; " +
+                    "t3=\"\"; { read -r t3 < /sys/class/sec/sec-cf-thermistor/temperature; } 2>/dev/null; " +
+                    "t4=\"\"; { read -r t4 < /sys/class/sec/sec-lp-thermistor/temperature; } 2>/dev/null; " +
+                    "tb1=\"\"; { read -r tb1 < /sys/class/power_supply/battery/batt_temp; } 2>/dev/null; " +
+                    "tb2=\"\"; { read -r tb2 < /sys/class/power_supply/battery/temp; } 2>/dev/null; " +
+                    "echo \"C=\$c\"; echo \"V=\$v\"; " +
+                    "echo \"T1=\$t1\"; echo \"T2=\$t2\"; echo \"T3=\$t3\"; echo \"T4=\$t4\"; " +
+                    "echo \"TB1=\$tb1\"; echo \"TB2=\$tb2\"; " +
                     "echo __DONE__",
                 timeoutSeconds = 4,
             )
@@ -418,36 +290,17 @@ object FastChargeController {
                 if (rawVoltage > 100_000) rawVoltage /= 1_000      // 部分内核以 µV 上报
                 voltageMv = rawVoltage
 
+                val t1 = normalizeTemp(taggedInt(stdout, "T1"))
+                val t2 = normalizeTemp(taggedInt(stdout, "T2"))
+                val t3 = normalizeTemp(taggedInt(stdout, "T3"))
+                val t4 = normalizeTemp(taggedInt(stdout, "T4"))
                 val tb1 = normalizeTemp(taggedInt(stdout, "TB1"))
                 val tb2 = normalizeTemp(taggedInt(stdout, "TB2"))
-                val tb3 = normalizeTemp(taggedInt(stdout, "TB3"))
-                val tzb = normalizeTemp(taggedInt(stdout, "TZB"))
-                val tcf = normalizeTemp(taggedInt(stdout, "TCF"))
-                val tth = normalizeTemp(taggedInt(stdout, "TTH"))
-                // 电池/机身有效温度取电池、thermal_zone 电池热敏与中框的最高值，防止机身已达 45°C 而单一节点滞后或失真
-                tempTenths = maxOf(tb1, tb2, tb3, tzb, tcf, tth)
-
-                val tap = normalizeTemp(taggedInt(stdout, "TAP"))
-                val tpa = normalizeTemp(taggedInt(stdout, "TPA"))
-                val tchg = normalizeTemp(taggedInt(stdout, "TCHG"))
-                val tdchg = normalizeTemp(taggedInt(stdout, "TDCHG"))
-                maxChipTempTenths = maxOf(tap, tpa, tchg, tdchg)
-
-                val directBattMax = maxOf(tb1, tb2, tb3)
-                if (taggedInt(stdout, "UNLOCKED") == 1 || directBattMax > 0) {
-                    lastDirectBattReadElapsedMs = android.os.SystemClock.elapsedRealtime()
-                }
-                if (tzb > 0 && tzb == lastTzbTempTenths) {
-                    consecutiveIdenticalTzbReads++
-                } else {
-                    lastTzbTempTenths = tzb
-                    consecutiveIdenticalTzbReads = if (tzb > 0) 1 else 0
-                }
-                lastMaxReadableTempTenths = maxOf(tzb, tcf, tth, maxChipTempTenths)
+                tempTenths = maxOf(tb1, tb2, t1, t2, t3, t4)
             }
         }
 
-        // 兜底方案：使用系统 BatteryManager API
+        // 兜底方案：使用系统 BatteryManager API 与 ACTION_BATTERY_CHANGED 粘性广播
         if (currentMa == 0) {
             val bm = context.getSystemService(BatteryManager::class.java)
             if (bm != null) {
@@ -476,7 +329,7 @@ object FastChargeController {
         }
 
         val watts = (voltageMv.toDouble() * currentMa.toDouble()) / 1_000_000.0
-        return BatteryMetrics(currentMa, voltageMv, watts, tempTenths, maxChipTempTenths)
+        return BatteryMetrics(currentMa, voltageMv, watts, tempTenths, 0)
     }
 
     /** 从 `echo C=123` 这类带标签输出里按标签取值，节点缺失时返回 null */
