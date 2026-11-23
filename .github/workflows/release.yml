@@ -24,34 +24,32 @@ jobs:
 
       - name: Verify APK & Generate SHA-256 Checksum
         run: |
-          test -f releases/WeiTiao-v1.6.3.apk
+          test -f releases/WeiTiao-v1.6.4.apk
           cd releases
-          sha256sum WeiTiao-v1.6.3.apk > WeiTiao-v1.6.3.apk.sha256
-          cat WeiTiao-v1.6.3.apk.sha256
+          sha256sum WeiTiao-v1.6.4.apk > WeiTiao-v1.6.4.apk.sha256
+          cat WeiTiao-v1.6.4.apk.sha256
 
       - name: Create GitHub Release and Upload APK + Checksum
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.6.3
-          name: "微调 WeiTiao v1.6.3 (仅充电显示快充通知、根治死循环与温控降频采样)"
+          tag_name: v1.6.4
+          name: "微调 WeiTiao v1.6.4 (对齐原版 17 节点 AC 亮屏快充、低电流踢一脚与电池温度硬熔断)"
           body: |
-            ### 微调 (WeiTiao) v1.6.3 (`versionCode=43`)
+            ### 微调 (WeiTiao) v1.6.4 (`versionCode=44`)
 
-            - **仅在真正充电时运行亮屏快充通知与服务 (`FastChargeReceiver` / `BrightScreenFastChargeService` / `FastChargeNotifier` / `TuningConfig`)**：
-              - 在 `FastChargeReceiver`（`goAsync()` 后台处理）、`FastChargeFallback.applyNow` 与 `TuningPrefs.resyncServices` / `syncServices` 调用方前置校验积极充电与 `isRootSuspended` 状态，未充电或无 Root 挂起时不调用 `startForegroundService()`；
-              - 服务 `onStartCommand` 不在主线程阻塞执行 `su`，若由 `startForegroundService()` 拉起后需立即退出，统一按 `NO_ROOT` → `!isWiredCharging` → `FULL_CHARGE` → `ACTION_STOP_STANDBY` 优先级绑定 `IMPORTANCE_NONE` 隐藏通知（`allowLiveReuse = false`）并主线程立即 `cancelLive` + `stopForeground` + `stopSelf()`，声明为 `START_NOT_STICKY`，避免 `ForegroundServiceDidNotStartInTimeException`。
-            - **满电 100% 方案 A 与拔插重触发闭环 (`FastChargeController` / `App` / `FastChargeWatchdog`)**：
-              - 达到 `BATTERY_STATUS_FULL` 时立即释放温控节点、隐藏通知并停止后台轮询；
-              - 进程级动态 `powerReceiver` 配合 `FastChargeJobService` 维持「满电退出 → 拔线 → 下次插线」自动触发闭环。
-            - **消除有 Root / 无 Root 死循环与后台唤醒 (`BrightScreenFastChargeService` / `FastChargeWatchdog` / `PassThroughService` / `DashboardScreen`)**：
-              - 移除过热熔断或满电恢复后的无条件 `scheduleNodeSync` 与重复 `stat + chmod` 轮询，正常供电轮询间隔 `10s`；
-              - 为 `JOB_ID_ARM` / `JOB_ID_KICK` 增加 `3s` 防抖与 `isNodesMayBeBlocked` 按需重调度，防止 `stopSelf` ↔ `JobScheduler` 乒乓唤醒；
-              - 无 Root 时 `BrightScreenFastChargeService` 与 `PassThroughService` 快速熔断退出，Root 恢复授权后自动解除挂起并同步；`DashboardScreen` 将状态检查由 2.5s 轮询改为 `ON_RESUME` 刷新。
-            - **智能温控采样与兜底 (`FastChargeController.readBatteryMetrics`)**：
-              - 优先读取免解锁 `__wt_tzb` 与 sec 热敏电阻，跳过常规 `chmod` 临时解锁；保留在 `__wt_tzb` 无效、连续 `6` 次卡死、距温控阈值 `3.0°C` 以内或距上次直接校验超过 `60s` 时的自动临时解锁兜底。
+            - **全面对齐 S8Tweak 原版 17 节点屏蔽范围 (`FastChargeController`)**：
+              - `blockTemperatureNodes` 重新覆盖全部 17 个温控节点（电池/充电路由 8 项 + AP/CP/PA/WF/机身 6 项热敏 + `lcd/panel` + `gpu_tmu` + `/sys/class/thermal`），彻底打穿三星 SSRM/SIOP 亮屏限流；拔线、非 AC 充、满电 100% 或过热熔断时恢复目录 `0755` / 文件 `0644`。
+            - **仅对 AC 有线充电生效 & 取消息屏反复撤回 (`BrightScreenFastChargeService` / `FastChargeWatchdog` / `TuningConfig`)**：
+              - 仅在 `BATTERY_PLUGGED_AC` 时启动亮屏快充并写入三星快充系统开关，插 USB/无线充时不误锁节点、不触发 JobScheduler 乒乓唤醒；
+              - AC 充电期间不再因息屏撤回节点或临时 `chmod 0444` 解锁 `batt_temp`，消除亮/息屏切换及定时解锁漏风口。
+            - **低电流「踢一脚」自动重协商 + 防抖冷却 (`BrightScreenFastChargeService`)**：
+              - 当电量 `< 85%` 且连续 2 次实测电流处于 `1..999mA` 慢充态时，自动临时恢复节点 5 秒后再重新屏蔽全部 17 个节点拉回快充；内置 `60s` 冷却与连续 `3` 次上限，避免老旧慢充头无限重试。
+            - **仅依电池自身温度触发硬熔断 + 延续 v1.6.3 零功耗底座 (`FastChargeController` / `App` / `FastChargeNotifier`)**：
+              - 过热熔断剔除 AP/PA 芯片温度干扰，仅按免解锁采集（与系统广播 `EXTRA_TEMPERATURE`）获得的电池自身温度及用户阈值（默认 44°C，降温 3°C 恢复）判定；
+              - 保留未充电零通知零服务、100% 满电退场与拔插闭环、无 Root 自动挂起。
             - **验证状态**：
-              - 本地单元测试 15 个套件共 134 项全部通过（含 `FastChargeSafetyTest` 新增 4 项安全回归测试）；R8 Release 构建通过。
-              - 真机实测（插拔线通知、满电 100% 退场与拔插闭环、无 Root 熔断功耗）待真机接入后进一步确认。
+              - 本地单元测试 15 个套件共 134 项全部通过（含 `FastChargeSafetyTest` 覆盖 AC 门控、17 节点校验、电池单温熔断与低电流重协商用例）；R8 Release 构建通过。
+              - 真机实测（AC 亮屏充电电流、全节点屏蔽下 `EXTRA_TEMPERATURE` 温升刷新与低电流踢一脚实效）待接入真机后进一步验证。
           files: |
-            releases/WeiTiao-v1.6.3.apk
-            releases/WeiTiao-v1.6.3.apk.sha256
+            releases/WeiTiao-v1.6.4.apk
+            releases/WeiTiao-v1.6.4.apk.sha256
