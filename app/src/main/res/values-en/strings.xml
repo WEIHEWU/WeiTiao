@@ -237,5 +237,17 @@
     <string name="selftest_refresh_btn">Re-run Environment Probe Now</string>
     <string name="csc_presets_card_title">One-Tap Samsung One UI CscFeature Presets</string>
     <string name="csc_presets_card_subtitle">Toggle Call Recording, Camera Shutter Sound Menu, Network Speed, and Data Usage without JSON</string>
+
+    <!-- Quick Settings Tile -->
+    <string name="qs_fast_charge_label">Fast Charge</string>
+    <string name="qs_fast_charge_on">On</string>
+    <string name="qs_fast_charge_off">Off</string>
+    <string name="qs_fast_charge_charging">Charging</string>
+    <string name="qs_fast_charge_charging_watts">%1$.1fW Charging</string>
+    <string name="qs_fast_charge_overheat">Thermal Cutoff</string>
+    <string name="qs_fast_charge_need_root">Root permission required to enable Fast Charge</string>
+    <string name="qs_fast_charge_added">Added Fast Charge tile to Quick Settings</string>
+    <string name="qs_fast_charge_already_added">Fast Charge tile is already in Quick Settings</string>
+    <string name="qs_fast_charge_manual_hint">Pull down Quick Settings, tap Edit, and drag Fast Charge into the panel</string>
 </resources>
 

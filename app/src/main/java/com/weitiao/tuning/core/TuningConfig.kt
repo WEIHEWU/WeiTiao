@@ -10,6 +10,7 @@ import com.weitiao.tuning.tuning.BrightScreenFastChargeService
 import com.weitiao.tuning.tuning.FastChargeController
 import com.weitiao.tuning.tuning.FastChargeNotifier
 import com.weitiao.tuning.tuning.FastChargeScheduler
+import com.weitiao.tuning.tuning.FastChargeTileService
 import com.weitiao.tuning.tuning.PassThroughService
 import java.util.concurrent.Executors
 
@@ -443,6 +444,9 @@ object TuningPrefs {
         }
 
         val snap = FastChargeScheduler.readBatterySnapshot(context)
+        if (previous.brightScreenFastCharge != config.brightScreenFastCharge) {
+            FastChargeTileService.requestSync(context)
+        }
         val plugged = snap.plugged
         val rootSuspended = FastChargeScheduler.isRootSuspended(context)
         val fullStopped = FastChargeController.isFullChargeStopped(

@@ -866,4 +866,28 @@ class FastChargeSafetyTest {
             ),
         )
     }
+
+    @Test
+    fun fastChargeTilePresentationReflectsAllStates() {
+        assertEquals(
+            TilePresentation(active = false, mode = TileMode.OFF),
+            resolveTilePresentation(enabled = false, isAcCharging = true, isOverheated = false, livePowerWatts = 35.0),
+        )
+        assertEquals(
+            TilePresentation(active = true, mode = TileMode.STANDBY),
+            resolveTilePresentation(enabled = true, isAcCharging = false, isOverheated = false, livePowerWatts = 0.0),
+        )
+        assertEquals(
+            TilePresentation(active = true, mode = TileMode.CHARGING),
+            resolveTilePresentation(enabled = true, isAcCharging = true, isOverheated = false, livePowerWatts = 0.0),
+        )
+        assertEquals(
+            TilePresentation(active = true, mode = TileMode.CHARGING_WATTS, powerWatts = 38.4),
+            resolveTilePresentation(enabled = true, isAcCharging = true, isOverheated = false, livePowerWatts = 38.4),
+        )
+        assertEquals(
+            TilePresentation(active = true, mode = TileMode.OVERHEAT),
+            resolveTilePresentation(enabled = true, isAcCharging = true, isOverheated = true, livePowerWatts = 38.4),
+        )
+    }
 }

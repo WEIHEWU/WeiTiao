@@ -237,5 +237,17 @@
     <string name="selftest_refresh_btn">立即重新检测环境探针</string>
     <string name="csc_presets_card_title">三星 One UI 隐藏特性一键开关</string>
     <string name="csc_presets_card_subtitle">无需手写 JSON，一键开启通话录音、快门音菜单、实时网速与流量条</string>
+
+    <!-- 快捷设置磁贴 -->
+    <string name="qs_fast_charge_label">亮屏快充</string>
+    <string name="qs_fast_charge_on">已开启</string>
+    <string name="qs_fast_charge_off">已关闭</string>
+    <string name="qs_fast_charge_charging">快充中</string>
+    <string name="qs_fast_charge_charging_watts">%1$.1fW 快充中</string>
+    <string name="qs_fast_charge_overheat">高温保护</string>
+    <string name="qs_fast_charge_need_root">需要授予 Root 权限才能开启亮屏快充</string>
+    <string name="qs_fast_charge_added">已将「亮屏快充」快捷磁贴添加到控制中心</string>
+    <string name="qs_fast_charge_already_added">「亮屏快充」快捷磁贴已在控制中心中</string>
+    <string name="qs_fast_charge_manual_hint">请下拉控制中心点击编辑，将「亮屏快充」拖入快捷面板</string>
 </resources>
 

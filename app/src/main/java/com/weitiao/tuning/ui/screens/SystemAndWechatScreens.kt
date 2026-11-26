@@ -67,6 +67,7 @@ import com.weitiao.tuning.core.HeartbeatHealth
 import com.weitiao.tuning.core.RootShell
 import com.weitiao.tuning.core.TuningConfig
 import com.weitiao.tuning.core.TuningPrefs
+import com.weitiao.tuning.tuning.FastChargeTileService
 import com.weitiao.tuning.ui.components.IosGlassTokens
 import com.weitiao.tuning.ui.components.MiuixPageScaffold
 import com.weitiao.tuning.ui.components.OneUiCollapsibleCard
@@ -1018,6 +1019,18 @@ internal fun PowerOptimizationDetailContent(
                     )
                 }
             }
+        }
+
+        OneUiIslandCard {
+            OneUiItemRow(
+                title = if (isZh) "快捷控制中心磁贴" else "Quick Settings Tile",
+                subtitle = if (isZh) "一键添加「亮屏快充」磁贴到下拉面板，支持直接点击开关"
+                else "Add the Fast Charge tile to Quick Settings for one-tap toggle",
+                icon = Icons.Default.Bolt,
+                iconTint = IosGlassTokens.IosBlue,
+                showChevron = true,
+                onClick = { FastChargeTileService.requestAddTile(context) },
+            )
         }
     } else {
         if (hasRoot && !bypassNodeSupported) {

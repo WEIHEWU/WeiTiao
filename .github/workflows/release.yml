@@ -24,39 +24,30 @@ jobs:
 
       - name: Verify APK & Generate SHA-256 Checksum
         run: |
-          test -f releases/WeiTiao-v1.6.5.apk
+          test -f releases/WeiTiao-v1.6.6.apk
           cd releases
-          sha256sum WeiTiao-v1.6.5.apk > WeiTiao-v1.6.5.apk.sha256
-          cat WeiTiao-v1.6.5.apk.sha256
+          sha256sum WeiTiao-v1.6.6.apk > WeiTiao-v1.6.6.apk.sha256
+          cat WeiTiao-v1.6.6.apk.sha256
 
       - name: Create GitHub Release and Upload APK + Checksum
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.6.5
-          name: "微调 WeiTiao v1.6.5 (内核软钳制 + 三路硬件温控红线 & 全局 0 延迟丝滑交互优化)"
+          tag_name: v1.6.6
+          name: "微调 WeiTiao v1.6.6 (新增「亮屏快充」系统控制中心快捷磁贴)"
           body: |
-            ### 微调 (WeiTiao) v1.6.5 (`versionCode=45`)
+            ### 微调 (WeiTiao) v1.6.6 (`versionCode=46`)
 
-            #### ⚡ 亮屏快充内核升级（吸收软钳制与三路硬件安全红线）
-            - **内核级温度软钳制 + SIOP 满血锁 (`FastChargeController`)**：
-              - 启用充电温控优化时，主动向三星电池驱动 `batt_temp_test` 写入 `b 350`、直锁 `siop_level = 100`，并按需写入 `/data/data/com.sec.android.sdhms/` 原生 SSRM 禁用标志与 `settings put global restricted_device_performance 0,0`；
-              - 周期复核同步保障 `siop_level` 不被 SSRM 降档；退出快充或恢复温控时自动写入 `b -300` / `w -300` 并清理调试标志。
-            - **三路独立硬件级安全红线 + 高精度微安电流 (`FastChargeController`)**：
-              - 新增 **充电 IC (`chg_temp >= 56.0°C`，降温 `4.0°C` 恢复)** 与 **USB 尾插 (`usb_temp >= 47.0°C`，降温 `3.0°C` 恢复)** 独立安全熔断保护，与电芯温度阈值三路独立判定（不计入 AP/PA 芯片瞬时高温，绝不误断快充）；
-              - 优先读取 `batt_current_ua_now` 与未被钳制的 `batt_temp_raw` / `wpc_temp` / `lrp` 通道温度。
-
-            #### 🚀 全局交互流畅度与点击响应优化
-            - **消除进入页面首帧卡顿 (`InstalledAppsRepository` & 懒加载弹窗)**：
-              - 新增后台应用列表与预缩放 `ImageBitmap` 内存缓存仓库 `InstalledAppsRepository`（全量 `queryIntentActivities` / `loadLabel` / `toBitmap` 下沉至 `Dispatchers.IO`）；
-              - 为「机型伪装」「分应用机型」「亮屏快充 / 应用旁路供电」的应用选择器增加 `show` 守卫，彻底消除进入页面首帧同步扫描全机百余个应用造成的 300~800ms 卡顿。
-            - **配置内存缓存 + 乐观异步落盘 (`CscPrefs` / `TuningPrefs` / `App`)**：
-              - 新增进程级配置内存缓存与 `saveAsync` 后台单线程异步持久化，同时在 `App.onCreate` 后台预热配置、地区目录与设备信息，切换开关/调节滑块达到 0ms 响应。
-            - **消除详情页跳闪与轻量转场 (`RootShell` / `SearchScreen` / `CscChangerApp`)**：
-              - 新增 `RootShell.peekLastKnownHasRoot()` 消除详情页首帧「未获 Root」横幅跳闪；
-              - 将微信作用域查询、地区目录加载与恢复默认 Root 清理移出主线程，并为顶层页面路由加入 `160ms` 轻量 `AnimatedContent` 淡入淡出过渡动画。
+            #### ⚡ 新增「亮屏快充」控制中心快捷磁贴 (`FastChargeTileService`)
+            - **下拉面板直接一键开关**：无需进入 App，下拉系统控制中心点击「亮屏快充」磁贴即可直接开启/关闭亮屏快充（无 Root 时自动安全回退并弹窗提示）。
+            - **双向实时同步 & 动态副标题**：
+              - 磁贴与 App 内亮屏快充开关实时双向同步（App 内切换自动触发 `TileService.requestListeningState` 刷新）；
+              - Android 10+ 支持动态副标题实时展示：`已关闭` / `已开启` / `快充中` / `xx.xW 快充中` / `高温保护`。
+            - **长按直达 & 一键添加到快捷面板**：
+              - 长按系统控制中心磁贴可直接跳转微调主页（`QS_TILE_PREFERENCES`）；
+              - 在「亮屏快充」详情页新增「快捷控制中心磁贴」入口，Android 13+ 一键弹窗添加到下拉面板。
 
             - **验证状态**：
-              - 本地单元测试 15 个套件共 135 项全部通过（0 失败 0 跳过，含 `FastChargeSafetyTest` 新增的充电 IC 与 USB 尾插过热熔断滞回用例）；R8 Release APK 编译通过。
+              - 本地单元测试 15 个套件共 136 项全部通过（0 失败 0 跳过，含 `FastChargeSafetyTest` 新增的快捷磁贴多状态展示用例）；R8 Release APK 编译通过。
           files: |
-            releases/WeiTiao-v1.6.5.apk
-            releases/WeiTiao-v1.6.5.apk.sha256
+            releases/WeiTiao-v1.6.6.apk
+            releases/WeiTiao-v1.6.6.apk.sha256
