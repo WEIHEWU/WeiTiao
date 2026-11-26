@@ -17,8 +17,12 @@ object NativeDevice {
         val simCountryIso: String,
     )
 
-    /** 读取底层真实原生参数（模块 UI 进程未被 Hook，获取未伪装的硬件真实值） */
+    @Volatile
+    private var cachedInfo: Info? = null
+
+    /** 读取底层真实原生参数（模块 UI 进程未被 Hook，获取未伪装的硬件真实值，进程内缓存） */
     fun detect(context: Context? = null): Info {
+        cachedInfo?.let { return it }
         val rawSalesCode = readFirstValidProp(
             CscConstants.PROP_SALES_CODE,
             "ril.official_csccode",
@@ -88,7 +92,7 @@ object NativeDevice {
             countryCode = resolvedCountry,
             simMcc = resolvedSimMcc,
             simCountryIso = resolvedSimIso,
-        )
+        ).also { cachedInfo = it }
     }
 
     private fun readFirstValidProp(vararg keys: String): String {

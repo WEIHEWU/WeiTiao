@@ -2,6 +2,11 @@ package com.weitiao.tuning.ui
 
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
@@ -82,7 +87,6 @@ fun CscChangerApp() {
             tabs = navTabs,
             selectedTab = selectedTab,
             onSelectTab = { nextTab ->
-                refreshVersion++
                 activeFeaturePage = null
                 showRegionSearch = false
                 selectedTab = nextTab
@@ -96,15 +100,12 @@ fun CscChangerApp() {
     ) {
         when {
             showRegionSearch -> {
-                refreshVersion++
                 showRegionSearch = false
             }
             activeFeaturePage != null -> {
-                refreshVersion++
                 activeFeaturePage = null
             }
             selectedTab != MainTab.HOME -> {
-                refreshVersion++
                 selectedTab = MainTab.HOME
             }
         }
@@ -114,118 +115,125 @@ fun CscChangerApp() {
         modifier = Modifier.fillMaxSize(),
         isFastChargingActive = isFastChargingActive,
     ) {
-        when {
-            showRegionSearch -> {
-                SearchScreen(
-                    initialQuery = "",
-                    onBack = {
-                        refreshVersion++
-                        showRegionSearch = false
-                    },
-                    onSelect = { entry ->
-                        val current = CscPrefs.load(context)
-                        val derivedMnc = if (entry.numeric.startsWith(entry.mcc) && entry.numeric.length > entry.mcc.length) {
-                            entry.numeric.substring(entry.mcc.length)
-                        } else {
-                            "00"
-                        }
-                        val updated = current.copy(
-                            enabled = true,
-                            salesCode = entry.code.uppercase(),
-                            countryCode = entry.countryCode.uppercase(),
-                            simMcc = entry.mcc,
-                            simMnc = derivedMnc,
-                            simNumeric = entry.numeric.ifBlank { "${entry.mcc}$derivedMnc" },
-                            simOperatorName = entry.operator,
-                            simCountryIso = entry.countryCode.lowercase(),
-                            marketUnlockRaw = "${entry.numeric},${entry.operator},${entry.countryCode.lowercase()},${entry.country}",
-                            spoofSimInfo = true,
-                            spoofSalesCode = true,
-                            spoofCountryCode = true,
-                            spoofRilSalesCode = true,
-                            spoofOmcCodes = true,
-                            spoofSemCscFeature = true,
-                        )
-                        CscPrefs.save(context, updated)
-                        RegionApplyState.markPending(context)
-                        refreshVersion++
-                        showRegionSearch = false
-                        activeFeaturePage = FeaturePageId.STORE_REGION
-
-                        scope.launch {
-                            val cleaned = withContext(Dispatchers.IO) { StoreCleaner.clearStoreDataRoot() }
-                            if (cleaned) {
-                                RegionApplyState.markApplied(context)
-                                refreshVersion++
-                                Toast.makeText(
-                                    context,
-                                    context.getString(R.string.clear_store_success),
-                                    Toast.LENGTH_SHORT,
-                                ).show()
-                            } else {
-                                Toast.makeText(
-                                    context,
-                                    context.getString(R.string.preset_applied_toast, entry.country.ifBlank { entry.code }),
-                                    Toast.LENGTH_SHORT,
-                                ).show()
-                            }
-                        }
-                    },
-                )
-            }
-
-            activeFeaturePage != null -> {
-                FeatureDetailScreen(
-                    pageId = activeFeaturePage!!,
-                    refreshTrigger = refreshVersion,
-                    onBack = {
-                        refreshVersion++
-                        activeFeaturePage = null
-                    },
-                    onNavigatePage = { nextPage ->
-                        refreshVersion++
-                        activeFeaturePage = nextPage
-                    },
-                    onOpenRegionSearch = {
-                        showRegionSearch = true
-                    },
-                    onConfigChanged = {
-                        refreshVersion++
-                    },
-                )
-            }
-
-            else -> {
-                when (selectedTab) {
-                    MainTab.HOME -> DashboardScreen(
-                        refreshTrigger = refreshVersion,
-                        bottomBar = bottomNavComposable,
-                        onOpenFeature = { pageId ->
-                            activeFeaturePage = pageId
+        val navRoute = Triple(showRegionSearch, activeFeaturePage, selectedTab)
+        AnimatedContent(
+            targetState = navRoute,
+            transitionSpec = {
+                fadeIn(animationSpec = tween(durationMillis = 160)) togetherWith
+                    fadeOut(animationSpec = tween(durationMillis = 120))
+            },
+            label = "MainNavTransition",
+        ) { (regionSearchVisible, featurePage, currentTab) ->
+            when {
+                regionSearchVisible -> {
+                    SearchScreen(
+                        initialQuery = "",
+                        onBack = {
+                            showRegionSearch = false
                         },
-                        onOpenSettings = {
-                            selectedTab = MainTab.SETTINGS
+                        onSelect = { entry ->
+                            val current = CscPrefs.load(context)
+                            val derivedMnc = if (entry.numeric.startsWith(entry.mcc) && entry.numeric.length > entry.mcc.length) {
+                                entry.numeric.substring(entry.mcc.length)
+                            } else {
+                                "00"
+                            }
+                            val updated = current.copy(
+                                enabled = true,
+                                salesCode = entry.code.uppercase(),
+                                countryCode = entry.countryCode.uppercase(),
+                                simMcc = entry.mcc,
+                                simMnc = derivedMnc,
+                                simNumeric = entry.numeric.ifBlank { "${entry.mcc}$derivedMnc" },
+                                simOperatorName = entry.operator,
+                                simCountryIso = entry.countryCode.lowercase(),
+                                marketUnlockRaw = "${entry.numeric},${entry.operator},${entry.countryCode.lowercase()},${entry.country}",
+                                spoofSimInfo = true,
+                                spoofSalesCode = true,
+                                spoofCountryCode = true,
+                                spoofRilSalesCode = true,
+                                spoofOmcCodes = true,
+                                spoofSemCscFeature = true,
+                            )
+                            CscPrefs.saveAsync(context, updated)
+                            RegionApplyState.markPending(context)
+                            refreshVersion++
+                            showRegionSearch = false
+                            activeFeaturePage = FeaturePageId.STORE_REGION
+
+                            scope.launch {
+                                val cleaned = withContext(Dispatchers.IO) { StoreCleaner.clearStoreDataRoot() }
+                                if (cleaned) {
+                                    RegionApplyState.markApplied(context)
+                                    refreshVersion++
+                                    Toast.makeText(
+                                        context,
+                                        context.getString(R.string.clear_store_success),
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                } else {
+                                    Toast.makeText(
+                                        context,
+                                        context.getString(R.string.preset_applied_toast, entry.country.ifBlank { entry.code }),
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                }
+                            }
+                        },
+                    )
+                }
+
+                featurePage != null -> {
+                    FeatureDetailScreen(
+                        pageId = featurePage,
+                        refreshTrigger = refreshVersion,
+                        onBack = {
+                            activeFeaturePage = null
+                        },
+                        onNavigatePage = { nextPage ->
+                            activeFeaturePage = nextPage
+                        },
+                        onOpenRegionSearch = {
+                            showRegionSearch = true
                         },
                         onConfigChanged = {
                             refreshVersion++
                         },
                     )
+                }
 
-                    MainTab.FEATURES -> FeaturesCatalogScreen(
-                        refreshTrigger = refreshVersion,
-                        bottomBar = bottomNavComposable,
-                        onOpenFeature = { pageId ->
-                            activeFeaturePage = pageId
-                        },
-                    )
+                else -> {
+                    when (currentTab) {
+                        MainTab.HOME -> DashboardScreen(
+                            refreshTrigger = refreshVersion,
+                            bottomBar = bottomNavComposable,
+                            onOpenFeature = { pageId ->
+                                activeFeaturePage = pageId
+                            },
+                            onOpenSettings = {
+                                selectedTab = MainTab.SETTINGS
+                            },
+                            onConfigChanged = {
+                                refreshVersion++
+                            },
+                        )
 
-                    MainTab.SETTINGS -> SettingsScreen(
-                        refreshTrigger = refreshVersion,
-                        bottomBar = bottomNavComposable,
-                        onOpenFeature = { pageId ->
-                            activeFeaturePage = pageId
-                        },
-                    )
+                        MainTab.FEATURES -> FeaturesCatalogScreen(
+                            refreshTrigger = refreshVersion,
+                            bottomBar = bottomNavComposable,
+                            onOpenFeature = { pageId ->
+                                activeFeaturePage = pageId
+                            },
+                        )
+
+                        MainTab.SETTINGS -> SettingsScreen(
+                            refreshTrigger = refreshVersion,
+                            bottomBar = bottomNavComposable,
+                            onOpenFeature = { pageId ->
+                                activeFeaturePage = pageId
+                            },
+                        )
+                    }
                 }
             }
         }

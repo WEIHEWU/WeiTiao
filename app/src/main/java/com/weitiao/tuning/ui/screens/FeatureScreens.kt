@@ -432,7 +432,7 @@ fun FeatureDetailScreen(
     var xposedReady by remember {
         mutableStateOf(App.getXposedService() != null || App.getRemotePrefs() != null)
     }
-    var hasRoot by remember { mutableStateOf(false) }
+    var hasRoot by remember { mutableStateOf(RootShell.peekLastKnownHasRoot() ?: false) }
     var showActivationGuide by rememberSaveable { mutableStateOf(false) }
     var pendingRestartConfirm by remember { mutableStateOf<(() -> Unit)?>(null) }
     var pendingRestartTitle by remember { mutableStateOf("") }
@@ -480,7 +480,7 @@ fun FeatureDetailScreen(
         val prev = csc
         val next = block(csc)
         csc = next
-        CscPrefs.save(context, next)
+        CscPrefs.saveAsync(context, next)
         if (prev.enabled != next.enabled || prev.salesCode != next.salesCode || prev.simMcc != next.simMcc) {
             RegionApplyState.markPending(context)
             regionCleanupPending = true
@@ -491,15 +491,18 @@ fun FeatureDetailScreen(
 
     fun updateTuning(toastMessage: String? = null, block: (TuningConfig) -> TuningConfig) {
         val next = block(tuning)
-        val result = TuningPrefs.saveWithStatus(context, next)
-        tuning = result.config
-        onConfigChanged()
-        val msg = if (!result.remoteSynced) {
-            if (isZh) "仅本地保存，尚未同步到 LSPosed" else "Saved locally only; not synced to LSPosed"
-        } else {
-            toastMessage
+        val optimistic = TuningPrefs.saveAsync(context, next) { result ->
+            if (!result.remoteSynced) {
+                scope.launch {
+                    snackbar.showSnackbar(
+                        if (isZh) "仅本地保存，尚未同步到 LSPosed" else "Saved locally only; not synced to LSPosed",
+                    )
+                }
+            }
         }
-        msg?.let { text -> scope.launch { snackbar.showSnackbar(text) } }
+        tuning = optimistic
+        onConfigChanged()
+        toastMessage?.let { text -> scope.launch { snackbar.showSnackbar(text) } }
     }
 
     val pageTitle = when (pageId) {
@@ -797,7 +800,7 @@ fun FeatureDetailScreen(
                     onUpdatePassApps = { updated ->
                         selectedPassApps = updated
                         TuningPrefs.saveSelectedApps(context, updated)
-                        TuningPrefs.save(context, tuning)
+                        TuningPrefs.saveAsync(context, tuning)
                         onConfigChanged()
                         scope.launch { snackbar.showSnackbar(context.getString(R.string.saved_toast)) }
                     },

@@ -809,4 +809,61 @@ class FastChargeSafetyTest {
             ),
         )
     }
+
+    @Test
+    fun isOverheatedTripsOnChargerIcAndUsbPortHardLimitsWithHysteresis() {
+        // 1. Battery cool (38.0°C), Charger IC reaches 56.0°C -> trips overheat
+        val hotChgMetrics = FastChargeController.BatteryMetrics(
+            currentMa = 3000,
+            voltageMv = 4200,
+            powerWatts = 12.6,
+            temperatureTenths = 380,
+            chgTempTenths = 560,
+            usbTempTenths = 390,
+        )
+        assertTrue(FastChargeController.isOverheated(hotChgMetrics, cutoffCelsius = 44, previouslyOverheated = false))
+        // Stays overheated at 53.0°C (> 52.0°C cooldown)
+        assertTrue(
+            FastChargeController.isOverheated(
+                hotChgMetrics.copy(chgTempTenths = 530),
+                cutoffCelsius = 44,
+                previouslyOverheated = true,
+            ),
+        )
+        // Recovers at 52.0°C (<= 52.0°C cooldown)
+        assertFalse(
+            FastChargeController.isOverheated(
+                hotChgMetrics.copy(chgTempTenths = 520),
+                cutoffCelsius = 44,
+                previouslyOverheated = true,
+            ),
+        )
+
+        // 2. Battery cool (38.0°C), USB port reaches 47.0°C -> trips overheat
+        val hotUsbMetrics = FastChargeController.BatteryMetrics(
+            currentMa = 3000,
+            voltageMv = 4200,
+            powerWatts = 12.6,
+            temperatureTenths = 380,
+            chgTempTenths = 450,
+            usbTempTenths = 470,
+        )
+        assertTrue(FastChargeController.isOverheated(hotUsbMetrics, cutoffCelsius = 44, previouslyOverheated = false))
+        // Stays overheated at 45.0°C (> 44.0°C cooldown)
+        assertTrue(
+            FastChargeController.isOverheated(
+                hotUsbMetrics.copy(usbTempTenths = 450),
+                cutoffCelsius = 44,
+                previouslyOverheated = true,
+            ),
+        )
+        // Recovers at 44.0°C (<= 44.0°C cooldown)
+        assertFalse(
+            FastChargeController.isOverheated(
+                hotUsbMetrics.copy(usbTempTenths = 440),
+                cutoffCelsius = 44,
+                previouslyOverheated = true,
+            ),
+        )
+    }
 }

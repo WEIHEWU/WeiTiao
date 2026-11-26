@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
 import com.weitiao.tuning.App
+import java.util.concurrent.Executors
 
 /**
  * 配置读写（libxposed 102 API 方案）：
@@ -16,16 +17,45 @@ import com.weitiao.tuning.App
  * （shared_prefs/），宿主进程（Galaxy Store 等）因 SELinux 隔离读不到。
  *
  * UI 侧读取逻辑：
- * 1. 优先走 XposedService remote prefs（若框架已连接）
- * 2. fallback 普通 SharedPreferences（框架未连接时 UI 仍可独立读写）
+ * 1. 优先命中进程内存缓存（0ms 返回，消除主线程 JSON 解析与跨进程读取卡顿）
+ * 2. 未命中时走 XposedService remote prefs，fallback 本地普通 SharedPreferences
  */
 object CscPrefs {
+
+    @Volatile
+    private var cachedConfig: CscConfig? = null
+
+    private val saveExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "CscPrefs-Save").apply { isDaemon = true }
+    }
+
+    fun invalidateCache() {
+        cachedConfig = null
+    }
 
     /**
      * 写入配置。优先写入框架 remote prefs（hook 侧可读到），
      * 框架未连接时 fallback 到本地普通 prefs。
      */
     fun save(context: Context, config: CscConfig) {
+        cachedConfig = config
+        persistInternal(context.applicationContext, config)
+    }
+
+    /**
+     * 乐观异步保存：立即更新内存态快照，并将跨进程 RemotePreferences 与本地同步落盘下沉到后台单线程队列，
+     * 消除点击开关时的主线程卡顿。
+     */
+    fun saveAsync(context: Context, config: CscConfig) {
+        cachedConfig = config
+        val appCtx = context.applicationContext
+        saveExecutor.execute {
+            runCatching { persistInternal(appCtx, config) }
+                .onFailure { Log.e("CscPrefs", "异步保存 CSC 配置失败", it) }
+        }
+    }
+
+    private fun persistInternal(appCtx: Context, config: CscConfig) {
         val remote = App.getXposedService()?.getRemotePreferences(CscConstants.PREFS_NAME)
         if (remote != null) {
             runCatching {
@@ -38,30 +68,35 @@ object CscPrefs {
                 Log.e("CscPrefs", "写入 LSPosed remote preferences 失败", it)
             }
             // 双写本地，保证 UI 进程自己也能读到（框架掉线/重启后仍有值）
-            val localEditor = localPrefs(context).edit()
+            val localEditor = localPrefs(appCtx).edit()
             CscConfig.toPrefs(localEditor, config)
             // 同步 commit：标记决定下一次启动的同步方向，不能靠异步 apply 赌落盘时机
             localEditor.putLong(CscConstants.KEY_LOCAL_SAVED_AT, System.currentTimeMillis())
             localEditor.commit()
         } else {
-            val editor = localPrefs(context).edit()
+            val editor = localPrefs(appCtx).edit()
             CscConfig.toPrefs(editor, config)
             editor.putLong(CscConstants.KEY_LOCAL_SAVED_AT, System.currentTimeMillis())
             editor.commit()
         }
     }
 
-    /** UI 侧读取：优先框架 remote prefs，fallback 本地 */
+    /** UI 侧读取：优先内存缓存，其次框架 remote prefs，fallback 本地 */
     fun load(context: Context): CscConfig {
+        cachedConfig?.let { return it }
         val remote = App.getXposedService()?.getRemotePreferences(CscConstants.PREFS_NAME)
-        if (remote != null && !remote.all.isEmpty()) {
-            return CscConfig.fromPrefs(remote)
+        val loaded = if (remote != null && !remote.all.isEmpty()) {
+            CscConfig.fromPrefs(remote)
+        } else {
+            CscConfig.fromPrefs(localPrefs(context))
         }
-        return CscConfig.fromPrefs(localPrefs(context))
+        cachedConfig = loaded
+        return loaded
     }
 
     /** UI 侧重置（仅清除 CSC/机型相关配置，保留微调相关独立配置） */
     fun clear(context: Context) {
+        cachedConfig = null
         val keysToRemove = listOf(
             "enabled", "sales_code", "country_code", "spoof_sales_code",
             "spoof_country_code", "spoof_ril_sales_code", "spoof_omc_codes",

@@ -213,6 +213,10 @@ object RootShell {
         return if (checkedAt > 0L && (now - checkedAt < ROOT_CHECK_TTL_MS)) cachedHasRoot else null
     }
 
+    /** 无阻塞读取本进程最近一次 Root 探测结果（用于 UI 首帧初始化，避免「未获 Root」横幅跳闪） */
+    fun peekLastKnownHasRoot(): Boolean? =
+        if (lastRootCheckElapsed > 0L) cachedHasRoot else null
+
     /** 检查 root 是否可用，支持 15 秒缓存以避免高频重复创建 su 进程与竞争锁 */
     fun hasRoot(forceRefresh: Boolean = false): Boolean {
         val now = elapsedMs()

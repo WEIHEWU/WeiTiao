@@ -82,7 +82,7 @@ fun SettingsScreen(
         mutableStateOf(App.getXposedService() != null || App.getRemotePrefs() != null)
     }
     var probeTick by remember { mutableIntStateOf(0) }
-    var hasRoot by remember { mutableStateOf(false) }
+    var hasRoot by remember { mutableStateOf(RootShell.peekLastKnownHasRoot() ?: false) }
     var hookedPkgs by remember { mutableStateOf<Set<String>>(emptySet()) }
     var nativeSalesCode by remember { mutableStateOf("") }
     var batteryRestricted by remember {

@@ -1,7 +1,6 @@
 package com.weitiao.tuning.ui.screens
 
 import android.Manifest
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.BackHandler
@@ -47,7 +46,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.state.ToggleableState
@@ -58,11 +56,11 @@ import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import androidx.core.graphics.drawable.toBitmap
 import com.weitiao.tuning.R
 import com.weitiao.tuning.WechatHooks
 import com.weitiao.tuning.core.CscConfig
 import com.weitiao.tuning.App
+import com.weitiao.tuning.core.InstalledAppsRepository
 import com.weitiao.tuning.core.LsposedScopeHelper
 import com.weitiao.tuning.core.StepHookStatus
 import com.weitiao.tuning.core.HeartbeatHealth
@@ -135,7 +133,7 @@ internal fun WechatEnhancementDetailContent(
         diagnostics = persisted?.status
         preview = persisted?.preview(currentConfig)
         planUpdated = persisted?.isTodayPlanUpdated(currentConfig)
-        wechatInScope = LsposedScopeHelper.isPackageInScope("com.tencent.mm")
+        wechatInScope = withContext(Dispatchers.IO) { LsposedScopeHelper.isPackageInScope("com.tencent.mm") }
         statusNow = System.currentTimeMillis()
     }
     LaunchedEffect(hasRoot) {
@@ -648,7 +646,9 @@ internal fun WechatEnhancementDetailContent(
                 text = if (isZh) "检查并修复微信作用域" else "Check / Repair WeChat Scope",
                 onClick = {
                     coroutineScope.launch {
-                        val alreadyInScope = LsposedScopeHelper.isPackageInScope("com.tencent.mm") == true
+                        val alreadyInScope = withContext(Dispatchers.IO) {
+                            LsposedScopeHelper.isPackageInScope("com.tencent.mm") == true
+                        }
                         if (alreadyInScope) {
                             wechatInScope = true
                             scopeMessage = if (isZh) "微信已在 LSPosed 作用域中。" else "WeChat is already in LSPosed scope."
@@ -745,7 +745,9 @@ internal fun WechatEnhancementDetailContent(
                 text = if (isZh) "检查并修复微信作用域" else "Check / Repair WeChat Scope",
                 onClick = {
                     coroutineScope.launch {
-                        val alreadyInScope = LsposedScopeHelper.isPackageInScope("com.tencent.mm") == true
+                        val alreadyInScope = withContext(Dispatchers.IO) {
+                            LsposedScopeHelper.isPackageInScope("com.tencent.mm") == true
+                        }
                         if (alreadyInScope) {
                             wechatInScope = true
                             scopeMessage = if (isZh) "微信已在 LSPosed 作用域中。" else "WeChat is already in LSPosed scope."
@@ -1137,15 +1139,17 @@ internal fun PowerOptimizationDetailContent(
         }
     }
 
-    PassThroughAppPickerSheet(
-        show = showPassAppPicker,
-        initial = selectedPassApps,
-        onDismiss = { showPassAppPicker = false },
-        onSave = { updated ->
-            onUpdatePassApps(updated)
-            showPassAppPicker = false
-        },
-    )
+    if (showPassAppPicker) {
+        PassThroughAppPickerSheet(
+            show = true,
+            initial = selectedPassApps,
+            onDismiss = { showPassAppPicker = false },
+            onSave = { updated ->
+                onUpdatePassApps(updated)
+                showPassAppPicker = false
+            },
+        )
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1550,12 +1554,6 @@ internal fun CustomKeyValueFeaturePage(
     }
 }
 
-private data class PassAppPickerEntry(
-    val packageName: String,
-    val label: String,
-    val icon: android.graphics.drawable.Drawable?,
-)
-
 @Composable
 internal fun PassThroughAppPickerSheet(
     show: Boolean,
@@ -1563,28 +1561,21 @@ internal fun PassThroughAppPickerSheet(
     onDismiss: () -> Unit,
     onSave: (Set<String>) -> Unit,
 ) {
+    if (!show) return
     val context = LocalContext.current
     var searchQuery by remember { mutableStateOf("") }
-    val apps = remember {
-        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        val pm = context.packageManager
-        pm.queryIntentActivities(intent, PackageManager.MATCH_ALL)
-            .map {
-                PassAppPickerEntry(
-                    packageName = it.activityInfo.packageName,
-                    label = it.loadLabel(pm).toString(),
-                    icon = runCatching { it.loadIcon(pm) }.getOrNull(),
-                )
-            }
-            .distinctBy { it.packageName }
-            .sortedBy { it.label.lowercase() }
+    var apps by remember { mutableStateOf(InstalledAppsRepository.peekCachedApps().orEmpty()) }
+    LaunchedEffect(show) {
+        if (apps.isEmpty()) {
+            apps = InstalledAppsRepository.getInstalledLauncherApps(context)
+        }
     }
 
     val filteredApps = remember(searchQuery, apps) {
-        if (searchQuery.isBlank()) apps
+        val q = searchQuery.trim().lowercase()
+        if (q.isEmpty()) apps
         else apps.filter {
-            it.label.contains(searchQuery, ignoreCase = true) ||
-                it.packageName.contains(searchQuery, ignoreCase = true)
+            it.labelLower.contains(q) || it.pkgLower.contains(q)
         }
     }
 
@@ -1619,6 +1610,16 @@ internal fun PassThroughAppPickerSheet(
                 modifier = Modifier.fillMaxWidth(),
             )
 
+            if (apps.isEmpty()) {
+                val isLoadingZh = remember { java.util.Locale.getDefault().language.startsWith("zh") }
+                Text(
+                    text = if (isLoadingZh) "正在加载已安装应用列表…" else "Loading installed apps…",
+                    fontSize = 11.5.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
+            }
+
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1641,9 +1642,9 @@ internal fun PassThroughAppPickerSheet(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        if (app.icon != null) {
+                        if (app.iconBitmap != null) {
                             Image(
-                                bitmap = app.icon.toBitmap(84, 84).asImageBitmap(),
+                                bitmap = app.iconBitmap,
                                 contentDescription = null,
                                 modifier = Modifier.size(32.dp),
                             )

@@ -98,7 +98,7 @@ fun DashboardScreen(
     var xposedReady by remember {
         mutableStateOf(App.getXposedService() != null || App.getRemotePrefs() != null)
     }
-    var hasRoot by remember { mutableStateOf(false) }
+    var hasRoot by remember { mutableStateOf(RootShell.peekLastKnownHasRoot() ?: false) }
     var stepHookStatus by remember { mutableStateOf<StepHookStatus?>(null) }
     var stepStatusNow by remember { mutableStateOf(System.currentTimeMillis()) }
     LaunchedEffect(hasRoot, refreshTrigger) {
@@ -204,7 +204,7 @@ fun DashboardScreen(
         val prev = csc
         val next = block(csc)
         csc = next
-        CscPrefs.save(context, next)
+        CscPrefs.saveAsync(context, next)
         if (prev.enabled != next.enabled || prev.salesCode != next.salesCode || prev.simMcc != next.simMcc) {
             RegionApplyState.markPending(context)
             regionCleanupPending = true
@@ -215,7 +215,7 @@ fun DashboardScreen(
 
     fun updateTuning(toastMessage: String? = null, block: (TuningConfig) -> TuningConfig) {
         val next = block(tuning)
-        tuning = TuningPrefs.save(context, next)
+        tuning = TuningPrefs.saveAsync(context, next)
         onConfigChanged()
         toastMessage?.let { msg -> scope.launch { snackbar.showSnackbar(msg) } }
     }

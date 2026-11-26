@@ -27,6 +27,8 @@ object CscCatalog {
     @Volatile
     private var codeMap: Map<String, CscEntry>? = null
 
+    fun peekCached(): List<CscEntry>? = cached
+
     fun load(context: Context): List<CscEntry> {
         cached?.let { return it }
         val text = context.assets.open(CSC_LIST_ASSET).bufferedReader().use { it.readText() }

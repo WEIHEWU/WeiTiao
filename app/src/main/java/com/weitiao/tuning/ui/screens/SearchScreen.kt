@@ -26,9 +26,11 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -52,6 +54,9 @@ import com.weitiao.tuning.ui.components.IosGlassTokens
 import com.weitiao.tuning.ui.components.OneUiBadge
 import com.weitiao.tuning.ui.components.OneUiNoticeBanner
 import com.weitiao.tuning.ui.components.rememberOneUiHaptics
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
@@ -75,15 +80,24 @@ fun SearchScreen(
     onSelect: (CscEntry) -> Unit,
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val haptics = rememberOneUiHaptics()
-    val catalog = remember { CscCatalog.load(context) }
-    val nativeInfo = remember { NativeDevice.detect(context) }
+    var catalog by remember { mutableStateOf(CscCatalog.peekCached().orEmpty()) }
+    var nativeInfo by remember { mutableStateOf<NativeDevice.Info?>(null) }
     var currentCsc by remember { mutableStateOf(CscPrefs.load(context)) }
+    LaunchedEffect(Unit) {
+        if (catalog.isEmpty()) {
+            catalog = withContext(Dispatchers.IO) { CscCatalog.load(context) }
+        }
+        if (nativeInfo == null) {
+            nativeInfo = withContext(Dispatchers.IO) { NativeDevice.detect(context) }
+        }
+    }
     var pendingConfirmEntry by remember { mutableStateOf<CscEntry?>(null) }
     var lastConfirmEntry by remember { mutableStateOf(catalog.firstOrNull()) }
     pendingConfirmEntry?.let { lastConfirmEntry = it }
 
-    val currentRegionText = remember(currentCsc, catalog, nativeInfo) {
+    val currentRegionText = remember(currentCsc, catalog) {
         val isZh = context.resources.configuration.locales[0].language.startsWith("zh")
         if (!currentCsc.enabled) {
             if (isZh) "未开启伪装 (原生识别)" else "Native (Unmodified)"
@@ -203,12 +217,12 @@ fun SearchScreen(
                                 ),
                                 onClick = {
                                     haptics.confirm()
-                                    StoreCleaner.restoreNativeTelephonyProps()
+                                    val resolvedNative = nativeInfo ?: NativeDevice.detect(context)
                                     val updated = currentCsc.copy(
                                         enabled = false,
-                                        salesCode = nativeInfo.salesCode,
-                                        countryCode = nativeInfo.countryCode,
-                                        simMcc = nativeInfo.simMcc,
+                                        salesCode = resolvedNative.salesCode,
+                                        countryCode = resolvedNative.countryCode,
+                                        simMcc = resolvedNative.simMcc,
                                         simMnc = "",
                                         simNumeric = "",
                                         simOperatorName = "",
@@ -217,14 +231,19 @@ fun SearchScreen(
                                         spoofSimInfo = false,
                                     )
                                     currentCsc = updated
-                                    CscPrefs.save(context, updated)
-                                    StoreCleaner.clearStoreDataRoot()
+                                    CscPrefs.saveAsync(context, updated)
                                     RegionApplyState.markApplied(context)
-                                    Toast.makeText(
-                                        context,
-                                        R.string.restore_market_success,
-                                        Toast.LENGTH_SHORT,
-                                    ).show()
+                                    scope.launch {
+                                        withContext(Dispatchers.IO) {
+                                            StoreCleaner.restoreNativeTelephonyProps()
+                                            StoreCleaner.clearStoreDataRoot()
+                                        }
+                                        Toast.makeText(
+                                            context,
+                                            R.string.restore_market_success,
+                                            Toast.LENGTH_SHORT,
+                                        ).show()
+                                    }
                                 },
                             )
                         }

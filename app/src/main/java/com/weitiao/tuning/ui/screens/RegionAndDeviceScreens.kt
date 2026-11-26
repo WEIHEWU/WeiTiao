@@ -1,7 +1,5 @@
 package com.weitiao.tuning.ui.screens
 
-import android.content.Intent
-import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
@@ -29,6 +27,7 @@ import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -37,7 +36,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.state.ToggleableState
@@ -48,10 +46,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.graphics.drawable.toBitmap
 import com.weitiao.tuning.R
 import com.weitiao.tuning.core.CscConfig
 import com.weitiao.tuning.core.DeviceModels
+import com.weitiao.tuning.core.InstalledAppItem
+import com.weitiao.tuning.core.InstalledAppsRepository
 import com.weitiao.tuning.core.LsposedScopeHelper
 import com.weitiao.tuning.ui.components.IosGlassTokens
 import com.weitiao.tuning.ui.components.OneUiBadge
@@ -656,40 +655,42 @@ internal fun DeviceSpoofDetailContent(
         },
     )
 
-    TargetScopeOnlyPickerSheet(
-        show = showTargetScopePicker,
-        initialSelection = if (csc.deviceTargetFilterEnabled) csc.deviceTargetPackages else emptySet(),
-        isZh = isZh,
-        onDismiss = { showTargetScopePicker = false },
-        onSave = { updatedTargets ->
-            val prevTargets = csc.deviceTargetPackages
-            onUpdateCsc(context.getString(R.string.saved_toast)) {
-                it.copy(
-                    spoofDevice = true,
-                    deviceTargetFilterEnabled = updatedTargets.isNotEmpty(),
-                    deviceTargetPackages = updatedTargets,
-                )
-            }
-            showTargetScopePicker = false
-            if (updatedTargets.isNotEmpty()) {
-                scope.launch(Dispatchers.IO) {
-                    val newlyAdded = updatedTargets - prevTargets
-                    if (newlyAdded.isNotEmpty()) {
-                        LsposedScopeHelper.requestScopesViaService(newlyAdded) { approved ->
-                            if (!approved) {
-                                scope.launch {
-                                    onShowSnackbar(
-                                        if (isZh) "未自动加入作用域，请在 LSPosed 管理器中手动勾选目标应用"
-                                        else "Scope not added automatically; please enable target apps in LSPosed Manager",
-                                    )
+    if (showTargetScopePicker) {
+        TargetScopeOnlyPickerSheet(
+            show = true,
+            initialSelection = if (csc.deviceTargetFilterEnabled) csc.deviceTargetPackages else emptySet(),
+            isZh = isZh,
+            onDismiss = { showTargetScopePicker = false },
+            onSave = { updatedTargets ->
+                val prevTargets = csc.deviceTargetPackages
+                onUpdateCsc(context.getString(R.string.saved_toast)) {
+                    it.copy(
+                        spoofDevice = true,
+                        deviceTargetFilterEnabled = updatedTargets.isNotEmpty(),
+                        deviceTargetPackages = updatedTargets,
+                    )
+                }
+                showTargetScopePicker = false
+                if (updatedTargets.isNotEmpty()) {
+                    scope.launch(Dispatchers.IO) {
+                        val newlyAdded = updatedTargets - prevTargets
+                        if (newlyAdded.isNotEmpty()) {
+                            LsposedScopeHelper.requestScopesViaService(newlyAdded) { approved ->
+                                if (!approved) {
+                                    scope.launch {
+                                        onShowSnackbar(
+                                            if (isZh) "未自动加入作用域，请在 LSPosed 管理器中手动勾选目标应用"
+                                            else "Scope not added automatically; please enable target apps in LSPosed Manager",
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
-        },
-    )
+            },
+        )
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -706,17 +707,21 @@ internal fun PerAppModelDetailContent(
     onShowSnackbar: (String) -> Unit,
 ) {
     val context = LocalContext.current
-    val pm = context.packageManager
     val scope = rememberCoroutineScope()
     var showAddAppSheet by remember { mutableStateOf(false) }
     var editingAppPkg by remember { mutableStateOf<String?>(null) }
 
-    val appLabelMap = remember(csc.perAppDeviceModels.keys, editingAppPkg) {
-        (csc.perAppDeviceModels.keys + listOfNotNull(editingAppPkg)).associateWith { pkg ->
-            runCatching {
-                val info = pm.getApplicationInfo(pkg, 0)
-                pm.getApplicationLabel(info).toString()
-            }.getOrDefault(pkg)
+    val targetPackages = remember(csc.perAppDeviceModels.keys, editingAppPkg) {
+        (csc.perAppDeviceModels.keys + listOfNotNull(editingAppPkg))
+    }
+    var appLabelMap by remember(targetPackages) {
+        mutableStateOf(
+            targetPackages.associateWith { pkg -> InstalledAppsRepository.peekAppLabel(pkg) ?: pkg },
+        )
+    }
+    LaunchedEffect(targetPackages) {
+        if (targetPackages.isNotEmpty()) {
+            appLabelMap = InstalledAppsRepository.resolveAppLabels(context, targetPackages)
         }
     }
 
@@ -846,17 +851,19 @@ internal fun PerAppModelDetailContent(
         }
     }
 
-    SingleAppSelectorSheet(
-        show = showAddAppSheet,
-        perAppModels = csc.perAppDeviceModels,
-        globalDefaultModel = csc.deviceName,
-        isZh = isZh,
-        onDismiss = { showAddAppSheet = false },
-        onSelectApp = { pkg ->
-            showAddAppSheet = false
-            editingAppPkg = pkg
-        },
-    )
+    if (showAddAppSheet) {
+        SingleAppSelectorSheet(
+            show = true,
+            perAppModels = csc.perAppDeviceModels,
+            globalDefaultModel = csc.deviceName,
+            isZh = isZh,
+            onDismiss = { showAddAppSheet = false },
+            onSelectApp = { pkg ->
+                showAddAppSheet = false
+                editingAppPkg = pkg
+            },
+        )
+    }
 
     val currentEditingPkg = editingAppPkg
     DeviceModelPicker(
@@ -883,12 +890,6 @@ internal fun PerAppModelDetailContent(
     )
 }
 
-private data class SimpleAppEntry(
-    val packageName: String,
-    val label: String,
-    val icon: android.graphics.drawable.Drawable?,
-)
-
 /**
  * 分应用机型专用：点选应用即进入机型选择，无需勾选复选框和点击多层小徽章
  */
@@ -901,33 +902,25 @@ private fun SingleAppSelectorSheet(
     onDismiss: () -> Unit,
     onSelectApp: (String) -> Unit,
 ) {
+    if (!show) return
     val context = LocalContext.current
     var query by remember { mutableStateOf("") }
-    val apps = remember {
-        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        val pm = context.packageManager
-        pm.queryIntentActivities(intent, PackageManager.MATCH_ALL)
-            .map {
-                SimpleAppEntry(
-                    packageName = it.activityInfo.packageName,
-                    label = it.loadLabel(pm).toString(),
-                    icon = runCatching { it.loadIcon(pm) }.getOrNull(),
-                )
-            }
-            .filterNot { it.packageName == context.packageName }
-            .distinctBy { it.packageName }
-            .sortedBy { it.label.lowercase() }
+    var apps by remember { mutableStateOf(InstalledAppsRepository.peekCachedApps().orEmpty()) }
+    LaunchedEffect(show) {
+        if (apps.isEmpty()) {
+            apps = InstalledAppsRepository.getInstalledLauncherApps(context)
+        }
     }
 
     val filteredApps = remember(query, apps, perAppModels) {
-        val base = if (query.isBlank()) apps
+        val q = query.trim().lowercase()
+        val base = if (q.isEmpty()) apps
         else apps.filter {
-            it.label.contains(query, ignoreCase = true) ||
-                it.packageName.contains(query, ignoreCase = true)
+            it.labelLower.contains(q) || it.pkgLower.contains(q)
         }
         base.sortedWith(
-            compareByDescending<SimpleAppEntry> { it.packageName in perAppModels }
-                .thenBy { it.label.lowercase() },
+            compareByDescending<InstalledAppItem> { it.packageName in perAppModels }
+                .thenBy { it.labelLower },
         )
     }
 
@@ -961,7 +954,9 @@ private fun SingleAppSelectorSheet(
             )
 
             Text(
-                text = if (isZh) "点击任意应用即可直接为其选择专属机型" else "Tap any app below to choose its device model",
+                text = if (apps.isEmpty()) {
+                    if (isZh) "正在加载已安装应用列表…" else "Loading installed apps…"
+                } else if (isZh) "点击任意应用即可直接为其选择专属机型" else "Tap any app below to choose its device model",
                 fontSize = 11.5.sp,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 modifier = Modifier.padding(horizontal = 4.dp),
@@ -985,9 +980,9 @@ private fun SingleAppSelectorSheet(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        if (app.icon != null) {
+                        if (app.iconBitmap != null) {
                             Image(
-                                bitmap = app.icon.toBitmap(84, 84).asImageBitmap(),
+                                bitmap = app.iconBitmap,
                                 contentDescription = null,
                                 modifier = Modifier.size(34.dp),
                             )
@@ -1044,35 +1039,27 @@ private fun TargetScopeOnlyPickerSheet(
     onDismiss: () -> Unit,
     onSave: (Set<String>) -> Unit,
 ) {
+    if (!show) return
     val context = LocalContext.current
     var query by remember { mutableStateOf("") }
-    val apps = remember {
-        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        val pm = context.packageManager
-        pm.queryIntentActivities(intent, PackageManager.MATCH_ALL)
-            .map {
-                SimpleAppEntry(
-                    packageName = it.activityInfo.packageName,
-                    label = it.loadLabel(pm).toString(),
-                    icon = runCatching { it.loadIcon(pm) }.getOrNull(),
-                )
-            }
-            .filterNot { it.packageName == context.packageName }
-            .distinctBy { it.packageName }
-            .sortedBy { it.label.lowercase() }
+    var apps by remember { mutableStateOf(InstalledAppsRepository.peekCachedApps().orEmpty()) }
+    LaunchedEffect(show) {
+        if (apps.isEmpty()) {
+            apps = InstalledAppsRepository.getInstalledLauncherApps(context)
+        }
     }
 
     var selected by remember(initialSelection, show) { mutableStateOf(initialSelection.toSet()) }
 
     val filteredApps = remember(query, apps, selected) {
-        val base = if (query.isBlank()) apps
+        val q = query.trim().lowercase()
+        val base = if (q.isEmpty()) apps
         else apps.filter {
-            it.label.contains(query, ignoreCase = true) ||
-                it.packageName.contains(query, ignoreCase = true)
+            it.labelLower.contains(q) || it.pkgLower.contains(q)
         }
         base.sortedWith(
-            compareByDescending<SimpleAppEntry> { it.packageName in selected }
-                .thenBy { it.label.lowercase() },
+            compareByDescending<InstalledAppItem> { it.packageName in selected }
+                .thenBy { it.labelLower },
         )
     }
 
@@ -1111,7 +1098,9 @@ private fun TargetScopeOnlyPickerSheet(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = if (selected.isEmpty()) {
+                    text = if (apps.isEmpty()) {
+                        if (isZh) "正在加载已安装应用列表…" else "Loading installed apps…"
+                    } else if (selected.isEmpty()) {
                         if (isZh) "当前：未限制（对 LSPosed 全部作用域生效）"
                         else "Current: All apps in LSPosed scope"
                     } else {
@@ -1153,9 +1142,9 @@ private fun TargetScopeOnlyPickerSheet(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        if (app.icon != null) {
+                        if (app.iconBitmap != null) {
                             Image(
-                                bitmap = app.icon.toBitmap(84, 84).asImageBitmap(),
+                                bitmap = app.iconBitmap,
                                 contentDescription = null,
                                 modifier = Modifier.size(32.dp),
                             )

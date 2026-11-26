@@ -11,6 +11,7 @@ import com.weitiao.tuning.tuning.FastChargeController
 import com.weitiao.tuning.tuning.FastChargeNotifier
 import com.weitiao.tuning.tuning.FastChargeScheduler
 import com.weitiao.tuning.tuning.PassThroughService
+import java.util.concurrent.Executors
 
 data class TuningConfig(
     val stepEnabled: Boolean = false,
@@ -164,6 +165,21 @@ object TuningPrefs {
     private const val KEY_APPS = "tuning_pass_through_apps"
     const val KEY_REMOTE_SYNC_OK = "local_config_remote_synced"
 
+    @Volatile
+    private var cachedConfig: TuningConfig? = null
+
+    @Volatile
+    private var cachedSelectedApps: Set<String>? = null
+
+    private val saveExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "TuningPrefs-Save").apply { isDaemon = true }
+    }
+
+    fun invalidateCache() {
+        cachedConfig = null
+        cachedSelectedApps = null
+    }
+
     internal fun verifyRemoteConfigMatches(remote: SharedPreferences, expected: TuningConfig): Boolean {
         if (!remote.contains(TuningConfig.KEY_STEP_GENERATION)) return false
         val actual = TuningConfig.fromPrefs(remote)
@@ -215,26 +231,65 @@ object TuningPrefs {
     }
 
     fun load(context: Context): TuningConfig {
+        cachedConfig?.let { return it }
         // local 是用户在 App UI 操作的真相，优先使用。
         // 之前的实现把"XposedService 是否绑定"作为是否回退到 local 的条件，
         // 但 App 自身的后台服务（亮屏快充、旁路供电）根本不依赖 LSPosed hook，
         // 一旦 LSPosed 模块未激活/未就绪，服务就被错误判定为关闭，
         // 表现为"升级后服务不启动、用户必须手动重启模块/手机"。
         val local = localPrefs(context)
-        if (local.all.isNotEmpty()) {
-            return TuningConfig.fromPrefs(local)
+        val loaded = if (local.all.isNotEmpty()) {
+            TuningConfig.fromPrefs(local)
+        } else {
+            // local 还没值（首次安装）才回退到 remote 做一次种子同步
+            val remote = App.getXposedService()?.getRemotePreferences(CscConstants.PREFS_NAME)
+            if (remote != null && remote.all.isNotEmpty()) {
+                TuningConfig.fromPrefs(remote)
+            } else {
+                TuningConfig()
+            }
         }
-        // local 还没值（首次安装）才回退到 remote 做一次种子同步
-        val remote = App.getXposedService()?.getRemotePreferences(CscConstants.PREFS_NAME)
-        if (remote != null && remote.all.isNotEmpty()) {
-            return TuningConfig.fromPrefs(remote)
-        }
-        return TuningConfig()
+        cachedConfig = loaded
+        return loaded
     }
 
     fun saveWithStatus(context: Context, value: TuningConfig): TuningSaveResult {
         val previous = load(context)
         val config = value.prepareForSave(previous)
+        cachedConfig = config
+        return persistAndSyncInternal(context.applicationContext, previous, config)
+    }
+
+    /**
+     * 乐观异步保存：立即更新内存态配置并返回，并将 remote/local commit 与服务同步放到后台单线程队列执行，
+     * 彻底消除切换开关/调节滑块后的主线程阻塞与卡顿。
+     */
+    fun saveAsync(
+        context: Context,
+        value: TuningConfig,
+        onResult: ((TuningSaveResult) -> Unit)? = null,
+    ): TuningConfig {
+        val previous = load(context)
+        val config = value.prepareForSave(previous)
+        cachedConfig = config
+        val appCtx = context.applicationContext
+        saveExecutor.execute {
+            val result = runCatching {
+                persistAndSyncInternal(appCtx, previous, config)
+            }.getOrElse {
+                android.util.Log.e("TuningPrefs", "异步保存调优配置失败", it)
+                TuningSaveResult(config = config, remoteSynced = true)
+            }
+            onResult?.invoke(result)
+        }
+        return config
+    }
+
+    private fun persistAndSyncInternal(
+        appCtx: Context,
+        previous: TuningConfig,
+        config: TuningConfig,
+    ): TuningSaveResult {
         var remoteSynced = false
         val remote = runCatching { App.getXposedService()?.getRemotePreferences(CscConstants.PREFS_NAME) }.getOrNull()
         if (remote != null) {
@@ -246,7 +301,7 @@ object TuningPrefs {
                 android.util.Log.e("TuningPrefs", "写入 LSPosed remote preferences 失败", it)
             }.getOrDefault(false)
         }
-        localPrefs(context).edit().let { editor ->
+        localPrefs(appCtx).edit().let { editor ->
             TuningConfig.write(editor, config)
             // 打上"本地被用户显式保存过"的标记。缺了它，App.onServiceBind 会认为
             // 本地是默认值而不敢拿它覆盖 remote，用户改的开关就推不到 hook。
@@ -254,22 +309,31 @@ object TuningPrefs {
             editor.putBoolean(KEY_REMOTE_SYNC_OK, remoteSynced)
             editor.commit()
         }
-        syncServices(context, previous, config)
+        syncServices(appCtx, previous, config)
         return TuningSaveResult(config = config, remoteSynced = remoteSynced)
     }
 
     fun save(context: Context, value: TuningConfig): TuningConfig =
         saveWithStatus(context, value).config
 
-    fun selectedApps(context: Context): Set<String> =
-        context.getSharedPreferences(APPS_PREFS, Context.MODE_PRIVATE)
+    fun selectedApps(context: Context): Set<String> {
+        cachedSelectedApps?.let { return it }
+        val loaded = context.getSharedPreferences(APPS_PREFS, Context.MODE_PRIVATE)
             .getStringSet(KEY_APPS, emptySet())
             ?.toSet()
             .orEmpty()
+        cachedSelectedApps = loaded
+        return loaded
+    }
 
     fun saveSelectedApps(context: Context, packages: Set<String>) {
-        context.getSharedPreferences(APPS_PREFS, Context.MODE_PRIVATE)
-            .edit().putStringSet(KEY_APPS, packages.toSet()).commit()
+        val copy = packages.toSet()
+        cachedSelectedApps = copy
+        val appCtx = context.applicationContext
+        saveExecutor.execute {
+            appCtx.getSharedPreferences(APPS_PREFS, Context.MODE_PRIVATE)
+                .edit().putStringSet(KEY_APPS, copy).commit()
+        }
     }
 
     /**

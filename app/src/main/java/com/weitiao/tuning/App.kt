@@ -9,8 +9,11 @@ import android.content.SharedPreferences
 import android.os.Build
 import android.util.Log
 import com.weitiao.tuning.core.CscConstants
+import com.weitiao.tuning.core.CscPrefs
+import com.weitiao.tuning.core.NativeDevice
 import com.weitiao.tuning.core.RootShell
 import com.weitiao.tuning.core.TuningPrefs
+import com.weitiao.tuning.data.CscCatalog
 import com.weitiao.tuning.tuning.BrightScreenFastChargeService
 import com.weitiao.tuning.tuning.FastChargeController
 import com.weitiao.tuning.tuning.FastChargeFallback
@@ -70,6 +73,9 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
         Thread({
             runCatching {
                 FastChargeNotifier.cleanupLegacyIfNeeded(this)
+                CscPrefs.load(this)
+                CscCatalog.load(this)
+                NativeDevice.detect(this)
                 val cfg = TuningPrefs.load(this)
                 val snap = FastChargeScheduler.readBatterySnapshot(this)
                 val fullStopped = FastChargeController.isFullChargeStopped(
@@ -200,6 +206,8 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
             editor.putLong(CscConstants.KEY_LOCAL_SAVED_AT, System.currentTimeMillis())
             editor.putBoolean(TuningPrefs.KEY_REMOTE_SYNC_OK, true)
             val committed = editor.commit()
+            CscPrefs.invalidateCache()
+            TuningPrefs.invalidateCache()
             Log.i(TAG, "同步方向 remote -> local（本地无保存标记，以 hook 现值为准）：写入 $written 项 commit=$committed")
             return
         }

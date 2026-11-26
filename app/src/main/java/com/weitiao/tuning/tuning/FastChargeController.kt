@@ -66,6 +66,10 @@ object FastChargeController {
 
     const val FULL_CHARGE_RELEASE_LEVEL = 100
     const val FULL_CHARGE_RESUME_LEVEL = 98
+    const val CHG_HARD_LIMIT_TENTHS = 560 // 充电 IC 56.0°C 硬件安全红线
+    const val CHG_COOLDOWN_TENTHS = 520   // 充电 IC 降温 4.0°C (52.0°C) 恢复
+    const val USB_HARD_LIMIT_TENTHS = 470 // USB 尾插 47.0°C 硬件安全红线
+    const val USB_COOLDOWN_TENTHS = 440   // USB 尾插降温 3.0°C (44.0°C) 恢复
 
     fun isAcPlugged(pluggedType: Int): Boolean = pluggedType == BatteryManager.BATTERY_PLUGGED_AC
 
@@ -114,12 +118,16 @@ object FastChargeController {
         val powerWatts: Double,
         val temperatureTenths: Int, // 电池有效温度（0.1°C 单位，如 385 代表 38.5°C）
         val maxChipTempTenths: Int = 0, // 保留字段兼容历史数据结构（熔断不再计入 AP/PA 芯片温度）
+        val chgTempTenths: Int = 0, // 充电 IC 温度（0.1°C 单位）
+        val usbTempTenths: Int = 0, // USB 尾插温度（0.1°C 单位）
     )
 
     /**
-     * 判定是否触发高温安全熔断：
-     * 仅根据电池自身温度与用户设定阈值（默认 44°C）判定，降温 3.0°C 后恢复；
-     * 已处于熔断态且读温失效（<= 0）时保持 fail-safe 熔断态。
+     * 判定是否触发高温安全熔断（三路独立硬件安全红线，不含 AP/PA 芯片温度以防误触发）：
+     * 1. 电芯真实温度 >= 用户设定阈值（默认 44°C），降温 3.0°C 后恢复；
+     * 2. 充电 IC 温度 (chg_temp) >= 56.0°C，降温 4.0°C (<= 52.0°C) 后恢复；
+     * 3. USB 尾插温度 (usb_temp) >= 47.0°C，降温 3.0°C (<= 44.0°C) 后恢复；
+     * 已处于熔断态且所有安全传感器读温失效（<= 0）时保持 fail-safe 熔断态。
      */
     fun isOverheated(
         metrics: BatteryMetrics,
@@ -133,21 +141,32 @@ object FastChargeController {
         val battOverheatTenths = clampedCutoff * 10
         val battCoolDownTenths = battOverheatTenths - 30 // 降温 3.0°C 恢复
         val battTemp = metrics.temperatureTenths
+        val chgTemp = metrics.chgTempTenths
+        val usbTemp = metrics.usbTempTenths
 
         return if (!previouslyOverheated) {
-            battTemp >= battOverheatTenths
+            battTemp >= battOverheatTenths ||
+                chgTemp >= CHG_HARD_LIMIT_TENTHS ||
+                usbTemp >= USB_HARD_LIMIT_TENTHS
         } else {
-            battTemp <= 0 || battTemp > battCoolDownTenths
+            val allUnreadable = battTemp <= 0 && chgTemp <= 0 && usbTemp <= 0
+            allUnreadable ||
+                battTemp > battCoolDownTenths ||
+                chgTemp > CHG_COOLDOWN_TENTHS ||
+                usbTemp > USB_COOLDOWN_TENTHS
         }
     }
 
     /**
-     * 屏蔽全部 17 个温控节点（对齐 S8Tweak 原版逻辑，单次批量 `chmod 0000`）。
+     * 屏蔽全部 17 个温控节点并启用内核软钳制 + 直锁 `siop_level=100` + 原生 SSRM 调试禁用标志。
      */
     fun blockTemperatureNodes(context: Context? = null): Result {
         context?.let { markNodesMayBeBlocked(it, true) }
         val command = buildString {
             append(UID_PREAMBLE)
+            append("if [ -e /sys/class/power_supply/battery/siop_level ]; then echo 100 > /sys/class/power_supply/battery/siop_level 2>/dev/null; fi; ")
+            append("if [ -e /sys/class/power_supply/battery/batt_temp_test ]; then echo 'b 350' > /sys/class/power_supply/battery/batt_temp_test 2>/dev/null; fi; ")
+            append("if [ -d /data/data/com.sec.android.sdhms ]; then touch /data/data/com.sec.android.sdhms/ssrm.disable /data/data/com.sec.android.sdhms/sdhms_cooldown_disable 2>/dev/null; fi; ")
             append("f000=\"\"; ")
             for (node in ALL_MANAGED_NODES) {
                 append("[ -e '$node' ] && f000=\"\$f000 $node\"; ")
@@ -163,7 +182,7 @@ object FastChargeController {
     }
 
     /**
-     * 恢复全部 17 个温控节点权限：目录使用 0755，sysfs 传感器文件使用 0644，批量合并 chmod 调用。
+     * 恢复全部 17 个温控节点权限：目录使用 0755，sysfs 传感器文件使用 0644，并释放内核 `batt_temp_test` 钳制与 SSRM 标志。
      */
     fun restoreTemperatureNodes(context: Context? = null): Result {
         val command = buildString {
@@ -176,6 +195,8 @@ object FastChargeController {
 
             append("[ -n \"\$d755\" ] && chmod 0755 \$d755 2>/dev/null; ")
             append("[ -n \"\$f644\" ] && chmod 0644 \$f644 2>/dev/null; ")
+            append("if [ -e /sys/class/power_supply/battery/batt_temp_test ]; then echo 'b -300' > /sys/class/power_supply/battery/batt_temp_test 2>/dev/null; echo 'w -300' > /sys/class/power_supply/battery/batt_temp_test 2>/dev/null; fi; ")
+            append("rm -f /data/data/com.sec.android.sdhms/ssrm.disable /data/data/com.sec.android.sdhms/sdhms_cooldown_disable 2>/dev/null; ")
             append("echo __DONE__")
         }
         val res = runRootCommand(command)
@@ -198,6 +219,7 @@ object FastChargeController {
     private fun queryNodeBlockReport(): NodeBlockReport? {
         val command = buildString {
             append(UID_PREAMBLE)
+            append("if [ -e /sys/class/power_supply/battery/siop_level ]; then { read -r __s < /sys/class/power_supply/battery/siop_level; } 2>/dev/null; [ \"\${__s:-100}\" -lt 100 ] 2>/dev/null && echo 100 > /sys/class/power_supply/battery/siop_level 2>/dev/null; fi; ")
             append("stat -c '%a:%n' ")
             ALL_MANAGED_NODES.joinTo(this, separator = " ") { "'${it.replace("'", "'\\''")}'" }
             append(" 2>/dev/null; echo __DONE__")
@@ -237,7 +259,7 @@ object FastChargeController {
         )
     }
 
-    /** 开启三星系统设置快充开关 */
+    /** 开启三星系统设置快充开关并解除轻度性能限制 */
     fun enableSamsungFastChargingSettings(): Result {
         val command = buildString {
             append(UID_PREAMBLE)
@@ -245,14 +267,16 @@ object FastChargeController {
             append("settings put system wireless_fast_charging '1'; ")
             append("settings put system super_fast_charging '1'; ")
             append("settings put system fast_charging '1'; ")
+            append("settings put global restricted_device_performance '0,0' 2>/dev/null; ")
             append("echo __DONE__")
         }
         return runRootCommand(command)
     }
 
     /**
-     * 纯免解锁硬件指标读取：通过 0-fork 的 mksh 内建 `read -r` 读取电流、电压及未被屏蔽的电池温度通道；
-     * 充电锁死 17 个节点期间绝不临时 `chmod 0444/0000`，当直读电池节点为空时由系统广播 `EXTRA_TEMPERATURE` 兜底。
+     * 纯免解锁硬件指标读取：通过 0-fork 的 mksh 内建 `read -r` 读取高精度微安电流、电压、
+     * 未被屏蔽/未被 `batt_temp_test` 钳制的真实电池温度，以及充电 IC (`chg_temp`) 与 USB 尾插 (`usb_temp`) 温度；
+     * 当直读电池节点为空时由系统广播 `EXTRA_TEMPERATURE` 兜底。
      */
     fun readBatteryMetrics(
         context: Context,
@@ -262,29 +286,41 @@ object FastChargeController {
         var currentMa = 0
         var voltageMv = 0
         var tempTenths = 0
+        var chgTempTenths = 0
+        var usbTempTenths = 0
 
         if (RootShell.hasRoot()) {
             val (exitCode, stdout) = RootShell.exec(
                 UID_PREAMBLE +
+                    "cua=\"\"; { read -r cua < /sys/class/power_supply/battery/batt_current_ua_now; } 2>/dev/null; " +
                     "c=\"\"; { read -r c < /sys/class/power_supply/battery/current_now; } 2>/dev/null; " +
                     "v=\"\"; { read -r v < /sys/class/power_supply/battery/voltage_now; } 2>/dev/null; " +
                     "t1=\"\"; { read -r t1 < /sys/class/power_supply/battery/batt_temp_raw; } 2>/dev/null; " +
                     "t2=\"\"; { read -r t2 < /sys/class/sec/battery/batt_temp; } 2>/dev/null; " +
                     "t3=\"\"; { read -r t3 < /sys/class/sec/sec-cf-thermistor/temperature; } 2>/dev/null; " +
                     "t4=\"\"; { read -r t4 < /sys/class/sec/sec-lp-thermistor/temperature; } 2>/dev/null; " +
+                    "t5=\"\"; { read -r t5 < /sys/class/power_supply/battery/wpc_temp; } 2>/dev/null; " +
+                    "t6=\"\"; { read -r t6 < /sys/class/power_supply/battery/lrp; } 2>/dev/null; " +
                     "tb1=\"\"; { read -r tb1 < /sys/class/power_supply/battery/batt_temp; } 2>/dev/null; " +
                     "tb2=\"\"; { read -r tb2 < /sys/class/power_supply/battery/temp; } 2>/dev/null; " +
-                    "echo \"C=\$c\"; echo \"V=\$v\"; " +
-                    "echo \"T1=\$t1\"; echo \"T2=\$t2\"; echo \"T3=\$t3\"; echo \"T4=\$t4\"; " +
-                    "echo \"TB1=\$tb1\"; echo \"TB2=\$tb2\"; " +
+                    "tchg=\"\"; { read -r tchg < /sys/class/power_supply/battery/chg_temp; } 2>/dev/null; " +
+                    "tusb=\"\"; { read -r tusb < /sys/class/power_supply/battery/usb_temp; } 2>/dev/null; " +
+                    "echo \"CUA=\$cua\"; echo \"C=\$c\"; echo \"V=\$v\"; " +
+                    "echo \"T1=\$t1\"; echo \"T2=\$t2\"; echo \"T3=\$t3\"; echo \"T4=\$t4\"; echo \"T5=\$t5\"; echo \"T6=\$t6\"; " +
+                    "echo \"TB1=\$tb1\"; echo \"TB2=\$tb2\"; echo \"TCHG=\$tchg\"; echo \"TUSB=\$tusb\"; " +
                     "echo __DONE__",
                 timeoutSeconds = 4,
             )
 
             if (exitCode == 0 && stdout.contains("__UID__0")) {
-                var rawCurrent = abs(taggedInt(stdout, "C") ?: 0)
-                if (rawCurrent > 100_000) rawCurrent /= 1_000      // 部分内核以 µA 上报
-                currentMa = rawCurrent
+                val rawUa = abs(taggedInt(stdout, "CUA") ?: 0)
+                if (rawUa > 10_000) {
+                    currentMa = rawUa / 1_000
+                } else {
+                    var rawCurrent = abs(taggedInt(stdout, "C") ?: 0)
+                    if (rawCurrent > 100_000) rawCurrent /= 1_000      // 部分内核以 µA 上报
+                    currentMa = rawCurrent
+                }
 
                 var rawVoltage = abs(taggedInt(stdout, "V") ?: 0)
                 if (rawVoltage > 100_000) rawVoltage /= 1_000      // 部分内核以 µV 上报
@@ -294,9 +330,16 @@ object FastChargeController {
                 val t2 = normalizeTemp(taggedInt(stdout, "T2"))
                 val t3 = normalizeTemp(taggedInt(stdout, "T3"))
                 val t4 = normalizeTemp(taggedInt(stdout, "T4"))
+                val t5 = normalizeTemp(taggedInt(stdout, "T5"))
+                val t6 = normalizeTemp(taggedInt(stdout, "T6"))
                 val tb1 = normalizeTemp(taggedInt(stdout, "TB1"))
                 val tb2 = normalizeTemp(taggedInt(stdout, "TB2"))
-                tempTenths = maxOf(tb1, tb2, t1, t2, t3, t4)
+                // 优先保留未受 batt_temp_test (350) 钳制影响的真实物理热敏读数
+                val rawUnclamped = maxOf(t1, t2, t3, t4, t5, t6)
+                val reportedBatt = maxOf(tb1, tb2)
+                tempTenths = if (rawUnclamped > 0) maxOf(rawUnclamped, reportedBatt) else reportedBatt
+                chgTempTenths = normalizeTemp(taggedInt(stdout, "TCHG"))
+                usbTempTenths = normalizeTemp(taggedInt(stdout, "TUSB"))
             }
         }
 
@@ -329,7 +372,7 @@ object FastChargeController {
         }
 
         val watts = (voltageMv.toDouble() * currentMa.toDouble()) / 1_000_000.0
-        return BatteryMetrics(currentMa, voltageMv, watts, tempTenths, 0)
+        return BatteryMetrics(currentMa, voltageMv, watts, tempTenths, 0, chgTempTenths, usbTempTenths)
     }
 
     /** 从 `echo C=123` 这类带标签输出里按标签取值，节点缺失时返回 null */
